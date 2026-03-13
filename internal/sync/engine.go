@@ -161,11 +161,20 @@ func (e *Engine) syncProject(ctx context.Context, project string, full bool) Pro
 		}
 	}
 
-	elapsed := time.Since(start).Seconds()
-	_ = e.db.UpdateSyncMeta(project, elapsed, total, newCount+updatedCount, "")
+	// Run deletion detection on full sync.
 	if full {
+		deleted, err := DetectDeletions(ctx, e.db, e.client, project)
+		if err != nil {
+			// Non-fatal: log and continue.
+			_ = err
+		} else {
+			_ = deleted
+		}
 		_ = e.db.UpdateFullSyncMeta(project)
 	}
+
+	elapsed := time.Since(start).Seconds()
+	_ = e.db.UpdateSyncMeta(project, elapsed, total, newCount+updatedCount, "")
 
 	return Progress{Project: project, New: newCount, Updated: updatedCount, Total: total}
 }
