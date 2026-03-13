@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-test:
+    name: Build and Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: true
+
+      - name: Install zig (for CGO cross-compilation)
+        run: |
+          wget -q https://ziglang.org/download/0.12.0/zig-linux-x86_64-0.12.0.tar.xz
+          tar -xf zig-linux-x86_64-0.12.0.tar.xz
+          echo "$PWD/zig-linux-x86_64-0.12.0" >> $GITHUB_PATH
+
+      - name: Build
+        run: make build
+
+      - name: Test
+        run: make test
+
+      - name: Lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          args: --build-tags fts5
+
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    needs: build-test
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: true
+
+      - name: Install zig
+        run: |
+          wget -q https://ziglang.org/download/0.12.0/zig-linux-x86_64-0.12.0.tar.xz
+          tar -xf zig-linux-x86_64-0.12.0.tar.xz
+          echo "$PWD/zig-linux-x86_64-0.12.0" >> $GITHUB_PATH
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: latest
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}

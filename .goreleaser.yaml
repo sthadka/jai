@@ -1,0 +1,70 @@
+version: 2
+
+project_name: jai
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - main: ./cmd/jai
+    binary: jai
+    tags:
+      - fts5
+    env:
+      - CGO_ENABLED=1
+    ldflags:
+      - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}}
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    # CGO cross-compilation with zig cc for linux targets.
+    overrides:
+      - goos: linux
+        goarch: amd64
+        env:
+          - CC=zig cc -target x86_64-linux-musl
+          - CXX=zig c++ -target x86_64-linux-musl
+      - goos: linux
+        goarch: arm64
+        env:
+          - CC=zig cc -target aarch64-linux-musl
+          - CXX=zig c++ -target aarch64-linux-musl
+
+archives:
+  - format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - config.example.yaml
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "Merge pull request"
+
+brews:
+  - name: jai
+    homepage: https://github.com/syethadk/jai
+    description: "Query Jira with SQL — sync Jira Cloud to SQLite and query it"
+    license: MIT
+    tap:
+      owner: syethadk
+      name: homebrew-tap
+    commit_author:
+      name: goreleaserbot
+      email: goreleaser@example.com
+    install: |
+      bin.install "jai"
+    test: |
+      system "#{bin}/jai", "--help"
