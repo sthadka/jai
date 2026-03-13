@@ -1,13 +1,16 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/syethadk/jai/internal/config"
 	"github.com/syethadk/jai/internal/db"
 	"github.com/syethadk/jai/internal/jira"
+	"github.com/syethadk/jai/internal/output"
 	"github.com/syethadk/jai/internal/query"
 	synce "github.com/syethadk/jai/internal/sync"
 )
@@ -18,6 +21,7 @@ type globals struct {
 	dbPath  string
 	jsonOut bool
 	noSync  bool
+	fields  string
 
 	cfg    *config.Config
 	db     *db.DB
@@ -28,55 +32,102 @@ type globals struct {
 
 var g globals
 
-var rootCmd = &cobra.Command{
-	Use:   "jai",
-	Short: "Query Jira with SQL",
-	Long:  "jai syncs Jira Cloud data to a local SQLite database and lets you query it with SQL.",
-	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		// Skip init for commands that don't need DB/config.
-		skip := map[string]bool{"help": true, "completion": true}
-		if skip[cmd.Name()] {
+// noAutoSync lists commands that should never trigger auto-sync.
+var noAutoSync = map[string]bool{
+	"sync":       true,
+	"init":       true,
+	"schema":     true,
+	"fields":     true,
+	"completion": true,
+	"help":       true,
+}
+
+func newRootCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "jai",
+		Short: "Query Jira with SQL",
+		Long:  "jai syncs Jira Cloud data to a local SQLite database and lets you query it with SQL.",
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			if cmd.Name() == "help" || cmd.Name() == "completion" {
+				return nil
+			}
+
+			cfgPath := g.cfgPath
+			if cfgPath == "" {
+				cfgPath = config.DefaultConfigPath()
+			}
+
+			cfg, err := config.Load(cfgPath)
+			if err != nil {
+				return fmt.Errorf("loading config: %w\n\nRun 'jai init' to set up jai.", err)
+			}
+			if err := cfg.Validate(); err != nil {
+				return err
+			}
+			g.cfg = cfg
+
+			if g.dbPath != "" {
+				g.cfg.DB.Path = g.dbPath
+			}
+
+			database, err := db.Open(g.cfg.DB.Path)
+			if err != nil {
+				return fmt.Errorf("opening database: %w", err)
+			}
+			g.db = database
+
+			g.jira = jira.New(cfg.Jira.URL, cfg.Jira.Email, cfg.Jira.Token, cfg.Sync.RateLimit)
+			g.query = query.New(database, cfg)
+			g.sync = synce.New(database, g.jira, cfg)
+
+			if !g.noSync && !noAutoSync[cmd.Name()] {
+				if shouldAutoSync(database, cfg) {
+					fmt.Fprint(os.Stderr, "Auto-syncing... ")
+					runAutoSync(cmd.Context())
+				}
+			}
+
 			return nil
+		},
+	}
+}
+
+var rootCmd = newRootCmd()
+
+// shouldAutoSync returns true if any project's last sync is older than the configured interval.
+func shouldAutoSync(database *db.DB, cfg *config.Config) bool {
+	interval, err := time.ParseDuration(cfg.Sync.Interval)
+	if err != nil {
+		interval = 15 * time.Minute
+	}
+
+	for _, project := range cfg.Jira.Projects {
+		meta, err := database.GetSyncMeta(project)
+		if err != nil || !meta.LastSyncTime.Valid || meta.LastSyncTime.String == "" {
+			return true
 		}
-
-		// Load config.
-		cfgPath := g.cfgPath
-		if cfgPath == "" {
-			cfgPath = config.DefaultConfigPath()
+		t, err := time.Parse(time.RFC3339, meta.LastSyncTime.String)
+		if err != nil || time.Since(t) > interval {
+			return true
 		}
+	}
+	return false
+}
 
-		cfg, err := config.Load(cfgPath)
-		if err != nil {
-			return fmt.Errorf("loading config: %w\n\nRun 'jai init' to set up jai.", err)
+func runAutoSync(ctx context.Context) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ch, err := g.sync.Sync(ctx, false)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "auto-sync failed:", err)
+		return
+	}
+	go func() {
+		for range ch {
 		}
-		if err := cfg.Validate(); err != nil {
-			return err
-		}
-		g.cfg = cfg
-
-		// Override DB path if specified.
-		if g.dbPath != "" {
-			g.cfg.DB.Path = g.dbPath
-		}
-
-		// Open DB.
-		database, err := db.Open(g.cfg.DB.Path)
-		if err != nil {
-			return fmt.Errorf("opening database: %w", err)
-		}
-		g.db = database
-
-		// Initialize Jira client.
-		g.jira = jira.New(cfg.Jira.URL, cfg.Jira.Email, cfg.Jira.Token, cfg.Sync.RateLimit)
-
-		// Initialize query engine.
-		g.query = query.New(database, cfg)
-
-		// Initialize sync engine.
-		g.sync = synce.New(database, g.jira, cfg)
-
-		return nil
-	},
+		fmt.Fprintln(os.Stderr, "done.")
+	}()
 }
 
 // Execute runs the root command.
@@ -89,16 +140,16 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&g.dbPath, "db", "", "database file path")
 	rootCmd.PersistentFlags().BoolVar(&g.jsonOut, "json", false, "output as JSON")
 	rootCmd.PersistentFlags().BoolVar(&g.noSync, "no-sync", false, "skip auto-sync")
+	rootCmd.PersistentFlags().StringVar(&g.fields, "fields", "", "comma-separated field names to include in output")
 }
 
-// exitError prints an error and exits with code 1.
-func exitError(err error) {
-	fmt.Fprintf(os.Stderr, "error: %v\n", err)
+// jsonErr prints a JSON error envelope to stdout and exits.
+func jsonErr(errType, msg string) {
+	fmt.Println(string(output.Err(errType, msg)))
 	os.Exit(1)
 }
 
-// jsonError prints a JSON error envelope and exits.
+// jsonError is an alias kept for backward compat within this package.
 func jsonError(errType, msg string) {
-	fmt.Printf(`{"ok":false,"error":{"type":%q,"message":%q}}%s`, errType, msg, "\n")
-	os.Exit(1)
+	jsonErr(errType, msg)
 }

@@ -7,12 +7,24 @@ import (
 	"github.com/syethadk/jai/internal/output"
 )
 
-var queryCmd = &cobra.Command{
-	Use:   "query <sql>",
-	Short: "Execute a SQL query against the local database",
+var searchLimit int
+
+var searchCmd = &cobra.Command{
+	Use:   "search <text>",
+	Short: "Full-text search across issues",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		results, err := g.query.Execute(args[0])
+		text := args[0]
+
+		sql := fmt.Sprintf(`
+			SELECT i.key, i.summary, i.status, i.assignee, highlight(issues_fts, 1, '[', ']') AS match
+			FROM issues_fts
+			JOIN issues i ON i.key = issues_fts.key
+			WHERE issues_fts MATCH ?
+			ORDER BY rank
+			LIMIT %d`, searchLimit)
+
+		results, err := g.query.Execute(sql, text)
 		if err != nil {
 			if g.jsonOut {
 				fmt.Println(string(output.Err("QueryError", err.Error())))
@@ -37,5 +49,6 @@ var queryCmd = &cobra.Command{
 }
 
 func init() {
-	rootCmd.AddCommand(queryCmd)
+	searchCmd.Flags().IntVar(&searchLimit, "limit", 20, "maximum number of results")
+	rootCmd.AddCommand(searchCmd)
 }

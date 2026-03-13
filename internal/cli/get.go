@@ -1,11 +1,11 @@
 package cli
 
 import (
-	"encoding/json"
 	"fmt"
 	"sort"
 
 	"github.com/spf13/cobra"
+	"github.com/syethadk/jai/internal/output"
 )
 
 var getCmd = &cobra.Command{
@@ -18,7 +18,8 @@ var getCmd = &cobra.Command{
 		results, err := g.query.Execute("SELECT * FROM issues WHERE key = ?", key)
 		if err != nil {
 			if g.jsonOut {
-				jsonError("QueryError", err.Error())
+				fmt.Println(string(output.Err("QueryError", err.Error())))
+				return nil
 			}
 			return err
 		}
@@ -26,34 +27,37 @@ var getCmd = &cobra.Command{
 		if len(results.Rows) == 0 {
 			msg := fmt.Sprintf("issue %s not found in local database (try: jai sync)", key)
 			if g.jsonOut {
-				jsonError("NotFoundError", msg)
+				fmt.Println(string(output.Err("NotFoundError", msg)))
+				return nil
 			}
 			return fmt.Errorf("%s", msg)
 		}
 
 		if g.jsonOut {
-			data, err := results.SingleJSON()
-			if err != nil {
-				return err
+			// Build map from first row.
+			data := make(map[string]interface{}, len(results.Columns))
+			for i, col := range results.Columns {
+				data[col] = results.Rows[0][i]
 			}
-			fmt.Println(string(data))
+			// Apply --fields filter.
+			if g.fields != "" {
+				data = output.FilterFields(data, output.ParseFields(g.fields))
+			}
+			fmt.Println(string(output.OK(data)))
 			return nil
 		}
 
 		// Human output: key-value pairs.
 		row := results.Rows[0]
-		// Build map.
 		fields := make(map[string]interface{}, len(results.Columns))
 		for i, col := range results.Columns {
 			fields[col] = row[i]
 		}
 
-		// Print key and summary first.
-		printField("Key", fields["key"])
-		printField("Summary", fields["summary"])
+		fmt.Printf("  %-22s %s\n", "Key:", output.ValueStr(fields["key"]))
+		fmt.Printf("  %-22s %s\n", "Summary:", output.ValueStr(fields["summary"]))
 		fmt.Println()
 
-		// Print remaining fields in alphabetical order, skipping large/internal ones.
 		skip := map[string]bool{"key": true, "summary": true, "raw_json": true, "comments_text": true}
 		keys := make([]string, 0, len(fields))
 		for k := range fields {
@@ -64,34 +68,14 @@ var getCmd = &cobra.Command{
 		sort.Strings(keys)
 		for _, k := range keys {
 			v := fields[k]
-			if v == nil || fmt.Sprintf("%v", v) == "" {
+			if v == nil || output.ValueStr(v) == "" {
 				continue
 			}
-			printField(toTitle(k), v)
+			fmt.Print(output.KV(toTitle(k), v))
 		}
 
 		return nil
 	},
-}
-
-func printField(label string, val interface{}) {
-	if val == nil {
-		return
-	}
-	var s string
-	switch v := val.(type) {
-	case []byte:
-		s = string(v)
-	case string:
-		s = v
-	default:
-		b, _ := json.Marshal(v)
-		s = string(b)
-	}
-	if s == "" || s == "null" {
-		return
-	}
-	fmt.Printf("  %-20s %s\n", label+":", s)
 }
 
 func toTitle(s string) string {
