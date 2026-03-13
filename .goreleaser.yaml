@@ -55,7 +55,7 @@ changelog:
 
 brews:
   - name: jai
-    homepage: https://github.com/syethadk/jai
+    homepage: https://github.com/sthadka/jai
     description: "Query Jira with SQL — sync Jira Cloud to SQLite and query it"
     license: MIT
     tap:

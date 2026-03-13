@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
-	"github.com/syethadk/jai/internal/output"
+	"github.com/sthadka/jai/internal/output"
 )
 
 var setCmd = &cobra.Command{

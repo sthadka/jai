@@ -7,12 +7,12 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/syethadk/jai/internal/config"
-	"github.com/syethadk/jai/internal/db"
-	"github.com/syethadk/jai/internal/jira"
-	"github.com/syethadk/jai/internal/output"
-	"github.com/syethadk/jai/internal/query"
-	synce "github.com/syethadk/jai/internal/sync"
+	"github.com/sthadka/jai/internal/config"
+	"github.com/sthadka/jai/internal/db"
+	"github.com/sthadka/jai/internal/jira"
+	"github.com/sthadka/jai/internal/output"
+	"github.com/sthadka/jai/internal/query"
+	synce "github.com/sthadka/jai/internal/sync"
 )
 
 // globals holds shared state passed to sub-commands.

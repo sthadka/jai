@@ -1,4 +1,4 @@
-module github.com/syethadk/jai
+module github.com/sthadka/jai
 
 go 1.25.0
 

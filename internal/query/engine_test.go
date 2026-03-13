@@ -4,8 +4,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/syethadk/jai/internal/config"
-	"github.com/syethadk/jai/internal/db"
+	"github.com/sthadka/jai/internal/config"
+	"github.com/sthadka/jai/internal/db"
 )
 
 func openTestDB(t *testing.T) *db.DB {

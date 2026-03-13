@@ -9,10 +9,10 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/syethadk/jai/internal/config"
-	"github.com/syethadk/jai/internal/db"
-	"github.com/syethadk/jai/internal/jira"
-	synce "github.com/syethadk/jai/internal/sync"
+	"github.com/sthadka/jai/internal/config"
+	"github.com/sthadka/jai/internal/db"
+	"github.com/sthadka/jai/internal/jira"
+	synce "github.com/sthadka/jai/internal/sync"
 )
 
 var initCmd = &cobra.Command{

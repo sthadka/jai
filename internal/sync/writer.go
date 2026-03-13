@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/syethadk/jai/internal/db"
-	"github.com/syethadk/jai/internal/jira"
+	"github.com/sthadka/jai/internal/db"
+	"github.com/sthadka/jai/internal/jira"
 )
 
 const maxRetries = 5

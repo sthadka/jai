@@ -9,9 +9,9 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/syethadk/jai/internal/config"
-	"github.com/syethadk/jai/internal/query"
-	synce "github.com/syethadk/jai/internal/sync"
+	"github.com/sthadka/jai/internal/config"
+	"github.com/sthadka/jai/internal/query"
+	synce "github.com/sthadka/jai/internal/sync"
 )
 
 // Mode represents the current UI mode.

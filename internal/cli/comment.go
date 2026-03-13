@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/syethadk/jai/internal/db"
-	"github.com/syethadk/jai/internal/output"
+	"github.com/sthadka/jai/internal/db"
+	"github.com/sthadka/jai/internal/output"
 )
 
 var commentCmd = &cobra.Command{

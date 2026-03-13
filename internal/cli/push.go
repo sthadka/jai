@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
-	synce "github.com/syethadk/jai/internal/sync"
+	synce "github.com/sthadka/jai/internal/sync"
 )
 
 var pushCmd = &cobra.Command{

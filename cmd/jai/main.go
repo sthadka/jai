@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/syethadk/jai/internal/cli"
+	"github.com/sthadka/jai/internal/cli"
 )
 
 func main() {

@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/syethadk/jai/internal/config"
-	"github.com/syethadk/jai/internal/db"
+	"github.com/sthadka/jai/internal/config"
+	"github.com/sthadka/jai/internal/db"
 )
 
 // Results holds query output.

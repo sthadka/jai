@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/syethadk/jai/internal/config"
-	"github.com/syethadk/jai/internal/db"
-	"github.com/syethadk/jai/internal/jira"
+	"github.com/sthadka/jai/internal/config"
+	"github.com/sthadka/jai/internal/db"
+	"github.com/sthadka/jai/internal/jira"
 )
 
 // Progress reports sync progress for a project.

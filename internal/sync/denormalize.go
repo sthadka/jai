@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/syethadk/jai/internal/db"
-	"github.com/syethadk/jai/internal/jira"
+	"github.com/sthadka/jai/internal/db"
+	"github.com/sthadka/jai/internal/jira"
 )
 
 // Denormalize extracts column values from a raw Jira issue JSON blob using the field map.

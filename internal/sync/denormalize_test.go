@@ -3,8 +3,8 @@ package sync
 import (
 	"testing"
 
-	"github.com/syethadk/jai/internal/db"
-	"github.com/syethadk/jai/internal/jira"
+	"github.com/sthadka/jai/internal/db"
+	"github.com/sthadka/jai/internal/jira"
 )
 
 func TestDenormalize_Basic(t *testing.T) {
