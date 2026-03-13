@@ -1,5 +1,1 @@
-dolt:
-  auto-start: true
-  data-dir: /Users/syethadk/work/code/jai/.beads/dolt
-  env:
-    DOLT_ROOT_PATH: /Users/syethadk/work/code/jai/.beads/dolt-home
+no-db: true

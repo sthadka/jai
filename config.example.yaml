@@ -1,0 +1,48 @@
+jira:
+  url: https://mycompany.atlassian.net
+  email: me@company.com
+  token: ${JAI_TOKEN}
+  projects:
+    - ROX
+    - ACS
+
+sync:
+  interval: 15m
+  rate_limit: 10
+  history: false
+  fts_fields:
+    - summary
+    - description
+    - labels
+
+db:
+  path: ~/.local/share/jai/jai.db
+
+me: me@company.com
+team: ACS Scanner
+
+fields:
+  overrides:
+    customfield_12345: team
+    customfield_67890: story_points
+
+views:
+  - name: my-work
+    title: My Work
+    query: |
+      SELECT key, summary, status, priority, updated
+      FROM issues
+      WHERE assignee_email = '{{me}}'
+      AND status_category != 'Done'
+      ORDER BY priority DESC, updated DESC
+    columns:
+      - key
+      - summary
+      - status
+      - priority
+    sort_by: priority
+    color_rules:
+      - field: priority
+        condition: equals
+        value: Blocker
+        color: "#ff0000"
