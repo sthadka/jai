@@ -54,7 +54,7 @@ var statusCmd = &cobra.Command{
 		}
 
 		// Human output.
-		fmt.Println("Projects:")
+		fmt.Println("Sources:")
 		for _, m := range metas {
 			lastSync := "never"
 			if m.LastSyncTime.Valid && m.LastSyncTime.String != "" {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -82,7 +83,6 @@ func newRootCmd() *cobra.Command {
 
 			if !g.noSync && !noAutoSync[cmd.Name()] {
 				if shouldAutoSync(database, cfg) {
-					fmt.Fprint(os.Stderr, "Auto-syncing... ")
 					runAutoSync(cmd.Context())
 				}
 			}
@@ -120,14 +120,48 @@ func runAutoSync(ctx context.Context) {
 	}
 	ch, err := g.sync.Sync(ctx, false, "")
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "auto-sync failed:", err)
+		fmt.Fprintf(os.Stderr, "sync: %v\n", err)
 		return
 	}
+
+	spinFrames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+	spinIdx := 0
+	total := 0
+	var syncErr error
+
+	ticker := time.NewTicker(80 * time.Millisecond)
+	defer ticker.Stop()
+
+	// Drain channel in a goroutine, spinner runs on the ticker.
+	done := make(chan struct{})
 	go func() {
-		for range ch {
+		for p := range ch {
+			if p.Done {
+				if p.Error != nil {
+					syncErr = p.Error
+				} else {
+					total += p.New + p.Updated
+				}
+			}
 		}
-		fmt.Fprintln(os.Stderr, "done.")
+		close(done)
 	}()
+
+	fmt.Fprint(os.Stderr, spinFrames[0]+" Syncing...  ")
+	for {
+		select {
+		case <-ticker.C:
+			spinIdx++
+			fmt.Fprintf(os.Stderr, "\r%s Syncing...  ", spinFrames[spinIdx%len(spinFrames)])
+		case <-done:
+			if syncErr != nil {
+				fmt.Fprintf(os.Stderr, "\r✗ Sync failed: %v\n", syncErr)
+			} else {
+				fmt.Fprintf(os.Stderr, "\r✓ Synced %d issues\n%s\n", total, strings.Repeat("─", 40))
+			}
+			return
+		}
+	}
 }
 
 // Execute runs the root command.
