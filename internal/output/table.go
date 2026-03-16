@@ -3,6 +3,7 @@ package output
 import (
 	"fmt"
 	"strings"
+	"time"
 )
 
 // Table renders rows as a plain-text aligned table.
@@ -87,6 +88,11 @@ func ValueStr(v interface{}) string {
 		return string(t)
 	case string:
 		return t
+	case time.Time:
+		if t.IsZero() {
+			return ""
+		}
+		return t.UTC().Format(time.RFC3339)
 	default:
 		return fmt.Sprintf("%v", t)
 	}

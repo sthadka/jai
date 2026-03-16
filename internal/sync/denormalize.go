@@ -3,10 +3,35 @@ package sync
 import (
 	"encoding/json"
 	"strings"
+	"time"
 
 	"github.com/sthadka/jai/internal/db"
 	"github.com/sthadka/jai/internal/jira"
 )
+
+// jiraDateFormats lists the timestamp formats Jira Cloud uses.
+// The colon-less timezone offset (+0000) is not RFC3339, so go-sqlite3
+// fails to parse it back from DATETIME columns, returning a zero time.Time.
+// We normalise to RFC3339 at write time so SQLite date functions also work.
+var jiraDateFormats = []string{
+	"2006-01-02T15:04:05.999-0700",
+	"2006-01-02T15:04:05.999Z07:00",
+	"2006-01-02T15:04:05-0700",
+	"2006-01-02T15:04:05Z07:00",
+	"2006-01-02",
+}
+
+func normalizeDate(s string) string {
+	if s == "" {
+		return ""
+	}
+	for _, layout := range jiraDateFormats {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t.UTC().Format(time.RFC3339)
+		}
+	}
+	return s // unrecognised format — store as-is
+}
 
 // Denormalize extracts column values from a raw Jira issue JSON blob using the field map.
 // Returns: (fixed IssueFields, extra dynamic columns map).
@@ -52,9 +77,9 @@ func Denormalize(raw []byte, fieldMap map[string]*db.FieldMapping) (*db.Issue, m
 	if fields.Reporter != nil {
 		issue.Reporter = fields.Reporter.DisplayName
 	}
-	issue.Created = fields.Created
-	issue.Updated = fields.Updated
-	issue.Resolved = fields.ResolutionDate
+	issue.Created = normalizeDate(fields.Created)
+	issue.Updated = normalizeDate(fields.Updated)
+	issue.Resolved = normalizeDate(fields.ResolutionDate)
 
 	if len(fields.Labels) > 0 {
 		issue.Labels = strings.Join(fields.Labels, ",")
