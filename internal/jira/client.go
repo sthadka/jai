@@ -160,6 +160,15 @@ func (c *Client) MySelf(ctx context.Context) (*MySelf, error) {
 	return &m, nil
 }
 
+// GetProject fetches project metadata (name, key).
+func (c *Client) GetProject(ctx context.Context, key string) (*ProjectInfo, error) {
+	var p ProjectInfo
+	if err := c.get(ctx, "/rest/api/3/project/"+key, &p); err != nil {
+		return nil, err
+	}
+	return &p, nil
+}
+
 // Fields fetches all field definitions.
 func (c *Client) Fields(ctx context.Context) ([]*Field, error) {
 	var fields []*Field

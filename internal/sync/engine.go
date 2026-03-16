@@ -37,6 +37,34 @@ func New(database *db.DB, client *jira.Client, cfg *config.Config) *Engine {
 	return &Engine{db: database, client: client, cfg: cfg}
 }
 
+// SyncProjects fetches the display name for every distinct project key in the issues
+// table and stores it in the projects table. Non-fatal: failures are logged to stderr.
+func (e *Engine) SyncProjects(ctx context.Context) {
+	rows, err := e.db.Query(`SELECT DISTINCT project FROM issues WHERE project != ''`)
+	if err != nil {
+		return
+	}
+	var keys []string
+	for rows.Next() {
+		var k string
+		if err := rows.Scan(&k); err == nil && k != "" {
+			keys = append(keys, k)
+		}
+	}
+	rows.Close()
+
+	for _, k := range keys {
+		p, err := e.client.GetProject(ctx, k)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: fetching project %s: %v\n", k, err)
+			continue
+		}
+		if err := e.db.UpsertProject(p.Key, p.Name); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: storing project %s: %v\n", k, err)
+		}
+	}
+}
+
 // DiscoverFields fetches field metadata from Jira and populates field_map.
 func (e *Engine) DiscoverFields(ctx context.Context, overrides map[string]string) error {
 	fields, err := e.client.Fields(ctx)
@@ -229,6 +257,11 @@ func (e *Engine) syncSource(ctx context.Context, src config.SyncSource, full boo
 			}
 		}
 		_ = e.db.UpdateFullSyncMeta(src.Name)
+	}
+
+	// Sync project names so the TUI breadcrumb can show display names.
+	if full {
+		e.SyncProjects(ctx)
 	}
 
 	elapsed := time.Since(start).Seconds()

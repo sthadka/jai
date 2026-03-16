@@ -24,14 +24,38 @@ func DefaultDBPath() string {
 
 // Config holds the full jai configuration.
 type Config struct {
-	Jira        JiraConfig   `yaml:"jira"`
-	Sync        SyncConfig   `yaml:"sync"`
-	DB          DBConfig     `yaml:"db"`
-	Fields      FieldsConfig `yaml:"fields"`
-	Views       []ViewConfig `yaml:"views"`
-	Me          string       `yaml:"me"`
-	Team        string       `yaml:"team"`
-	SyncSources []SyncSource `yaml:"sync_sources"`
+	Jira        JiraConfig      `yaml:"jira"`
+	Sync        SyncConfig      `yaml:"sync"`
+	DB          DBConfig        `yaml:"db"`
+	Fields      FieldsConfig    `yaml:"fields"`
+	Views       []ViewConfig    `yaml:"views"`
+	Me          string          `yaml:"me"`
+	Team        string          `yaml:"team"`
+	SyncSources []SyncSource    `yaml:"sync_sources"`
+	Hierarchy   HierarchyConfig `yaml:"hierarchy"`
+	Detail      DetailConfig    `yaml:"detail"`
+}
+
+// HierarchyLevel defines one level in the issue hierarchy.
+type HierarchyLevel struct {
+	Name string `yaml:"name"`
+	JQL  string `yaml:"jql"`
+}
+
+// HierarchyConfig defines the hierarchy tree view.
+// From/To are level names; levels between them (inclusive) are shown.
+type HierarchyConfig struct {
+	Levels []HierarchyLevel `yaml:"levels"`
+	From   string           `yaml:"from"` // topmost level name to display
+	To     string           `yaml:"to"`   // bottommost level name to display
+}
+
+// DetailConfig controls the issue detail pane.
+type DetailConfig struct {
+	// SidebarFields lists Jira field display names (jira_name in field_map)
+	// to include in the right sidebar, in addition to the defaults.
+	// Example: ["Contributors", "Product Manager"]
+	SidebarFields []string `yaml:"sidebar_fields"`
 }
 
 // SyncSource defines a named set of issues to sync.

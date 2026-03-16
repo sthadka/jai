@@ -18,6 +18,18 @@ var migrations = []migration{
 		description: "initial schema",
 		up:          createSchema,
 	},
+	{
+		version:     2,
+		description: "add projects table",
+		up: func(tx *sql.Tx) error {
+			_, err := tx.Exec(`CREATE TABLE IF NOT EXISTS projects (
+				key        TEXT PRIMARY KEY,
+				name       TEXT NOT NULL,
+				synced_at  DATETIME NOT NULL DEFAULT (datetime('now'))
+			)`)
+			return err
+		},
+	},
 }
 
 // Migrate applies any pending schema migrations in order.

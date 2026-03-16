@@ -28,17 +28,18 @@ type KeyMap struct {
 	Tab9     key.Binding
 
 	// Actions.
-	Select   key.Binding
-	Sort     key.Binding
-	Group    key.Binding
-	Filter   key.Binding
-	Refresh  key.Binding
-	Open     key.Binding
-	Edit     key.Binding
-	Comment  key.Binding
-	Quit     key.Binding
-	Back     key.Binding
-	Help     key.Binding
+	Select      key.Binding
+	Sort        key.Binding
+	Group       key.Binding
+	Filter      key.Binding
+	Refresh     key.Binding
+	Open        key.Binding
+	Edit        key.Binding
+	Comment     key.Binding
+	FieldPicker key.Binding // comma: open field editor in detail view
+	Quit        key.Binding
+	Back        key.Binding
+	Help        key.Binding
 }
 
 // DefaultKeys returns the default keybindings.
@@ -65,16 +66,17 @@ func DefaultKeys() KeyMap {
 		Tab8:    key.NewBinding(key.WithKeys("8")),
 		Tab9:    key.NewBinding(key.WithKeys("9")),
 
-		Select:  key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "open detail")),
-		Sort:    key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "sort")),
-		Group:   key.NewBinding(key.WithKeys("g"), key.WithHelp("g", "group by")),
-		Filter:  key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filter")),
-		Refresh: key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh")),
-		Open:    key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "open in browser")),
-		Edit:    key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "edit field")),
-		Comment: key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "comment")),
-		Quit:    key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
-		Back:    key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back/clear")),
-		Help:    key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
+		Select:      key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "open detail")),
+		Sort:        key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "sort")),
+		Group:       key.NewBinding(key.WithKeys("g"), key.WithHelp("g", "group by")),
+		Filter:      key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filter")),
+		Refresh:     key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh")),
+		Open:        key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "open in browser")),
+		Edit:        key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "edit field")),
+		Comment:     key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "comment")),
+		FieldPicker: key.NewBinding(key.WithKeys(","), key.WithHelp(",", "edit field (detail)")),
+		Quit:        key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
+		Back:        key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back/clear")),
+		Help:        key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
 	}
 }

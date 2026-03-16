@@ -90,6 +90,12 @@ type FieldSchema struct {
 	Custom string `json:"custom"`
 }
 
+// ProjectInfo is a Jira project returned by /rest/api/3/project/{key}.
+type ProjectInfo struct {
+	Key  string `json:"key"`
+	Name string `json:"name"`
+}
+
 // MySelf is the /rest/api/3/myself response.
 type MySelf struct {
 	DisplayName  string `json:"displayName"`
