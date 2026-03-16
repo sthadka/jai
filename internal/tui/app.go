@@ -49,8 +49,11 @@ type App struct {
 	fieldPickerFiltered []*db.FieldMapping
 	fieldPickerCursor   int
 	fieldPickerChosen   *db.FieldMapping
-	fieldValueInput     textinput.Model
-	fieldValueCurrent   string
+	fieldValueInput       textinput.Model
+	fieldValueCurrent     string
+	fieldValueSuggestions []string // distinct existing values for chosen field
+	fieldValueSugFiltered []string // filtered by current input
+	fieldValueSugCursor   int      // -1 = no suggestion highlighted
 
 	width  int
 	height int
@@ -79,15 +82,16 @@ func New(cfg *config.Config, queryEng *query.Engine, syncEng *synce.Engine, data
 	fvi.CharLimit = 256
 
 	a := &App{
-		cfg:             cfg,
-		queryEng:        queryEng,
-		syncEngine:      syncEng,
-		database:        database,
-		keys:            DefaultKeys(),
-		filterInput:     ti,
+		cfg:              cfg,
+		queryEng:         queryEng,
+		syncEngine:       syncEng,
+		database:         database,
+		keys:             DefaultKeys(),
+		filterInput:      ti,
 		fieldPickerInput: fpi,
-		fieldValueInput: fvi,
-		syncTick:        15 * time.Minute,
+		fieldValueInput:  fvi,
+		fieldValueSugCursor: -1,
+		syncTick:         15 * time.Minute,
 	}
 
 	if d, err := time.ParseDuration(cfg.Sync.Interval); err == nil {
@@ -222,6 +226,49 @@ type fieldMapLoadedMsg struct {
 	fields []*db.FieldMapping
 }
 
+type fieldValuesLoadedMsg struct {
+	values []string
+}
+
+// loadFieldValuesCmd fetches distinct existing values for a field column.
+func (a *App) loadFieldValuesCmd(colName string) tea.Cmd {
+	return func() tea.Msg {
+		q := fmt.Sprintf(
+			`SELECT DISTINCT "%s" FROM issues WHERE "%s" IS NOT NULL AND "%s" != '' ORDER BY 1 LIMIT 50`,
+			colName, colName, colName,
+		)
+		rows, err := a.database.Query(q)
+		if err != nil {
+			return fieldValuesLoadedMsg{}
+		}
+		defer rows.Close()
+		var vals []string
+		for rows.Next() {
+			var v string
+			if err := rows.Scan(&v); err == nil && v != "" {
+				vals = append(vals, v)
+			}
+		}
+		return fieldValuesLoadedMsg{values: vals}
+	}
+}
+
+// filterFieldValueSuggestions filters a.fieldValueSuggestions by the current input.
+func (a *App) filterFieldValueSuggestions() {
+	filter := strings.ToLower(a.fieldValueInput.Value())
+	if filter == "" {
+		a.fieldValueSugFiltered = a.fieldValueSuggestions
+		return
+	}
+	var out []string
+	for _, v := range a.fieldValueSuggestions {
+		if strings.Contains(strings.ToLower(v), filter) {
+			out = append(out, v)
+		}
+	}
+	a.fieldValueSugFiltered = out
+}
+
 // Update handles messages and key events.
 func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
@@ -260,6 +307,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case fieldMapLoadedMsg:
 		a.fieldPickerAll = msg.fields
 		a.applyFieldFilter()
+		return a, nil
+
+	case fieldValuesLoadedMsg:
+		a.fieldValueSuggestions = msg.values
+		a.filterFieldValueSuggestions()
 		return a, nil
 
 	case SyncTickMsg:
@@ -321,6 +373,13 @@ func (a *App) handleKey(msg tea.KeyMsg, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, a.keys.Select):
 			a.mode = ModeTable
 			a.filterInput.Blur()
+		default:
+			var cmd tea.Cmd
+			a.filterInput, cmd = a.filterInput.Update(msg)
+			if t != nil {
+				t.SetFilter(a.filterInput.Value())
+			}
+			cmds = append(cmds, cmd)
 		}
 		return a, tea.Batch(cmds...)
 	}
@@ -393,15 +452,24 @@ func (a *App) handleKey(msg tea.KeyMsg, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 				chosen := a.fieldPickerFiltered[a.fieldPickerCursor]
 				a.fieldPickerChosen = chosen
 				a.fieldPickerInput.Blur()
-				// Find current value from detail data.
 				a.fieldValueCurrent = ""
 				if a.detail != nil && a.detail.data != nil {
 					a.fieldValueCurrent = issueStr(a.detail.data.Issue, chosen.Name)
 				}
 				a.fieldValueInput.SetValue("")
 				a.fieldValueInput.Focus()
+				a.fieldValueSuggestions = nil
+				a.fieldValueSugFiltered = nil
+				a.fieldValueSugCursor = -1
 				a.mode = ModeFieldValue
+				cmds = append(cmds, a.loadFieldValuesCmd(chosen.Name))
 			}
+		default:
+			// Pass all other keys (letters, backspace, etc.) to the text input.
+			var cmd tea.Cmd
+			a.fieldPickerInput, cmd = a.fieldPickerInput.Update(msg)
+			a.applyFieldFilter()
+			cmds = append(cmds, cmd)
 		}
 		return a, tea.Batch(cmds...)
 	}
@@ -413,9 +481,22 @@ func (a *App) handleKey(msg tea.KeyMsg, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 			a.mode = ModeFieldPicker
 			a.fieldValueInput.Blur()
 			a.fieldPickerInput.Focus()
+		case key.Matches(msg, a.keys.Up):
+			if a.fieldValueSugCursor > 0 {
+				a.fieldValueSugCursor--
+			} else if a.fieldValueSugCursor == 0 {
+				a.fieldValueSugCursor = -1 // deselect: back to raw input
+			}
+		case key.Matches(msg, a.keys.Down):
+			if a.fieldValueSugCursor < len(a.fieldValueSugFiltered)-1 {
+				a.fieldValueSugCursor++
+			}
 		case key.Matches(msg, a.keys.Select):
 			if a.fieldPickerChosen != nil && a.detail != nil {
 				newVal := a.fieldValueInput.Value()
+				if a.fieldValueSugCursor >= 0 && a.fieldValueSugCursor < len(a.fieldValueSugFiltered) {
+					newVal = a.fieldValueSugFiltered[a.fieldValueSugCursor]
+				}
 				issueKey := a.detail.IssueKey()
 				fieldName := a.fieldPickerChosen.JiraID
 				payload := marshalSetPayload(fieldName, newVal)
@@ -423,6 +504,13 @@ func (a *App) handleKey(msg tea.KeyMsg, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 			}
 			a.fieldValueInput.Blur()
 			a.mode = ModeDetail
+		default:
+			// Pass all other keys to the text input; typing resets suggestion cursor.
+			var cmd tea.Cmd
+			a.fieldValueInput, cmd = a.fieldValueInput.Update(msg)
+			a.filterFieldValueSuggestions()
+			a.fieldValueSugCursor = -1
+			cmds = append(cmds, cmd)
 		}
 		return a, tea.Batch(cmds...)
 	}
@@ -679,9 +767,9 @@ func (a *App) renderStatusBar() string {
 	case ModeDetail:
 		parts = append(parts, "q:quit  esc:back  o:browser  ,:edit  ↑↓:scroll")
 	case ModeFieldPicker:
-		parts = append(parts, "↑↓:select  enter:choose  esc:back")
+		parts = append(parts, "type:filter  ↑↓:select  enter:choose  esc:back")
 	case ModeFieldValue:
-		parts = append(parts, "enter:save  esc:back")
+		parts = append(parts, "type:value  ↑↓:suggestion  enter:save  esc:back")
 	default:
 		parts = append(parts, "q:quit  /:filter  s:sort  enter:detail  r:refresh")
 	}
@@ -752,7 +840,7 @@ func (a *App) renderFieldValueModal() string {
 	if a.fieldPickerChosen == nil {
 		return ""
 	}
-	w := 50
+	w := 52
 	if w > a.width-4 {
 		w = a.width - 4
 	}
@@ -760,6 +848,8 @@ func (a *App) renderFieldValueModal() string {
 	borderStyle := lipgloss.NewStyle().Foreground(colorHeader)
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(colorActiveTab)
 	labelStyle := lipgloss.NewStyle().Foreground(colorTab)
+	selectedStyle := lipgloss.NewStyle().Background(colorSelected).Foreground(colorActiveTab)
+	normalStyle := lipgloss.NewStyle().Foreground(colorTab)
 
 	var sb strings.Builder
 	inner := w - 4
@@ -784,6 +874,32 @@ func (a *App) renderFieldValueModal() string {
 	line("")
 	line(labelStyle.Render(fmt.Sprintf("%-*s", inner, "New value:")))
 	line(a.fieldValueInput.View())
+
+	// Suggestion dropdown.
+	if len(a.fieldValueSugFiltered) > 0 {
+		line(lipgloss.NewStyle().Foreground(colorStatusBar).Render(strings.Repeat("─", inner)))
+		maxVisible := 6
+		start := 0
+		if a.fieldValueSugCursor >= maxVisible {
+			start = a.fieldValueSugCursor - maxVisible + 1
+		}
+		end := start + maxVisible
+		if end > len(a.fieldValueSugFiltered) {
+			end = len(a.fieldValueSugFiltered)
+		}
+		for i := start; i < end; i++ {
+			v := a.fieldValueSugFiltered[i]
+			label := fmt.Sprintf("%-*s", inner, v)
+			if len(label) > inner {
+				label = label[:inner]
+			}
+			if i == a.fieldValueSugCursor {
+				line(selectedStyle.Render(label))
+			} else {
+				line(normalStyle.Render(label))
+			}
+		}
+	}
 
 	hline("╰", "╯")
 	return sb.String()
