@@ -30,7 +30,7 @@ func doSync(engine *synce.Engine) tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 
-		ch, err := engine.Sync(ctx, false)
+		ch, err := engine.Sync(ctx, false, "")
 		if err != nil {
 			return SyncMsg{Err: err}
 		}

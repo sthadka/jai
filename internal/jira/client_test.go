@@ -60,9 +60,6 @@ func TestSearchAll(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		callCount++
 		resp := SearchResponse{
-			StartAt:    0,
-			MaxResults: 100,
-			Total:      2,
 			Issues: []*Issue{
 				{Key: "TEST-1", Fields: json.RawMessage(`{"summary":"Issue 1"}`)},
 				{Key: "TEST-2", Fields: json.RawMessage(`{"summary":"Issue 2"}`)},
@@ -97,7 +94,6 @@ func TestSearchAll_Retry429(t *testing.T) {
 			return
 		}
 		resp := SearchResponse{
-			Total:  1,
 			Issues: []*Issue{{Key: "TEST-1", Fields: json.RawMessage(`{}`)}},
 		}
 		json.NewEncoder(w).Encode(resp)

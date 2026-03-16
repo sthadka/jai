@@ -5,12 +5,10 @@ import (
 	"strings"
 )
 
-// SearchResponse is the Jira /rest/api/3/search response.
+// SearchResponse is the Jira /rest/api/3/search/jql response.
 type SearchResponse struct {
-	StartAt    int      `json:"startAt"`
-	MaxResults int      `json:"maxResults"`
-	Total      int      `json:"total"`
-	Issues     []*Issue `json:"issues"`
+	Issues        []*Issue `json:"issues"`
+	NextPageToken string   `json:"nextPageToken"`
 }
 
 // Issue is a Jira issue from the API.

@@ -23,26 +23,69 @@ var initCmd = &cobra.Command{
 	RunE:              runInit,
 }
 
+// prompt prints a prompt with an optional default value and reads a line.
+// If the user presses Enter without input, the default is returned.
+func prompt(reader *bufio.Reader, label, defaultVal string) string {
+	if defaultVal != "" {
+		fmt.Printf("%s [%s]: ", label, defaultVal)
+	} else {
+		fmt.Printf("%s: ", label)
+	}
+	line, _ := reader.ReadString('\n')
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return defaultVal
+	}
+	return line
+}
+
 func runInit(cmd *cobra.Command, args []string) error {
 	reader := bufio.NewReader(os.Stdin)
 
 	fmt.Println("Welcome to jai! Let's get you set up.")
 	fmt.Println()
 
+	// Load existing config if present, to pre-populate prompts.
+	var existing *config.Config
+	if cfg, err := config.Load(config.DefaultConfigPath()); err == nil {
+		existing = cfg
+	}
+	defaults := func(field string) string {
+		if existing == nil {
+			return ""
+		}
+		switch field {
+		case "url":
+			return existing.Jira.URL
+		case "email":
+			return existing.Jira.Email
+		case "token":
+			return existing.Jira.Token
+		case "projects":
+			return strings.Join(existing.Jira.Projects, ",")
+		}
+		return ""
+	}
+
 	// Jira URL.
-	fmt.Print("Jira URL (e.g. https://mycompany.atlassian.net): ")
-	jiraURL, _ := reader.ReadString('\n')
-	jiraURL = strings.TrimSpace(jiraURL)
+	jiraURL := prompt(reader, "Jira URL (e.g. https://mycompany.atlassian.net)", defaults("url"))
 
 	// Email.
-	fmt.Print("Email: ")
-	email, _ := reader.ReadString('\n')
-	email = strings.TrimSpace(email)
+	email := prompt(reader, "Email", defaults("email"))
 
-	// API Token.
-	fmt.Print("API Token (will be referenced as ${JAI_TOKEN}): ")
-	token, _ := reader.ReadString('\n')
-	token = strings.TrimSpace(token)
+	// API Token — show a placeholder if one is already set, never the actual value.
+	existingToken := defaults("token")
+	var tokenDefault string
+	if existingToken != "" {
+		tokenDefault = "<existing token — press Enter to keep>"
+	}
+	tokenInput := prompt(reader, "API Token (will be referenced as ${JAI_TOKEN})", tokenDefault)
+	var token string
+	if tokenInput == tokenDefault && existingToken != "" {
+		token = existingToken
+	} else {
+		token = tokenInput
+	}
 
 	// Test connection.
 	fmt.Print("Testing connection... ")
@@ -56,9 +99,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Connected as %s\n\n", me.DisplayName)
 
 	// Project keys.
-	fmt.Print("Project keys (comma-separated, e.g. ROX,ACS): ")
-	projectsStr, _ := reader.ReadString('\n')
-	projectsStr = strings.TrimSpace(projectsStr)
+	projectsStr := prompt(reader, "Project keys (comma-separated, e.g. ROX,ACS)", defaults("projects"))
 	var projects []string
 	for _, p := range strings.Split(projectsStr, ",") {
 		p = strings.TrimSpace(strings.ToUpper(p))
@@ -82,7 +123,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("writing config: %w", err)
 	}
 	fmt.Printf("Config saved to %s\n", cfgPath)
-	fmt.Printf("Add to your shell profile: export JAI_TOKEN=%q\n\n", token)
+	fmt.Printf("Add to your shell profile: export JAI_TOKEN=<your-api-token>\n\n")
 
 	// Build a minimal config struct for sync.
 	cfg := &config.Config{
@@ -114,20 +155,12 @@ func runInit(cmd *cobra.Command, args []string) error {
 	}
 
 	// Initial sync.
-	fmt.Printf("Syncing %d project(s) (this may take a few minutes)...\n", len(projects))
-	ch, err := engine.Sync(ctx, true)
+	fmt.Printf("Syncing %d source(s) (this may take a few minutes)...\n", len(projects))
+	ch, err := engine.Sync(ctx, true, "")
 	if err != nil {
 		return fmt.Errorf("sync failed: %w", err)
 	}
-	total := 0
-	for p := range ch {
-		if p.Error != nil {
-			fmt.Printf("  %s: ERROR %v\n", p.Project, p.Error)
-		} else {
-			fmt.Printf("  %s: %d issues synced\n", p.Project, p.New + p.Updated)
-			total += p.New + p.Updated
-		}
-	}
+	total := displaySyncProgress(ch)
 
 	fmt.Printf("\nSync complete! %d issues synced.\n\n", total)
 	fmt.Println("Next steps:")

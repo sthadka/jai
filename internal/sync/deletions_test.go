@@ -16,7 +16,6 @@ func TestDetectDeletions(t *testing.T) {
 	// Set up a mock Jira server that returns TEST-1 but not TEST-2.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		resp := jira.SearchResponse{
-			Total: 1,
 			Issues: []*jira.Issue{
 				{Key: "TEST-1", Fields: json.RawMessage(`{}`)},
 			},

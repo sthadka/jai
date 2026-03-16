@@ -131,6 +131,26 @@ func (c *Client) get(ctx context.Context, path string, out interface{}) error {
 	return json.NewDecoder(resp.Body).Decode(out)
 }
 
+// postDecode performs a POST request with a JSON body and decodes the JSON response into out.
+func (c *Client) postDecode(ctx context.Context, path string, in, out interface{}) error {
+	b, err := json.Marshal(in)
+	if err != nil {
+		return err
+	}
+	resp, err := c.doRequest(ctx, http.MethodPost, path, strings.NewReader(string(b)))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("jira API error %d: %s", resp.StatusCode, string(body))
+	}
+
+	return json.NewDecoder(resp.Body).Decode(out)
+}
+
 // MySelf calls /rest/api/3/myself to test the connection.
 func (c *Client) MySelf(ctx context.Context) (*MySelf, error) {
 	var m MySelf
@@ -151,20 +171,23 @@ func (c *Client) Fields(ctx context.Context) ([]*Field, error) {
 
 // SearchAll returns a paginated iterator over issues matching the JQL query.
 // It yields each page of issues. The caller iterates with a for range loop.
+// Uses POST /rest/api/3/search/jql with cursor-based pagination.
 func (c *Client) SearchAll(ctx context.Context, jql string, fields []string) func(yield func([]*Issue, error) bool) {
 	return func(yield func([]*Issue, error) bool) {
-		startAt := 0
-		pageSize := 100
-		fieldsParam := strings.Join(fields, ",")
+		var nextPageToken string
 
 		for {
-			path := fmt.Sprintf(
-				"/rest/api/3/search?jql=%s&startAt=%d&maxResults=%d&fields=%s",
-				jqlEncode(jql), startAt, pageSize, fieldsParam,
-			)
+			reqBody := map[string]interface{}{
+				"jql":        jql,
+				"maxResults": 100,
+				"fields":     fields,
+			}
+			if nextPageToken != "" {
+				reqBody["nextPageToken"] = nextPageToken
+			}
 
 			var resp SearchResponse
-			if err := c.get(ctx, path, &resp); err != nil {
+			if err := c.postDecode(ctx, "/rest/api/3/search/jql", reqBody, &resp); err != nil {
 				yield(nil, err)
 				return
 			}
@@ -177,33 +200,23 @@ func (c *Client) SearchAll(ctx context.Context, jql string, fields []string) fun
 				return
 			}
 
-			startAt += len(resp.Issues)
-			if startAt >= resp.Total {
+			if resp.NextPageToken == "" {
 				return
 			}
+			nextPageToken = resp.NextPageToken
 		}
 	}
 }
 
 // SearchCount returns the total number of issues matching a JQL query.
 func (c *Client) SearchCount(ctx context.Context, jql string) (int, error) {
-	path := fmt.Sprintf("/rest/api/3/search?jql=%s&maxResults=0", jqlEncode(jql))
-	var resp SearchResponse
-	if err := c.get(ctx, path, &resp); err != nil {
-		return 0, err
+	total := 0
+	for page, err := range c.SearchAll(ctx, jql, []string{"key"}) {
+		if err != nil {
+			return 0, err
+		}
+		total += len(page)
 	}
-	return resp.Total, nil
+	return total, nil
 }
 
-func jqlEncode(jql string) string {
-	return strings.NewReplacer(
-		" ", "%20",
-		"=", "%3D",
-		"\"", "%22",
-		"'", "%27",
-		">", "%3E",
-		"<", "%3C",
-		"(", "%28",
-		")", "%29",
-	).Replace(jql)
-}

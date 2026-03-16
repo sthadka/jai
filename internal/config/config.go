@@ -24,13 +24,24 @@ func DefaultDBPath() string {
 
 // Config holds the full jai configuration.
 type Config struct {
-	Jira   JiraConfig   `yaml:"jira"`
-	Sync   SyncConfig   `yaml:"sync"`
-	DB     DBConfig     `yaml:"db"`
-	Fields FieldsConfig `yaml:"fields"`
-	Views  []ViewConfig `yaml:"views"`
-	Me     string       `yaml:"me"`
-	Team   string       `yaml:"team"`
+	Jira        JiraConfig   `yaml:"jira"`
+	Sync        SyncConfig   `yaml:"sync"`
+	DB          DBConfig     `yaml:"db"`
+	Fields      FieldsConfig `yaml:"fields"`
+	Views       []ViewConfig `yaml:"views"`
+	Me          string       `yaml:"me"`
+	Team        string       `yaml:"team"`
+	SyncSources []SyncSource `yaml:"sync_sources"`
+}
+
+// SyncSource defines a named set of issues to sync.
+// Set JQL for a raw query, or Projects for a shorthand project-key list.
+// If both are set, JQL takes precedence.
+// If neither SyncSources nor jira.projects is set, sync_sources are derived from jira.projects.
+type SyncSource struct {
+	Name     string   `yaml:"name"`
+	JQL      string   `yaml:"jql"`
+	Projects []string `yaml:"projects"`
 }
 
 // JiraConfig holds Jira connection settings.
@@ -141,8 +152,8 @@ func (c *Config) Validate() error {
 	if c.Jira.Token == "" {
 		errs = append(errs, "jira.token is required (use ${JAI_TOKEN} env var)")
 	}
-	if len(c.Jira.Projects) == 0 {
-		errs = append(errs, "jira.projects is required (at least one project key)")
+	if len(c.Jira.Projects) == 0 && len(c.SyncSources) == 0 {
+		errs = append(errs, "either jira.projects or sync_sources is required")
 	}
 
 	if len(errs) > 0 {

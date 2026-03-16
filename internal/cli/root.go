@@ -118,7 +118,7 @@ func runAutoSync(ctx context.Context) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	ch, err := g.sync.Sync(ctx, false)
+	ch, err := g.sync.Sync(ctx, false, "")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "auto-sync failed:", err)
 		return

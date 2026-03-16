@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -14,12 +15,14 @@ import (
 )
 
 // Progress reports sync progress for a project.
+// Done=false means an intermediate update; Done=true means the project finished.
 type Progress struct {
 	Project string
 	New     int
 	Updated int
 	Total   int
 	Error   error
+	Done    bool
 }
 
 // Engine orchestrates Jira sync operations.
@@ -41,12 +44,31 @@ func (e *Engine) DiscoverFields(ctx context.Context, overrides map[string]string
 		return fmt.Errorf("fetching fields: %w", err)
 	}
 
+	// Pre-load existing name→jiraID mapping so we can detect true collisions
+	// (same name owned by a different field) and disambiguate rather than skip.
+	existing, _ := e.db.FieldMapByJiraID()
+	takenNames := make(map[string]string, len(existing)) // name → jiraID
+	for id, f := range existing {
+		takenNames[f.Name] = id
+	}
+
 	for _, f := range fields {
 		if f.Schema == nil {
 			continue
 		}
 		name := inferColumnName(f, overrides)
 		fieldType := jiraSchemaToType(f.Schema)
+
+		// If this name is already owned by a different field, append a suffix
+		// derived from the jira_id to make it unique.
+		if ownerID, taken := takenNames[name]; taken && ownerID != f.ID {
+			suffix := f.ID
+			if strings.HasPrefix(suffix, "customfield_") {
+				suffix = suffix[len("customfield_"):]
+			}
+			name = name + "_" + suffix
+		}
+		takenNames[name] = f.ID
 
 		mapping := &db.FieldMapping{
 			JiraID:     f.ID,
@@ -62,67 +84,111 @@ func (e *Engine) DiscoverFields(ctx context.Context, overrides map[string]string
 		}
 
 		if err := e.db.UpsertFieldMapping(mapping); err != nil {
-			return fmt.Errorf("upserting field %s: %w", f.ID, err)
+			// Non-fatal: log and continue so one bad field doesn't abort discovery.
+			fmt.Fprintf(os.Stderr, "warning: skipping field %s (%s): %v\n", f.ID, name, err)
+			continue
 		}
 	}
 	return nil
 }
 
-// Sync runs an incremental sync for all configured projects.
-// It sends progress updates over the returned channel (closed when done).
-func (e *Engine) Sync(ctx context.Context, full bool) (<-chan Progress, error) {
-	ch := make(chan Progress, len(e.cfg.Jira.Projects))
+// effectiveSources returns the sync sources to run, optionally filtered to a
+// single source by name. If no sync_sources are configured, one source per
+// entry in jira.projects is generated for backward compatibility.
+func effectiveSources(cfg *config.Config, filter string) ([]config.SyncSource, error) {
+	sources := cfg.SyncSources
+	if len(sources) == 0 {
+		for _, p := range cfg.Jira.Projects {
+			sources = append(sources, config.SyncSource{
+				Name:     p,
+				Projects: []string{p},
+			})
+		}
+	}
+	if filter == "" {
+		return sources, nil
+	}
+	for _, s := range sources {
+		if s.Name == filter {
+			return []config.SyncSource{s}, nil
+		}
+	}
+	return nil, fmt.Errorf("sync source %q not found", filter)
+}
 
+// sourceJQL builds the base JQL for a SyncSource.
+func sourceJQL(s config.SyncSource) string {
+	if s.JQL != "" {
+		return s.JQL
+	}
+	quoted := make([]string, len(s.Projects))
+	for i, p := range s.Projects {
+		quoted[i] = `"` + p + `"`
+	}
+	return `project in (` + strings.Join(quoted, ", ") + `)`
+}
+
+// Sync runs a sync for all configured sources (or a single named one).
+// It sends intermediate Progress updates (Done=false) as pages arrive,
+// and a final Progress (Done=true) when each source finishes.
+// The channel is closed when all sources are done.
+func (e *Engine) Sync(ctx context.Context, full bool, sourceFilter string) (<-chan Progress, error) {
+	sources, err := effectiveSources(e.cfg, sourceFilter)
+	if err != nil {
+		return nil, err
+	}
+
+	ch := make(chan Progress, 64)
 	go func() {
 		defer close(ch)
-		for _, project := range e.cfg.Jira.Projects {
-			p := e.syncProject(ctx, project, full)
-			ch <- p
+		for _, src := range sources {
+			e.syncSource(ctx, src, full, ch)
 		}
 	}()
-
 	return ch, nil
 }
 
-func (e *Engine) syncProject(ctx context.Context, project string, full bool) Progress {
+func (e *Engine) syncSource(ctx context.Context, src config.SyncSource, full bool, ch chan<- Progress) {
 	start := time.Now()
 
 	fieldMap, err := e.db.FieldMapByJiraID()
 	if err != nil {
-		return Progress{Project: project, Error: fmt.Errorf("loading field map: %w", err)}
+		ch <- Progress{Project: src.Name, Error: fmt.Errorf("loading field map: %w", err), Done: true}
+		return
 	}
 
 	// Ensure custom field columns exist.
 	if err := e.ensureCustomColumns(fieldMap); err != nil {
-		return Progress{Project: project, Error: err}
+		ch <- Progress{Project: src.Name, Error: err, Done: true}
+		return
 	}
 
+	base := sourceJQL(src)
 	var jql string
 	if full {
-		jql = fmt.Sprintf(`project = "%s" ORDER BY updated ASC`, project)
+		jql = base + ` ORDER BY updated ASC`
 	} else {
-		meta, err := e.db.GetSyncMeta(project)
+		meta, err := e.db.GetSyncMeta(src.Name)
 		if err != nil {
-			return Progress{Project: project, Error: fmt.Errorf("loading sync meta: %w", err)}
+			ch <- Progress{Project: src.Name, Error: fmt.Errorf("loading sync meta: %w", err), Done: true}
+			return
 		}
-
 		if meta.LastSyncTime.Valid && meta.LastSyncTime.String != "" {
-			jql = fmt.Sprintf(`project = "%s" AND updated >= "%s" ORDER BY updated ASC`, project, meta.LastSyncTime.String)
+			jql = fmt.Sprintf(`(%s) AND updated >= "%s" ORDER BY updated ASC`, base, meta.LastSyncTime.String)
 		} else {
-			// First sync: fetch all.
-			jql = fmt.Sprintf(`project = "%s" ORDER BY updated ASC`, project)
+			jql = base + ` ORDER BY updated ASC`
 		}
 	}
 
 	fields := e.expandFields(fieldMap)
-
 	var newCount, updatedCount, total int
 
 	for page, err := range e.client.SearchAll(ctx, jql, fields) {
 		if err != nil {
 			elapsed := time.Since(start).Seconds()
-			_ = e.db.UpdateSyncMeta(project, elapsed, total, newCount+updatedCount, err.Error())
-			return Progress{Project: project, New: newCount, Updated: updatedCount, Total: total, Error: err}
+			_ = e.db.UpdateSyncMeta(src.Name, elapsed, total, newCount+updatedCount, err.Error())
+			ch <- Progress{Project: src.Name, New: newCount, Updated: updatedCount, Total: total, Error: err, Done: true}
+			return
 		}
 
 		for _, apiIssue := range page {
@@ -148,7 +214,6 @@ func (e *Engine) syncProject(ctx context.Context, project string, full bool) Pro
 				continue
 			}
 
-			// Extract and store comments.
 			comments, err := ExtractComments(apiIssue.Key, rawBytes)
 			if err == nil {
 				for _, c := range comments {
@@ -159,24 +224,26 @@ func (e *Engine) syncProject(ctx context.Context, project string, full bool) Pro
 				}
 			}
 		}
+
+		// Emit an intermediate update after each page.
+		ch <- Progress{Project: src.Name, New: newCount, Updated: updatedCount, Total: total}
 	}
 
-	// Run deletion detection on full sync.
-	if full {
-		deleted, err := DetectDeletions(ctx, e.db, e.client, project)
-		if err != nil {
-			// Non-fatal: log and continue.
-			_ = err
-		} else {
-			_ = deleted
+	// Run deletion detection on full sync for project-keyed sources only.
+	// JQL sources have no reliable scope to diff against.
+	if full && src.JQL == "" {
+		for _, project := range src.Projects {
+			if _, err := DetectDeletions(ctx, e.db, e.client, project); err != nil {
+				_ = err // non-fatal
+			}
 		}
-		_ = e.db.UpdateFullSyncMeta(project)
+		_ = e.db.UpdateFullSyncMeta(src.Name)
 	}
 
 	elapsed := time.Since(start).Seconds()
-	_ = e.db.UpdateSyncMeta(project, elapsed, total, newCount+updatedCount, "")
+	_ = e.db.UpdateSyncMeta(src.Name, elapsed, total, newCount+updatedCount, "")
 
-	return Progress{Project: project, New: newCount, Updated: updatedCount, Total: total}
+	ch <- Progress{Project: src.Name, New: newCount, Updated: updatedCount, Total: total, Done: true}
 }
 
 // ensureCustomColumns creates columns in the issues table for custom fields that don't have one yet.
@@ -224,6 +291,10 @@ func inferColumnName(f *jira.Field, overrides map[string]string) string {
 	name = strings.Trim(name, "_")
 	if name == "" {
 		name = strings.ToLower(f.ID)
+	}
+	// SQLite identifiers cannot start with a digit.
+	if len(name) > 0 && name[0] >= '0' && name[0] <= '9' {
+		name = "_" + name
 	}
 	return name
 }

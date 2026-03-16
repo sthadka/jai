@@ -136,6 +136,6 @@ func (db *DB) EnsureColumn(name, colType string) error {
 		}
 	}
 
-	_, err = db.Exec(fmt.Sprintf("ALTER TABLE issues ADD COLUMN %s %s", name, colType))
+	_, err = db.Exec(fmt.Sprintf(`ALTER TABLE issues ADD COLUMN "%s" %s`, name, colType))
 	return err
 }

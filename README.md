@@ -264,6 +264,15 @@ fields:
 
 `jai init` generates this file interactively.
 
+**Data files:**
+
+| File | Default path |
+|------|-------------|
+| Config | `~/.config/jai/config.yaml` |
+| Database | `~/.local/share/jai/jai.db` |
+
+Both paths can be overridden with `--config` and `--db` flags, or by setting `db.path` in the config file.
+
 **Custom fields** are auto-discovered from Jira's field metadata API during the first sync. Run `jai fields` to see all available columns with their Jira IDs, types, and FTS flags. Override any name in config if the auto-inferred name isn't right.
 
 ---
