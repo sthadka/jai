@@ -21,7 +21,7 @@ var searchCmd = &cobra.Command{
 			FROM issues_fts
 			JOIN issues i ON i.key = issues_fts.key
 			WHERE issues_fts MATCH ?
-			ORDER BY rank
+			ORDER BY issues_fts.rank
 			LIMIT %d`, searchLimit)
 
 		results, err := g.query.Execute(sql, text)
