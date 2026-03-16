@@ -16,13 +16,16 @@ import (
 
 // Progress reports sync progress for a project.
 // Done=false means an intermediate update; Done=true means the project finished.
+// ResumedFrom is non-empty on the first event of a resumed sync, holding the
+// cursor timestamp the sync started from.
 type Progress struct {
-	Project string
-	New     int
-	Updated int
-	Total   int
-	Error   error
-	Done    bool
+	Project     string
+	New         int
+	Updated     int
+	Total       int
+	Error       error
+	Done        bool
+	ResumedFrom string
 }
 
 // Engine orchestrates Jira sync operations.
@@ -151,7 +154,13 @@ func sourceJQL(s config.SyncSource) string {
 // It sends intermediate Progress updates (Done=false) as pages arrive,
 // and a final Progress (Done=true) when each source finishes.
 // The channel is closed when all sources are done.
-func (e *Engine) Sync(ctx context.Context, full bool, sourceFilter string) (<-chan Progress, error) {
+// resume is only meaningful when full=true: if true, the sync continues from
+// the last saved cursor instead of starting over.
+func (e *Engine) Sync(ctx context.Context, full, resume bool, sourceFilter string) (<-chan Progress, error) {
+	if resume && !full {
+		return nil, fmt.Errorf("--resume requires --full")
+	}
+
 	sources, err := effectiveSources(e.cfg, sourceFilter)
 	if err != nil {
 		return nil, err
@@ -161,13 +170,13 @@ func (e *Engine) Sync(ctx context.Context, full bool, sourceFilter string) (<-ch
 	go func() {
 		defer close(ch)
 		for _, src := range sources {
-			e.syncSource(ctx, src, full, ch)
+			e.syncSource(ctx, src, full, resume, ch)
 		}
 	}()
 	return ch, nil
 }
 
-func (e *Engine) syncSource(ctx context.Context, src config.SyncSource, full bool, ch chan<- Progress) {
+func (e *Engine) syncSource(ctx context.Context, src config.SyncSource, full, resume bool, ch chan<- Progress) {
 	start := time.Now()
 
 	fieldMap, err := e.db.FieldMapByJiraID()
@@ -184,8 +193,23 @@ func (e *Engine) syncSource(ctx context.Context, src config.SyncSource, full boo
 
 	base := sourceJQL(src)
 	var jql string
+	var resumedFrom string
+
 	if full {
-		jql = base + ` ORDER BY updated ASC`
+		if resume {
+			cursor, err := e.db.GetResumeCursor(src.Name)
+			if err == nil && cursor != "" {
+				resumedFrom = cursor
+				jqlTime := cursorToJQL(cursor)
+				jql = fmt.Sprintf(`(%s) AND updated >= "%s" ORDER BY updated ASC`, base, jqlTime)
+			} else {
+				jql = base + ` ORDER BY updated ASC`
+			}
+		} else {
+			// Fresh full sync: discard any stale cursor.
+			_ = e.db.ClearResumeCursor(src.Name)
+			jql = base + ` ORDER BY updated ASC`
+		}
 	} else {
 		meta, err := e.db.GetSyncMeta(src.Name)
 		if err != nil {
@@ -201,9 +225,17 @@ func (e *Engine) syncSource(ctx context.Context, src config.SyncSource, full boo
 
 	fields := e.expandFields(fieldMap)
 	var newCount, updatedCount, total int
+	var lastUpdated string // max updated timestamp seen this run (for cursor)
+
+	// Emit an initial event so the display knows we're resuming.
+	ch <- Progress{Project: src.Name, ResumedFrom: resumedFrom}
 
 	for page, err := range e.client.SearchAll(ctx, jql, fields) {
 		if err != nil {
+			// Save cursor so the next --resume can pick up here.
+			if full && lastUpdated != "" {
+				_ = e.db.SetResumeCursor(src.Name, lastUpdated)
+			}
 			elapsed := time.Since(start).Seconds()
 			_ = e.db.UpdateSyncMeta(src.Name, elapsed, total, newCount+updatedCount, err.Error())
 			ch <- Progress{Project: src.Name, New: newCount, Updated: updatedCount, Total: total, Error: err, Done: true}
@@ -233,6 +265,11 @@ func (e *Engine) syncSource(ctx context.Context, src config.SyncSource, full boo
 				continue
 			}
 
+			// Track max updated for resume cursor.
+			if issue.Updated > lastUpdated {
+				lastUpdated = issue.Updated
+			}
+
 			comments, err := ExtractComments(apiIssue.Key, rawBytes)
 			if err == nil {
 				for _, c := range comments {
@@ -244,8 +281,18 @@ func (e *Engine) syncSource(ctx context.Context, src config.SyncSource, full boo
 			}
 		}
 
+		// Save cursor after each completed page so a restart can skip ahead.
+		if full && lastUpdated != "" {
+			_ = e.db.SetResumeCursor(src.Name, lastUpdated)
+		}
+
 		// Emit an intermediate update after each page.
 		ch <- Progress{Project: src.Name, New: newCount, Updated: updatedCount, Total: total}
+	}
+
+	// Sync completed successfully — clear the resume cursor.
+	if full {
+		_ = e.db.ClearResumeCursor(src.Name)
 	}
 
 	// Run deletion detection on full sync for project-keyed sources only.
@@ -268,6 +315,15 @@ func (e *Engine) syncSource(ctx context.Context, src config.SyncSource, full boo
 	_ = e.db.UpdateSyncMeta(src.Name, elapsed, total, newCount+updatedCount, "")
 
 	ch <- Progress{Project: src.Name, New: newCount, Updated: updatedCount, Total: total, Done: true}
+}
+
+// cursorToJQL converts an RFC3339 timestamp to the format Jira JQL expects.
+func cursorToJQL(cursor string) string {
+	t, err := time.Parse(time.RFC3339, cursor)
+	if err != nil {
+		return cursor
+	}
+	return t.UTC().Format("2006-01-02 15:04:05")
 }
 
 // ensureCustomColumns creates columns in the issues table for custom fields that don't have one yet.

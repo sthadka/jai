@@ -181,7 +181,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 	// Initial sync.
 	fmt.Printf("Syncing %d source(s) (this may take a few minutes)...\n", len(sources))
-	ch, err := engine.Sync(ctx, true, "")
+	ch, err := engine.Sync(ctx, true, false, "")
 	if err != nil {
 		return fmt.Errorf("sync failed: %w", err)
 	}

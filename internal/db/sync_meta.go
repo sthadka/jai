@@ -63,6 +63,36 @@ func (db *DB) UpdateFullSyncMeta(project string) error {
 	return err
 }
 
+// GetResumeCursor returns the stored resume cursor for a sync source (empty if none).
+func (db *DB) GetResumeCursor(source string) (string, error) {
+	var cursor sql.NullString
+	err := db.QueryRow(`SELECT resume_cursor FROM sync_metadata WHERE project = ?`, source).Scan(&cursor)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return cursor.String, nil
+}
+
+// SetResumeCursor stores a resume cursor for a sync source.
+func (db *DB) SetResumeCursor(source, cursor string) error {
+	_, err := db.Exec(`
+		INSERT INTO sync_metadata (project, resume_cursor)
+		VALUES (?, ?)
+		ON CONFLICT(project) DO UPDATE SET resume_cursor = excluded.resume_cursor`,
+		source, cursor,
+	)
+	return err
+}
+
+// ClearResumeCursor removes the resume cursor for a sync source.
+func (db *DB) ClearResumeCursor(source string) error {
+	_, err := db.Exec(`UPDATE sync_metadata SET resume_cursor = NULL WHERE project = ?`, source)
+	return err
+}
+
 // IssueCountBySource returns a map of source-name/project → live issue count
 // from the issues table. For project-keyed sources the project column is used;
 // sources whose name doesn't match any project key will have a zero count.

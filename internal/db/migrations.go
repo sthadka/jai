@@ -30,6 +30,14 @@ var migrations = []migration{
 			return err
 		},
 	},
+	{
+		version:     3,
+		description: "add resume_cursor to sync_metadata",
+		up: func(tx *sql.Tx) error {
+			_, err := tx.Exec(`ALTER TABLE sync_metadata ADD COLUMN resume_cursor TEXT`)
+			return err
+		},
+	},
 }
 
 // Migrate applies any pending schema migrations in order.
