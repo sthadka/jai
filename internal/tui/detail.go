@@ -410,14 +410,25 @@ func statusDot(status string) string {
 	return lipgloss.NewStyle().Foreground(color).Render("●")
 }
 
-// formatDateShort formats an RFC3339 date as a short human-readable string.
+// formatDateShort formats a date string as a short human-readable string.
+// Handles RFC3339, Jira Cloud's "+0000" timezone format, and date-only strings.
 func formatDateShort(s string) string {
 	if s == "" {
 		return ""
 	}
-	formats := []string{time.RFC3339, "2006-01-02T15:04:05Z", "2006-01-02"}
+	formats := []string{
+		time.RFC3339,
+		"2006-01-02T15:04:05Z",
+		"2006-01-02T15:04:05.999-0700", // Jira Cloud: millis + no-colon TZ
+		"2006-01-02T15:04:05.999Z07:00",
+		"2006-01-02T15:04:05-0700",
+		"2006-01-02",
+	}
 	for _, f := range formats {
 		if t, err := time.Parse(f, s); err == nil {
+			if t.IsZero() {
+				return ""
+			}
 			return t.Format("Jan 02, 2006")
 		}
 	}

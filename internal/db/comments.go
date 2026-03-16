@@ -25,8 +25,13 @@ func (db *DB) UpsertComment(c *Comment) error {
 
 // GetComments returns all comments for an issue, ordered by created time.
 func (db *DB) GetComments(issueKey string) ([]*Comment, error) {
+	// Use CAST(... AS TEXT) to bypass go-sqlite3's automatic DATETIME→time.Time
+	// conversion. Without this, Jira's "+0000" timezone format (no colon) fails
+	// go-sqlite3's timestamp parsers and the column scans as time.Time{} (zero),
+	// which then formats as "0001-01-01T00:00:00Z" and displays as "Jan 01, 0001".
 	rows, err := db.Query(
-		`SELECT id, issue_key, author, author_email, body, created, updated
+		`SELECT id, issue_key, author, author_email, body,
+		 CAST(created AS TEXT), CAST(updated AS TEXT)
 		 FROM comments WHERE issue_key = ? ORDER BY created`,
 		issueKey,
 	)
