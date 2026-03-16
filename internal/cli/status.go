@@ -22,9 +22,11 @@ var statusCmd = &cobra.Command{
 			return err
 		}
 
+		issueCounts, _ := g.db.IssueCountBySource()
+
 		pendingCount, err := g.db.CountPendingChanges()
 		if err != nil {
-			pendingCount = -1
+			pendingCount = 0
 		}
 
 		dbInfo, _ := os.Stat(g.cfg.DB.Path)
@@ -35,8 +37,7 @@ var statusCmd = &cobra.Command{
 				projects[i] = map[string]interface{}{
 					"project":            m.Project,
 					"last_sync_time":     m.LastSyncTime.String,
-					"issues_total":       m.IssuesTotal.Int64,
-					"issues_synced":      m.IssuesSynced.Int64,
+					"issues_count":       issueCounts[m.Project],
 					"last_sync_duration": m.LastSyncDuration.Float64,
 					"last_sync_error":    m.LastSyncError.String,
 				}
@@ -62,7 +63,7 @@ var statusCmd = &cobra.Command{
 				}
 			}
 			fmt.Printf("  %s: %d issues, last sync %s\n",
-				m.Project, m.IssuesSynced.Int64, lastSync)
+				m.Project, issueCounts[m.Project], lastSync)
 			if m.LastSyncError.Valid && m.LastSyncError.String != "" {
 				fmt.Printf("    Error: %s\n", m.LastSyncError.String)
 			}

@@ -63,6 +63,27 @@ func (db *DB) UpdateFullSyncMeta(project string) error {
 	return err
 }
 
+// IssueCountBySource returns a map of source-name/project → live issue count
+// from the issues table. For project-keyed sources the project column is used;
+// sources whose name doesn't match any project key will have a zero count.
+func (db *DB) IssueCountBySource() (map[string]int, error) {
+	rows, err := db.Query(`SELECT project, COUNT(*) FROM issues GROUP BY project`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	counts := make(map[string]int)
+	for rows.Next() {
+		var proj string
+		var n int
+		if err := rows.Scan(&proj, &n); err != nil {
+			return nil, err
+		}
+		counts[proj] = n
+	}
+	return counts, rows.Err()
+}
+
 // AllSyncMeta returns sync metadata for all projects.
 func (db *DB) AllSyncMeta() ([]*SyncMeta, error) {
 	rows, err := db.Query(

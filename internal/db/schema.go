@@ -100,6 +100,17 @@ func createSchema(tx *sql.Tx) error {
 			('story_points', 'Story Points',    'story_points',   'number',   0, 1, 0)
 		`,
 
+		`CREATE TABLE IF NOT EXISTS pending_changes (
+			id          INTEGER PRIMARY KEY AUTOINCREMENT,
+			issue_key   TEXT NOT NULL,
+			operation   TEXT NOT NULL,
+			payload     TEXT NOT NULL,
+			created_at  DATETIME NOT NULL DEFAULT (datetime('now')),
+			synced_at   DATETIME,
+			retry_count INTEGER NOT NULL DEFAULT 0,
+			last_error  TEXT
+		)`,
+
 		`CREATE VIRTUAL TABLE IF NOT EXISTS issues_fts USING fts5(
 			key UNINDEXED,
 			summary,
