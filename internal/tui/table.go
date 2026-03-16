@@ -104,15 +104,16 @@ func (t *TableModel) SetFilter(text string) {
 	}
 
 	lower := strings.ToLower(text)
-	t.filtered = t.filtered[:0]
+	filtered := make([][]string, 0, len(t.rows))
 	for _, row := range t.rows {
 		for _, cell := range row {
 			if strings.Contains(strings.ToLower(cell), lower) {
-				t.filtered = append(t.filtered, row)
+				filtered = append(filtered, row)
 				break
 			}
 		}
 	}
+	t.filtered = filtered
 	t.cursor = 0
 	t.offset = 0
 }
