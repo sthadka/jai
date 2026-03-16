@@ -3,6 +3,8 @@ package cli
 import (
 	"context"
 	"fmt"
+	"os"
+	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -39,48 +41,93 @@ var syncCmd = &cobra.Command{
 }
 
 // displaySyncProgress consumes the sync progress channel, rendering a live
-// progress line per project. Returns total issues synced across all projects.
+// spinner line per source. The spinner runs on its own 80ms ticker so it
+// keeps moving even between Jira page responses. Rate is computed from
+// deltas so it stabilises quickly instead of averaging from t=0.
+// Returns total issues synced across all sources.
 func displaySyncProgress(ch <-chan synce.Progress) int {
 	spinners := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
-
-	type state struct {
-		start   time.Time
-		current synce.Progress
-		spin    int
-	}
-	states := make(map[string]*state)
-
+	spinIdx := 0
 	total := 0
-	for p := range ch {
-		s, ok := states[p.Project]
-		if !ok {
-			s = &state{start: time.Now()}
-			states[p.Project] = s
-		}
-		s.current = p
 
-		if p.Done {
-			if p.Error != nil {
-				fmt.Printf("\r  %-6s ERROR %v\n", p.Project+":", p.Error)
-			} else {
-				elapsed := time.Since(s.start).Round(time.Millisecond * 100)
-				fmt.Printf("\r  %-6s %d issues (%d new, %d updated) in %s\n",
-					p.Project+":", p.Total, p.New, p.Updated, elapsed)
-				total += p.New + p.Updated
+	// curSource holds the state of the currently-syncing source.
+	// Done sources are printed immediately by the drain goroutine.
+	type curSource struct {
+		name      string
+		total     int
+		rate      float64 // issues/sec (delta-based, not cumulative)
+		lastTotal int
+		lastT     time.Time
+		start     time.Time
+	}
+
+	var mu sync.Mutex
+	var cur *curSource
+	allDone := make(chan struct{})
+
+	// Drain goroutine: receives progress events and updates shared state.
+	// For Done events it also prints the final line (holding mu to avoid
+	// interleaving with the ticker's \r updates).
+	go func() {
+		defer close(allDone)
+		for p := range ch {
+			mu.Lock()
+
+			// New source started (sources are sequential).
+			if cur == nil || cur.name != p.Project {
+				now := time.Now()
+				cur = &curSource{name: p.Project, start: now, lastT: now}
 			}
-		} else {
-			elapsed := time.Since(s.start).Seconds()
-			rate := 0.0
-			if elapsed > 0 {
-				rate = float64(p.Total) / elapsed
+
+			// Delta rate: only update when ≥500ms have elapsed and count grew.
+			now := time.Now()
+			if dt := now.Sub(cur.lastT).Seconds(); dt >= 0.5 && p.Total > cur.lastTotal {
+				cur.rate = float64(p.Total-cur.lastTotal) / dt
+				cur.lastTotal = p.Total
+				cur.lastT = now
 			}
-			spin := spinners[s.spin%len(spinners)]
-			s.spin++
-			fmt.Printf("\r  %s %-6s %d issues @ %.0f/s   ",
-				spin, p.Project, p.Total, rate)
+			cur.total = p.Total
+
+			if p.Done {
+				c := cur
+				cur = nil
+				elapsed := time.Since(c.start).Round(100 * time.Millisecond)
+				if p.Error != nil {
+					fmt.Fprintf(os.Stderr, "\r  ✗ %-25s ERROR: %v\033[K\n", c.name, p.Error)
+				} else {
+					fmt.Fprintf(os.Stderr, "\r  ✓ %-25s %d issues (%d new, %d updated) in %s\033[K\n",
+						c.name, p.Total, p.New, p.Updated, elapsed)
+					total += p.New + p.Updated
+				}
+			}
+
+			mu.Unlock()
+		}
+	}()
+
+	ticker := time.NewTicker(80 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			mu.Lock()
+			if cur != nil {
+				spin := spinners[spinIdx%len(spinners)]
+				rateStr := ""
+				if cur.rate > 0 {
+					rateStr = fmt.Sprintf("  %.0f/s", cur.rate)
+				}
+				fmt.Fprintf(os.Stderr, "\r  %s %-25s %d issues%s\033[K",
+					spin, cur.name, cur.total, rateStr)
+				spinIdx++
+			}
+			mu.Unlock()
+
+		case <-allDone:
+			return total
 		}
 	}
-	return total
 }
 
 func init() {
