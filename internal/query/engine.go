@@ -28,8 +28,13 @@ func New(database *db.DB, cfg *config.Config) *Engine {
 }
 
 // Execute runs a SQL query with template variable resolution.
+// Only SELECT and WITH (CTE) statements are permitted; write operations
+// are rejected to protect the local database from accidental mutation.
 func (e *Engine) Execute(sql string, args ...interface{}) (*Results, error) {
 	resolved := e.resolveTemplates(sql)
+	if err := requireReadOnly(resolved); err != nil {
+		return nil, err
+	}
 
 	rows, err := e.db.Query(resolved, args...)
 	if err != nil {
@@ -65,6 +70,15 @@ func (e *Engine) Execute(sql string, args ...interface{}) (*Results, error) {
 		Rows:    resultRows,
 		Count:   len(resultRows),
 	}, nil
+}
+
+// requireReadOnly returns an error if sql is not a SELECT or WITH statement.
+func requireReadOnly(sql string) error {
+	first := strings.ToUpper(strings.TrimSpace(sql))
+	if strings.HasPrefix(first, "SELECT") || strings.HasPrefix(first, "WITH") {
+		return nil
+	}
+	return fmt.Errorf("only SELECT queries are allowed; use 'jai set', 'jai comment', or 'jai push' for writes")
 }
 
 // resolveTemplates replaces {{variable}} placeholders with their values.
