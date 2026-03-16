@@ -61,8 +61,6 @@ func runInit(cmd *cobra.Command, args []string) error {
 			return existing.Jira.Email
 		case "token":
 			return existing.Jira.Token
-		case "projects":
-			return strings.Join(existing.Jira.Projects, ",")
 		}
 		return ""
 	}
@@ -98,21 +96,48 @@ func runInit(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Printf("Connected as %s\n\n", me.DisplayName)
 
-	// Project keys.
-	projectsStr := prompt(reader, "Project keys (comma-separated, e.g. ROX,ACS)", defaults("projects"))
-	var projects []string
-	for _, p := range strings.Split(projectsStr, ",") {
-		p = strings.TrimSpace(strings.ToUpper(p))
-		if p != "" {
-			projects = append(projects, p)
+	// Sync sources.
+	fmt.Println("Sync sources define which Jira issues to sync.")
+	fmt.Println("Each source needs a name and a JQL filter.")
+	fmt.Println("Example JQL: project = ROX")
+	fmt.Println("             project in (ROX, ACS) AND team = \"Platform\"")
+	fmt.Println()
+
+	var sources []config.SyncSource
+	// Pre-populate from existing config if present.
+	if existing != nil && len(existing.SyncSources) > 0 {
+		fmt.Println("Existing sync sources (press Enter to keep each):")
+		for _, s := range existing.SyncSources {
+			name := prompt(reader, "  Source name", s.Name)
+			jql := prompt(reader, "  JQL filter", s.JQL)
+			if name != "" && jql != "" {
+				sources = append(sources, config.SyncSource{Name: name, JQL: jql})
+			}
 		}
 	}
-	if len(projects) == 0 {
-		return fmt.Errorf("at least one project is required")
+
+	for {
+		if len(sources) > 0 {
+			addMore := prompt(reader, "Add another source?", "n")
+			if !strings.HasPrefix(strings.ToLower(addMore), "y") {
+				break
+			}
+		}
+		name := prompt(reader, "  Source name (e.g. my-team)", "")
+		jql := prompt(reader, "  JQL filter (e.g. project = ROX)", "")
+		if name == "" || jql == "" {
+			fmt.Println("  Both name and JQL are required — skipping.")
+			continue
+		}
+		sources = append(sources, config.SyncSource{Name: name, JQL: jql})
+	}
+
+	if len(sources) == 0 {
+		return fmt.Errorf("at least one sync source is required")
 	}
 
 	// Build config content.
-	cfgContent := buildConfigYAML(jiraURL, email, me.EmailAddress, projects)
+	cfgContent := buildConfigYAML(jiraURL, email, me.EmailAddress, sources)
 
 	// Write config file.
 	cfgPath := config.DefaultConfigPath()
@@ -128,14 +153,14 @@ func runInit(cmd *cobra.Command, args []string) error {
 	// Build a minimal config struct for sync.
 	cfg := &config.Config{
 		Jira: config.JiraConfig{
-			URL:      jiraURL,
-			Email:    email,
-			Token:    token,
-			Projects: projects,
+			URL:   jiraURL,
+			Email: email,
+			Token: token,
 		},
-		Sync: config.SyncConfig{Interval: "15m", RateLimit: 10},
-		Me:   me.EmailAddress,
-		DB:   config.DBConfig{Path: config.DefaultDBPath()},
+		SyncSources: sources,
+		Sync:        config.SyncConfig{Interval: "15m", RateLimit: 10},
+		Me:          me.EmailAddress,
+		DB:          config.DBConfig{Path: config.DefaultDBPath()},
 	}
 
 	// Open database.
@@ -155,7 +180,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	}
 
 	// Initial sync.
-	fmt.Printf("Syncing %d source(s) (this may take a few minutes)...\n", len(projects))
+	fmt.Printf("Syncing %d source(s) (this may take a few minutes)...\n", len(sources))
 	ch, err := engine.Sync(ctx, true, "")
 	if err != nil {
 		return fmt.Errorf("sync failed: %w", err)
@@ -170,18 +195,19 @@ func runInit(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func buildConfigYAML(jiraURL, email, meEmail string, projects []string) string {
+func buildConfigYAML(jiraURL, email, meEmail string, sources []config.SyncSource) string {
 	var sb strings.Builder
 	sb.WriteString("jira:\n")
 	sb.WriteString(fmt.Sprintf("  url: %s\n", jiraURL))
 	sb.WriteString(fmt.Sprintf("  email: %s\n", email))
 	sb.WriteString("  token: ${JAI_TOKEN}\n")
-	sb.WriteString("  projects:\n")
-	for _, p := range projects {
-		sb.WriteString(fmt.Sprintf("    - %s\n", p))
-	}
 	sb.WriteString("\nsync:\n  interval: 15m\n  rate_limit: 10\n")
 	sb.WriteString(fmt.Sprintf("\nme: %s\n", meEmail))
+	sb.WriteString("\nsync_sources:\n")
+	for _, s := range sources {
+		sb.WriteString(fmt.Sprintf("  - name: %s\n", s.Name))
+		sb.WriteString(fmt.Sprintf("    jql: %s\n", s.JQL))
+	}
 	sb.WriteString(`
 views:
   - name: my-work

@@ -46,10 +46,9 @@ type SyncSource struct {
 
 // JiraConfig holds Jira connection settings.
 type JiraConfig struct {
-	URL      string   `yaml:"url"`
-	Email    string   `yaml:"email"`
-	Token    string   `yaml:"token"`
-	Projects []string `yaml:"projects"`
+	URL   string `yaml:"url"`
+	Email string `yaml:"email"`
+	Token string `yaml:"token"`
 }
 
 // SyncConfig holds sync behavior settings.
@@ -152,8 +151,8 @@ func (c *Config) Validate() error {
 	if c.Jira.Token == "" {
 		errs = append(errs, "jira.token is required (use ${JAI_TOKEN} env var)")
 	}
-	if len(c.Jira.Projects) == 0 && len(c.SyncSources) == 0 {
-		errs = append(errs, "either jira.projects or sync_sources is required")
+	if len(c.SyncSources) == 0 {
+		errs = append(errs, "sync_sources is required — run 'jai init' to configure")
 	}
 
 	if len(errs) > 0 {

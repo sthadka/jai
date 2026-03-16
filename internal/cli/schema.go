@@ -2,6 +2,8 @@ package cli
 
 import (
 	"fmt"
+	"regexp"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/sthadka/jai/internal/output"
@@ -139,6 +141,110 @@ var schemaCmd = &cobra.Command{
 	},
 }
 
+// schemaDBCmd returns a compact representation of the issues table for AI agents.
+var schemaDBCmd = &cobra.Command{
+	Use:   "db",
+	Short: "Show database schema (for AI agents)",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		rows, err := g.db.Query("PRAGMA table_info(issues)")
+		if err != nil {
+			fmt.Println(string(output.Err("QueryError", err.Error())))
+			return nil
+		}
+		defer rows.Close()
+
+		type col struct {
+			Name    string `json:"name"`
+			Type    string `json:"type"`
+			Custom  bool   `json:"custom,omitempty"`
+		}
+
+		var columns []col
+		for rows.Next() {
+			var cid int
+			var name, colType string
+			var notNull int
+			var dflt interface{}
+			var pk int
+			if err := rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
+				continue
+			}
+			if name == "raw_json" || name == "comments_text" || name == "synced_at" {
+				continue
+			}
+			columns = append(columns, col{Name: name, Type: strings.ToLower(colType)})
+		}
+		rows.Close()
+
+		// Mark custom columns from field_map.
+		customRows, err := g.db.Query("SELECT name FROM field_map WHERE is_custom = 1 AND is_column = 1")
+		if err == nil {
+			customNames := map[string]bool{}
+			for customRows.Next() {
+				var n string
+				if err := customRows.Scan(&n); err == nil {
+					customNames[n] = true
+				}
+			}
+			customRows.Close()
+			for i, c := range columns {
+				if customNames[c.Name] {
+					columns[i].Custom = true
+				}
+			}
+		}
+
+		fmt.Println(string(output.OK(map[string]interface{}{
+			"table":   "issues",
+			"columns": columns,
+			"hint":    "Use 'jai schema values <column>' to see distinct values for any column",
+		})))
+		return nil
+	},
+}
+
+// safeColumnRe matches valid SQLite column names.
+var safeColumnRe = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
+
+// schemaValuesCmd returns distinct values for a column in the issues table.
+var schemaValuesCmd = &cobra.Command{
+	Use:   "values <column>",
+	Short: "List distinct values for a column (for AI agents)",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		col := args[0]
+		if !safeColumnRe.MatchString(col) {
+			fmt.Println(string(output.Err("InvalidColumn", "column name contains invalid characters")))
+			return nil
+		}
+
+		sql := fmt.Sprintf(`SELECT DISTINCT "%s" FROM issues WHERE "%s" IS NOT NULL AND "%s" != '' ORDER BY "%s" LIMIT 200`, col, col, col, col)
+		rows, err := g.db.Query(sql)
+		if err != nil {
+			fmt.Println(string(output.Err("QueryError", err.Error())))
+			return nil
+		}
+		defer rows.Close()
+
+		var values []interface{}
+		for rows.Next() {
+			var v interface{}
+			if err := rows.Scan(&v); err == nil {
+				values = append(values, v)
+			}
+		}
+
+		fmt.Println(string(output.OK(map[string]interface{}{
+			"column": col,
+			"values": values,
+			"count":  len(values),
+		})))
+		return nil
+	},
+}
+
 func init() {
+	schemaCmd.AddCommand(schemaDBCmd)
+	schemaCmd.AddCommand(schemaValuesCmd)
 	rootCmd.AddCommand(schemaCmd)
 }

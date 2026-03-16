@@ -38,6 +38,8 @@ var noAutoSync = map[string]bool{
 	"sync":       true,
 	"init":       true,
 	"schema":     true,
+	"db":         true, // schema db sub-command
+	"values":     true, // schema values sub-command
 	"fields":     true,
 	"completion": true,
 	"help":       true,
@@ -94,15 +96,15 @@ func newRootCmd() *cobra.Command {
 
 var rootCmd = newRootCmd()
 
-// shouldAutoSync returns true if any project's last sync is older than the configured interval.
+// shouldAutoSync returns true if any sync source's last sync is older than the configured interval.
 func shouldAutoSync(database *db.DB, cfg *config.Config) bool {
 	interval, err := time.ParseDuration(cfg.Sync.Interval)
 	if err != nil {
 		interval = 15 * time.Minute
 	}
 
-	for _, project := range cfg.Jira.Projects {
-		meta, err := database.GetSyncMeta(project)
+	for _, src := range cfg.SyncSources {
+		meta, err := database.GetSyncMeta(src.Name)
 		if err != nil || !meta.LastSyncTime.Valid || meta.LastSyncTime.String == "" {
 			return true
 		}

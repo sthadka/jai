@@ -93,18 +93,9 @@ func (e *Engine) DiscoverFields(ctx context.Context, overrides map[string]string
 }
 
 // effectiveSources returns the sync sources to run, optionally filtered to a
-// single source by name. If no sync_sources are configured, one source per
-// entry in jira.projects is generated for backward compatibility.
+// single source by name.
 func effectiveSources(cfg *config.Config, filter string) ([]config.SyncSource, error) {
 	sources := cfg.SyncSources
-	if len(sources) == 0 {
-		for _, p := range cfg.Jira.Projects {
-			sources = append(sources, config.SyncSource{
-				Name:     p,
-				Projects: []string{p},
-			})
-		}
-	}
 	if filter == "" {
 		return sources, nil
 	}
