@@ -215,8 +215,8 @@ func ExtractComments(issueKey string, raw []byte) ([]*db.Comment, error) {
 			ID:       c.ID,
 			IssueKey: issueKey,
 			Body:     jira.ADFToPlaintext(c.Body),
-			Created:  c.Created,
-			Updated:  c.Updated,
+			Created:  normalizeDate(c.Created),
+			Updated:  normalizeDate(c.Updated),
 		}
 		if c.Author != nil {
 			dbC.Author = c.Author.DisplayName

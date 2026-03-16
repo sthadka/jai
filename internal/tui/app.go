@@ -51,8 +51,7 @@ type App struct {
 	fieldPickerChosen   *db.FieldMapping
 	fieldValueInput       textinput.Model
 	fieldValueCurrent     string
-	fieldValueSuggestions []string // distinct existing values for chosen field
-	fieldValueSugFiltered []string // filtered by current input
+	fieldValueSugFiltered []string // DB-queried suggestions for the current input
 	fieldValueSugCursor   int      // -1 = no suggestion highlighted
 
 	width  int
@@ -230,14 +229,28 @@ type fieldValuesLoadedMsg struct {
 	values []string
 }
 
-// loadFieldValuesCmd fetches distinct existing values for a field column.
-func (a *App) loadFieldValuesCmd(colName string) tea.Cmd {
+// loadFieldValuesCmd queries distinct existing values for a field column,
+// filtered live by the user's current input text. Each keystroke fires a
+// fresh DB query so there is no cap on the total number of distinct values.
+func (a *App) loadFieldValuesCmd(colName, filter string) tea.Cmd {
 	return func() tea.Msg {
-		q := fmt.Sprintf(
-			`SELECT DISTINCT "%s" FROM issues WHERE "%s" IS NOT NULL AND "%s" != '' ORDER BY 1 LIMIT 50`,
-			colName, colName, colName,
+		var (
+			q    string
+			args []interface{}
 		)
-		rows, err := a.database.Query(q)
+		if filter == "" {
+			q = fmt.Sprintf(
+				`SELECT DISTINCT "%s" FROM issues WHERE "%s" IS NOT NULL AND "%s" != '' ORDER BY 1 LIMIT 50`,
+				colName, colName, colName,
+			)
+		} else {
+			q = fmt.Sprintf(
+				`SELECT DISTINCT "%s" FROM issues WHERE "%s" LIKE ? ORDER BY 1 LIMIT 50`,
+				colName, colName,
+			)
+			args = []interface{}{"%" + filter + "%"}
+		}
+		rows, err := a.database.Query(q, args...)
 		if err != nil {
 			return fieldValuesLoadedMsg{}
 		}
@@ -251,22 +264,6 @@ func (a *App) loadFieldValuesCmd(colName string) tea.Cmd {
 		}
 		return fieldValuesLoadedMsg{values: vals}
 	}
-}
-
-// filterFieldValueSuggestions filters a.fieldValueSuggestions by the current input.
-func (a *App) filterFieldValueSuggestions() {
-	filter := strings.ToLower(a.fieldValueInput.Value())
-	if filter == "" {
-		a.fieldValueSugFiltered = a.fieldValueSuggestions
-		return
-	}
-	var out []string
-	for _, v := range a.fieldValueSuggestions {
-		if strings.Contains(strings.ToLower(v), filter) {
-			out = append(out, v)
-		}
-	}
-	a.fieldValueSugFiltered = out
 }
 
 // Update handles messages and key events.
@@ -310,8 +307,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case fieldValuesLoadedMsg:
-		a.fieldValueSuggestions = msg.values
-		a.filterFieldValueSuggestions()
+		a.fieldValueSugFiltered = msg.values
 		return a, nil
 
 	case SyncTickMsg:
@@ -458,11 +454,10 @@ func (a *App) handleKey(msg tea.KeyMsg, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 				}
 				a.fieldValueInput.SetValue("")
 				a.fieldValueInput.Focus()
-				a.fieldValueSuggestions = nil
 				a.fieldValueSugFiltered = nil
 				a.fieldValueSugCursor = -1
 				a.mode = ModeFieldValue
-				cmds = append(cmds, a.loadFieldValuesCmd(chosen.Name))
+				cmds = append(cmds, a.loadFieldValuesCmd(chosen.Name, ""))
 			}
 		default:
 			// Pass all other keys (letters, backspace, etc.) to the text input.
@@ -508,8 +503,10 @@ func (a *App) handleKey(msg tea.KeyMsg, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 			// Pass all other keys to the text input; typing resets suggestion cursor.
 			var cmd tea.Cmd
 			a.fieldValueInput, cmd = a.fieldValueInput.Update(msg)
-			a.filterFieldValueSuggestions()
 			a.fieldValueSugCursor = -1
+			if a.fieldPickerChosen != nil {
+				cmds = append(cmds, a.loadFieldValuesCmd(a.fieldPickerChosen.Name, a.fieldValueInput.Value()))
+			}
 			cmds = append(cmds, cmd)
 		}
 		return a, tea.Batch(cmds...)
