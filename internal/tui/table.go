@@ -262,9 +262,11 @@ func (t *TableModel) Render(height int) string {
 	return sb.String()
 }
 
-// computeWidths calculates column widths based on content, capped at reasonable sizes.
+// computeWidths calculates column widths. Fixed columns are capped; the first
+// "expand" column (summary or description) gets all remaining terminal width.
 func (t *TableModel) computeWidths() []int {
-	widths := make([]int, len(t.columns))
+	n := len(t.columns)
+	widths := make([]int, n)
 	for i, col := range t.columns {
 		widths[i] = len(col)
 	}
@@ -281,19 +283,59 @@ func (t *TableModel) computeWidths() []int {
 		}
 	}
 
-	// Cap: key=10, summary=60, others=20
-	caps := map[string]int{
-		"key": 12, "summary": 55, "description": 60,
+	// Find the column that should expand to fill available space.
+	expandCol := -1
+	for i, colName := range t.columns {
+		if colName == "summary" || colName == "description" {
+			expandCol = i
+			break
+		}
 	}
+
+	// Fixed caps for non-expand columns.
+	fixedCaps := map[string]int{"key": 12}
 	defaultCap := 25
 
+	naturalExpand := 0
+	if expandCol >= 0 {
+		naturalExpand = widths[expandCol]
+	}
+
 	for i, colName := range t.columns {
+		if i == expandCol {
+			continue
+		}
 		cap := defaultCap
-		if c, ok := caps[colName]; ok {
+		if c, ok := fixedCaps[colName]; ok {
 			cap = c
 		}
 		if widths[i] > cap {
 			widths[i] = cap
+		}
+	}
+
+	if expandCol >= 0 && t.width > 0 {
+		// Space used by fixed columns + 2-char separators between all columns.
+		used := (n - 1) * 2
+		for i, w := range widths {
+			if i != expandCol {
+				used += w
+			}
+		}
+		available := t.width - used
+		if available < 10 {
+			available = 10
+		}
+		// Don't pad beyond natural content width.
+		if naturalExpand < available {
+			widths[expandCol] = naturalExpand
+		} else {
+			widths[expandCol] = available
+		}
+	} else if expandCol >= 0 {
+		// No terminal width info — fall back to a reasonable cap.
+		if widths[expandCol] > 60 {
+			widths[expandCol] = 60
 		}
 	}
 
