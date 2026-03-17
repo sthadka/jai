@@ -327,6 +327,8 @@ func cursorToJQL(cursor string) string {
 }
 
 // ensureCustomColumns creates columns in the issues table for custom fields that don't have one yet.
+// It also updates the in-memory fieldMap so Denormalize sees is_column=true immediately on the
+// same sync run (otherwise the first sync after column creation would skip the field).
 func (e *Engine) ensureCustomColumns(fieldMap map[string]*db.FieldMapping) error {
 	for _, f := range fieldMap {
 		if !f.IsCustom || f.IsColumn {
@@ -339,6 +341,7 @@ func (e *Engine) ensureCustomColumns(fieldMap map[string]*db.FieldMapping) error
 		if err := e.db.MarkFieldAsColumn(f.JiraID); err != nil {
 			return err
 		}
+		f.IsColumn = true // update in-memory map so Denormalize uses it this run
 	}
 	return nil
 }

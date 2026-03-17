@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 	"github.com/sthadka/jai/internal/config"
@@ -14,6 +15,49 @@ import (
 	"github.com/sthadka/jai/internal/jira"
 	synce "github.com/sthadka/jai/internal/sync"
 )
+
+// ── ANSI helpers ──────────────────────────────────────────────────────────────
+
+const (
+	ansiReset  = "\033[0m"
+	ansiBold   = "\033[1m"
+	ansiDim    = "\033[2m"
+	ansiGreen  = "\033[32m"
+	ansiYellow = "\033[33m"
+	ansiCyan   = "\033[36m"
+	ansiRed    = "\033[31m"
+)
+
+func ansi(code, s string) string { return code + s + ansiReset }
+func bold(s string) string       { return ansi(ansiBold, s) }
+func dim(s string) string        { return ansi(ansiDim, s) }
+func green(s string) string      { return ansi(ansiGreen, s) }
+func cyan(s string) string       { return ansi(ansiCyan, s) }
+func yellow(s string) string     { return ansi(ansiYellow, s) }
+func red(s string) string        { return ansi(ansiRed, s) }
+
+func stepOK(msg string)   { fmt.Printf("  %s %s\n", green("✓"), msg) }
+func stepFail(msg string) { fmt.Printf("  %s %s\n", red("✗"), msg) }
+func stepInfo(msg string) { fmt.Printf("  %s %s\n", dim("→"), msg) }
+func stepWarn(msg string) { fmt.Printf("  %s %s\n", yellow("!"), msg) }
+
+// boxLine prints a box content row, padding to boxContentWidth visible columns.
+// colored is the ANSI-escaped string; visibleLen is its display width (no escape codes).
+const boxContentWidth = 42
+
+func boxLine(colored, plain string) {
+	padding := strings.Repeat(" ", boxContentWidth-utf8.RuneCountInString(plain))
+	fmt.Printf("  %s  %s%s%s\n", bold("│"), colored, padding, bold("│"))
+}
+
+const initStepTotal = 4
+
+func initStep(n int, label string) {
+	fmt.Printf("\n  %s %s\n", cyan(fmt.Sprintf("[%d/%d]", n, initStepTotal)), bold(label))
+	fmt.Printf("  %s\n", strings.Repeat("─", 44))
+}
+
+// ── Command ───────────────────────────────────────────────────────────────────
 
 var initCmd = &cobra.Command{
 	Use:   "init",
@@ -23,13 +67,12 @@ var initCmd = &cobra.Command{
 	RunE:              runInit,
 }
 
-// prompt prints a prompt with an optional default value and reads a line.
-// If the user presses Enter without input, the default is returned.
+// prompt prints a styled prompt with an optional default and reads a line.
 func prompt(reader *bufio.Reader, label, defaultVal string) string {
 	if defaultVal != "" {
-		fmt.Printf("%s [%s]: ", label, defaultVal)
+		fmt.Printf("  %s %s %s: ", cyan("?"), label, dim(fmt.Sprintf("[%s]", defaultVal)))
 	} else {
-		fmt.Printf("%s: ", label)
+		fmt.Printf("  %s %s: ", cyan("?"), label)
 	}
 	line, _ := reader.ReadString('\n')
 	line = strings.TrimSpace(line)
@@ -39,18 +82,27 @@ func prompt(reader *bufio.Reader, label, defaultVal string) string {
 	return line
 }
 
+// ── Wizard ────────────────────────────────────────────────────────────────────
+
 func runInit(cmd *cobra.Command, args []string) error {
 	reader := bufio.NewReader(os.Stdin)
+	ctx := context.Background()
 
-	fmt.Println("Welcome to jai! Let's get you set up.")
+	// ── Banner ────────────────────────────────────────────────────────────────
 	fmt.Println()
+	fmt.Printf("  %s\n", bold("╭────────────────────────────────────────────╮"))
+	boxLine(cyan(bold("jai — first-run setup")), "jai — first-run setup")
+	boxLine(dim("Query Jira with SQL"), "Query Jira with SQL")
+	fmt.Printf("  %s\n", bold("╰────────────────────────────────────────────╯"))
+	fmt.Println()
+	fmt.Printf("  All Jira data is synced locally — fast queries, no rate limits.\n")
 
-	// Load existing config if present, to pre-populate prompts.
+	// Load existing config to pre-populate prompts.
 	var existing *config.Config
 	if cfg, err := config.Load(config.DefaultConfigPath()); err == nil {
 		existing = cfg
 	}
-	defaults := func(field string) string {
+	defaultFor := func(field string) string {
 		if existing == nil {
 			return ""
 		}
@@ -65,133 +117,169 @@ func runInit(cmd *cobra.Command, args []string) error {
 		return ""
 	}
 
-	// Jira URL.
-	jiraURL := prompt(reader, "Jira URL (e.g. https://mycompany.atlassian.net)", defaults("url"))
+	// ── Step 1: Credentials ───────────────────────────────────────────────────
+	initStep(1, "Jira credentials")
 
-	// Email.
-	email := prompt(reader, "Email", defaults("email"))
+	jiraURL := prompt(reader, "Jira URL", defaultFor("url"))
+	email := prompt(reader, "Email", defaultFor("email"))
 
-	// API Token — show a placeholder if one is already set, never the actual value.
-	existingToken := defaults("token")
-	var tokenDefault string
+	existingToken := defaultFor("token")
+	tokenDefault := ""
 	if existingToken != "" {
-		tokenDefault = "<existing token — press Enter to keep>"
+		tokenDefault = "<existing — press Enter to keep>"
 	}
-	tokenInput := prompt(reader, "API Token (will be referenced as ${JAI_TOKEN})", tokenDefault)
-	var token string
+	tokenInput := prompt(reader, "API Token "+dim("(stored as ${JAI_TOKEN})"), tokenDefault)
+	token := tokenInput
 	if tokenInput == tokenDefault && existingToken != "" {
 		token = existingToken
-	} else {
-		token = tokenInput
 	}
 
-	// Test connection.
-	fmt.Print("Testing connection... ")
-	client := jira.New(jiraURL, email, token, 10)
-	ctx := context.Background()
-	me, err := client.MySelf(ctx)
+	// ── Step 2: Test connection ───────────────────────────────────────────────
+	initStep(2, "Test connection")
+
+	stepInfo("Connecting to " + bold(jiraURL) + "...")
+	jiraClient := jira.New(jiraURL, email, token, 10)
+	me, err := jiraClient.MySelf(ctx)
 	if err != nil {
-		fmt.Println("FAILED")
-		return fmt.Errorf("connection failed: %w\n\nCheck your URL, email, and API token", err)
+		stepFail("Connection failed: " + err.Error())
+		fmt.Println()
+		stepInfo("Check your URL, email, and API token and try again.")
+		return fmt.Errorf("connection failed: %w", err)
 	}
-	fmt.Printf("Connected as %s\n\n", me.DisplayName)
+	stepOK("Connected as " + bold(me.DisplayName))
+	stepOK("Account: " + dim(me.EmailAddress))
 
-	// Sync sources.
-	fmt.Println("Sync sources define which Jira issues to sync.")
-	fmt.Println("Each source needs a name and a JQL filter.")
-	fmt.Println("Example JQL: project = ROX")
-	fmt.Println("             project in (ROX, ACS) AND team = \"Platform\"")
+	// Write config file.
+	cfgPath := config.DefaultConfigPath()
+	if err := os.MkdirAll(filepath.Dir(cfgPath), 0700); err != nil {
+		stepFail("Could not create config directory: " + err.Error())
+		return fmt.Errorf("creating config directory: %w", err)
+	}
+
+	// ── Step 3: Sync sources ──────────────────────────────────────────────────
+	initStep(3, "Sync sources")
+
+	stepInfo("Sync sources define which Jira issues to download.")
+	stepInfo("Each source needs a name and a JQL filter.")
+	fmt.Println()
+	fmt.Printf("  %s\n", dim("Examples:  project = ROX"))
+	fmt.Printf("  %s\n", dim("           project in (ROX, ACS) AND team = \"Platform\""))
 	fmt.Println()
 
 	var sources []config.SyncSource
-	// Pre-populate from existing config if present.
+
 	if existing != nil && len(existing.SyncSources) > 0 {
-		fmt.Println("Existing sync sources (press Enter to keep each):")
+		fmt.Printf("  %s Existing sources %s\n", cyan("→"), dim("(press Enter to keep)"))
+		fmt.Println()
 		for _, s := range existing.SyncSources {
-			name := prompt(reader, "  Source name", s.Name)
-			jql := prompt(reader, "  JQL filter", s.JQL)
+			name := prompt(reader, "Source name", s.Name)
+			jql := prompt(reader, "JQL filter", s.JQL)
 			if name != "" && jql != "" {
 				sources = append(sources, config.SyncSource{Name: name, JQL: jql})
+				stepOK(bold(name) + "  " + dim(jql))
 			}
 		}
 	}
 
 	for {
 		if len(sources) > 0 {
-			addMore := prompt(reader, "Add another source?", "n")
-			if !strings.HasPrefix(strings.ToLower(addMore), "y") {
+			more := prompt(reader, "Add another source?", "n")
+			if !strings.HasPrefix(strings.ToLower(more), "y") {
 				break
 			}
+			fmt.Println()
 		}
-		name := prompt(reader, "  Source name (e.g. my-team)", "")
-		jql := prompt(reader, "  JQL filter (e.g. project = ROX)", "")
+		name := prompt(reader, "Source name "+dim("(e.g. my-team)"), "")
+		jql := prompt(reader, "JQL filter  "+dim("(e.g. project = ROX)"), "")
 		if name == "" || jql == "" {
-			fmt.Println("  Both name and JQL are required — skipping.")
+			stepWarn("Both name and JQL are required — skipping.")
 			continue
 		}
 		sources = append(sources, config.SyncSource{Name: name, JQL: jql})
+		stepOK(bold(name) + "  " + dim(jql))
 	}
 
 	if len(sources) == 0 {
 		return fmt.Errorf("at least one sync source is required")
 	}
 
-	// Build config content.
+	// Persist config now that we have everything.
 	cfgContent := buildConfigYAML(jiraURL, email, me.EmailAddress, sources)
-
-	// Write config file.
-	cfgPath := config.DefaultConfigPath()
-	if err := os.MkdirAll(filepath.Dir(cfgPath), 0700); err != nil {
-		return fmt.Errorf("creating config directory: %w", err)
-	}
 	if err := os.WriteFile(cfgPath, []byte(cfgContent), 0600); err != nil {
+		stepFail("Could not write config: " + err.Error())
 		return fmt.Errorf("writing config: %w", err)
 	}
-	fmt.Printf("Config saved to %s\n", cfgPath)
-	fmt.Printf("Add to your shell profile: export JAI_TOKEN=<your-api-token>\n\n")
+	stepOK("Config saved: " + dim(cfgPath))
+	stepWarn("Add to your shell profile: " + bold("export JAI_TOKEN=<your-api-token>"))
 
-	// Build a minimal config struct for sync.
+	// ── Step 4: Initial sync ──────────────────────────────────────────────────
+	initStep(4, "Initial sync")
+
 	cfg := &config.Config{
-		Jira: config.JiraConfig{
-			URL:   jiraURL,
-			Email: email,
-			Token: token,
-		},
+		Jira:        config.JiraConfig{URL: jiraURL, Email: email, Token: token},
 		SyncSources: sources,
 		Sync:        config.SyncConfig{Interval: "15m", RateLimit: 10},
 		Me:          me.EmailAddress,
 		DB:          config.DBConfig{Path: config.DefaultDBPath()},
 	}
 
-	// Open database.
 	database, err := db.Open(cfg.DB.Path)
 	if err != nil {
+		stepFail("Could not open database: " + err.Error())
 		return fmt.Errorf("opening database: %w", err)
 	}
 	defer database.Close()
 
-	// Discover fields.
-	fmt.Print("Discovering fields... ")
-	engine := synce.New(database, client, cfg)
+	engine := synce.New(database, jiraClient, cfg)
+
+	stepInfo("Discovering Jira fields...")
 	if err := engine.DiscoverFields(ctx, nil); err != nil {
-		fmt.Printf("WARNING: %v\n", err)
+		stepWarn("Field discovery: " + err.Error())
 	} else {
-		fmt.Println("done")
+		stepOK("Fields discovered")
 	}
 
-	// Initial sync.
-	fmt.Printf("Syncing %d source(s) (this may take a few minutes)...\n", len(sources))
+	fmt.Println()
+	stepInfo(fmt.Sprintf("Syncing %d source(s) — this may take a few minutes...", len(sources)))
+	fmt.Println()
+
 	ch, err := engine.Sync(ctx, true, false, "")
 	if err != nil {
+		stepFail("Sync failed: " + err.Error())
 		return fmt.Errorf("sync failed: %w", err)
 	}
 	total := displaySyncProgress(ch)
+	stepOK(fmt.Sprintf("%d issues synced", total))
 
-	fmt.Printf("\nSync complete! %d issues synced.\n\n", total)
-	fmt.Println("Next steps:")
-	fmt.Printf("  jai query \"SELECT key, summary, status FROM issues LIMIT 10\"\n")
-	fmt.Printf("  jai tui\n")
-	fmt.Printf("  jai --help\n")
+	// ── Done ──────────────────────────────────────────────────────────────────
+	fmt.Println()
+	fmt.Printf("  %s\n", bold("╭────────────────────────────────────────────╮"))
+	boxLine(green(bold("Setup complete!")), "Setup complete!")
+	fmt.Printf("  %s\n", bold("╰────────────────────────────────────────────╯"))
+	fmt.Println()
+	fmt.Printf("  %s\n", bold("Quick reference:"))
+	fmt.Println()
+
+	type ref struct{ cmd, desc string }
+	refs := []ref{
+		{"jai query \"SELECT key, summary, status FROM issues LIMIT 10\"", "Run a SQL query"},
+		{"jai tui", "Open the full-screen TUI"},
+		{"jai get ROX-123", "Fetch a single issue"},
+		{"jai sync", "Incremental sync (new/updated issues)"},
+		{"jai sync --full", "Full resync of all issues"},
+		{"jai schema", "Inspect available columns"},
+		{"jai --help", "Show all commands"},
+	}
+
+	for _, r := range refs {
+		fmt.Printf("  %-60s %s\n", cyan(r.cmd), dim(r.desc))
+	}
+
+	fmt.Println()
+	fmt.Printf("  Config: %s\n", dim(cfgPath))
+	fmt.Printf("  DB:     %s\n", dim(cfg.DB.Path))
+	fmt.Println()
+
 	return nil
 }
 
