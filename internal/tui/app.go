@@ -168,15 +168,36 @@ func (a *App) loadView(i int) tea.Cmd {
 			}
 		}
 
-		return viewLoadedMsg{index: i, columns: cols, rows: rows}
+		// Extract group values before display-column filtering.
+		var groupVals []string
+		groupCol := -1
+		if v.GroupBy != "" {
+			for ci, c := range cols {
+				if c == v.GroupBy {
+					groupCol = ci
+					break
+				}
+			}
+			if groupCol >= 0 {
+				groupVals = make([]string, len(rows))
+				for r, row := range rows {
+					if groupCol < len(row) {
+						groupVals[r] = row[groupCol]
+					}
+				}
+			}
+		}
+
+		return viewLoadedMsg{index: i, columns: cols, rows: rows, groupVals: groupVals}
 	}
 }
 
 type viewLoadedMsg struct {
-	index   int
-	columns []string
-	rows    [][]string
-	err     error
+	index     int
+	columns   []string
+	rows      [][]string
+	groupVals []string // parallel to rows; non-nil when group_by is configured
+	err       error
 }
 
 // detailLoadedMsg carries the result of an async detail data load.
@@ -286,6 +307,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.err = ""
 			t := NewTableModel(msg.columns, msg.rows)
 			t.SetSize(a.width, a.tableHeight())
+			if msg.groupVals != nil {
+				t.SetGroupBy(0, msg.groupVals) // col 0 unused; vals drive the headers
+			}
 			a.tables[msg.index] = t
 		}
 		return a, nil

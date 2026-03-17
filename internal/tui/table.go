@@ -21,9 +21,10 @@ type TableModel struct {
 	sortDesc   bool
 	filterText string
 
-	// Grouping.
-	groupBy    int // column index, -1 = no grouping
-	collapsed  map[string]bool
+	// Grouping: groupVals is parallel to rows; filtGroupVals parallel to filtered.
+	groupBy       int      // column index in rows used for group headers, -1 = none
+	groupVals     []string // group value per row (parallel to rows)
+	filtGroupVals []string // group value per filtered row
 
 	colorRules interface{} // []config.ColorRule — stored as interface to avoid import cycle
 }
@@ -31,14 +32,23 @@ type TableModel struct {
 // NewTableModel creates a new table model.
 func NewTableModel(columns []string, rows [][]string) *TableModel {
 	t := &TableModel{
-		columns:   columns,
-		rows:      rows,
-		filtered:  rows,
-		sortCol:   -1,
-		groupBy:   -1,
-		collapsed: make(map[string]bool),
+		columns:  columns,
+		rows:     rows,
+		filtered: rows,
+		sortCol:  -1,
+		groupBy:  -1,
 	}
 	return t
+}
+
+// SetGroupBy configures the table to show group headers when the value in
+// groupCol (index into each row) changes. vals is a parallel slice to rows
+// containing the group label for each row. Rows are assumed to already be
+// ordered so that equal group values are adjacent.
+func (t *TableModel) SetGroupBy(groupCol int, vals []string) {
+	t.groupBy = groupCol
+	t.groupVals = vals
+	t.filtGroupVals = vals // recomputed when filter is applied
 }
 
 // SetSize updates the display dimensions.
@@ -98,6 +108,7 @@ func (t *TableModel) SetFilter(text string) {
 	t.filterText = text
 	if text == "" {
 		t.filtered = t.rows
+		t.filtGroupVals = t.groupVals
 		t.cursor = 0
 		t.offset = 0
 		return
@@ -105,15 +116,20 @@ func (t *TableModel) SetFilter(text string) {
 
 	lower := strings.ToLower(text)
 	filtered := make([][]string, 0, len(t.rows))
-	for _, row := range t.rows {
+	var filtGV []string
+	for i, row := range t.rows {
 		for _, cell := range row {
 			if strings.Contains(strings.ToLower(cell), lower) {
 				filtered = append(filtered, row)
+				if t.groupVals != nil && i < len(t.groupVals) {
+					filtGV = append(filtGV, t.groupVals[i])
+				}
 				break
 			}
 		}
 	}
 	t.filtered = filtered
+	t.filtGroupVals = filtGV
 	t.cursor = 0
 	t.offset = 0
 }
@@ -122,6 +138,7 @@ func (t *TableModel) SetFilter(text string) {
 func (t *TableModel) ClearFilter() {
 	t.filterText = ""
 	t.filtered = t.rows
+	t.filtGroupVals = t.groupVals
 	t.cursor = 0
 	t.offset = 0
 }
@@ -172,6 +189,7 @@ func (t *TableModel) UpdateRows(rows [][]string) {
 		t.SetFilter(t.filterText)
 	} else {
 		t.filtered = rows
+		t.filtGroupVals = t.groupVals
 	}
 	if t.cursor >= len(t.filtered) {
 		t.cursor = len(t.filtered) - 1
@@ -228,14 +246,53 @@ func (t *TableModel) Render(height int) string {
 		dataHeight = 1
 	}
 
-	end := t.offset + dataHeight
-	if end > len(t.filtered) {
-		end = len(t.filtered)
-	}
+	// When grouping is active, account for group header rows in the viewport.
+	grouped := t.groupBy >= 0 && len(t.filtGroupVals) > 0
+	groupStyle := lipgloss.NewStyle().Foreground(colorGroupHeader).Bold(true)
 
-	for i := t.offset; i < end; i++ {
+	// Count visible logical lines from offset to fill dataHeight.
+	linesUsed := 0
+	lastGroup := "\x00" // sentinel so first row always gets a header
+	for i := t.offset; i < len(t.filtered) && linesUsed < dataHeight; i++ {
 		row := t.filtered[i]
 		selected := i == t.cursor
+
+		// Group header.
+		if grouped {
+			gv := ""
+			if i < len(t.filtGroupVals) {
+				gv = t.filtGroupVals[i]
+			}
+			if gv != lastGroup {
+				if linesUsed >= dataHeight {
+					break
+				}
+				label := gv
+				if label == "" {
+					label = "(no parent)"
+				}
+				// Render full-width group header.
+				totalW := 0
+				for k, w := range widths {
+					totalW += w
+					if k < len(widths)-1 {
+						totalW += 2
+					}
+				}
+				header := fmt.Sprintf("── %s ", label)
+				if len(header) < totalW {
+					header += strings.Repeat("─", totalW-len(header))
+				}
+				sb.WriteString(groupStyle.Render(header))
+				sb.WriteString("\n")
+				linesUsed++
+				lastGroup = gv
+			}
+		}
+
+		if linesUsed >= dataHeight {
+			break
+		}
 
 		rowStyle := lipgloss.NewStyle()
 		if selected {
@@ -257,6 +314,7 @@ func (t *TableModel) Render(height int) string {
 			}
 		}
 		sb.WriteString("\n")
+		linesUsed++
 	}
 
 	return sb.String()
