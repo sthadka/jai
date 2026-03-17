@@ -139,6 +139,24 @@ func (a *App) loadView(i int) tea.Cmd {
 		}
 
 		cols := results.Columns
+
+		// Extract group values from full result set before display-column filtering,
+		// so group_by can reference a column not in the visible columns list.
+		var groupVals []string
+		if v.GroupBy != "" {
+			for ci, c := range cols {
+				if c == v.GroupBy {
+					groupVals = make([]string, len(rows))
+					for r, row := range rows {
+						if ci < len(row) {
+							groupVals[r] = row[ci]
+						}
+					}
+					break
+				}
+			}
+		}
+
 		if len(v.Columns) > 0 {
 			colIdx := make(map[string]int, len(cols))
 			for i, c := range cols {
@@ -165,26 +183,6 @@ func (a *App) loadView(i int) tea.Cmd {
 				}
 				cols = filtCols
 				rows = filtRows
-			}
-		}
-
-		// Extract group values before display-column filtering.
-		var groupVals []string
-		groupCol := -1
-		if v.GroupBy != "" {
-			for ci, c := range cols {
-				if c == v.GroupBy {
-					groupCol = ci
-					break
-				}
-			}
-			if groupCol >= 0 {
-				groupVals = make([]string, len(rows))
-				for r, row := range rows {
-					if groupCol < len(row) {
-						groupVals[r] = row[groupCol]
-					}
-				}
 			}
 		}
 

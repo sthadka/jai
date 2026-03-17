@@ -250,9 +250,13 @@ func (t *TableModel) Render(height int) string {
 	grouped := t.groupBy >= 0 && len(t.filtGroupVals) > 0
 	groupStyle := lipgloss.NewStyle().Foreground(colorGroupHeader).Bold(true)
 
-	// Count visible logical lines from offset to fill dataHeight.
+	// Seed lastGroup from the row just before the viewport so we don't emit a
+	// spurious header when the viewport starts mid-group (group member above fold).
 	linesUsed := 0
-	lastGroup := "\x00" // sentinel so first row always gets a header
+	lastGroup := "\x00"
+	if grouped && t.offset > 0 && t.offset-1 < len(t.filtGroupVals) {
+		lastGroup = t.filtGroupVals[t.offset-1]
+	}
 	for i := t.offset; i < len(t.filtered) && linesUsed < dataHeight; i++ {
 		row := t.filtered[i]
 		selected := i == t.cursor
@@ -270,6 +274,12 @@ func (t *TableModel) Render(height int) string {
 				label := gv
 				if label == "" {
 					label = "(no parent)"
+				}
+				// Add ↑ hint when a group starts mid-viewport (its first member is
+				// above the fold), so the user knows to scroll up for the parent row.
+				midGroup := i > 0 && i == t.offset && t.offset > 0
+				if midGroup {
+					label = "↑ " + label
 				}
 				// Render full-width group header.
 				totalW := 0
