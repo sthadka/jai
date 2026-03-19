@@ -279,6 +279,9 @@ func (e *Engine) syncSource(ctx context.Context, src config.SyncSource, full, re
 					_ = e.db.UpdateIssueCommentsText(apiIssue.Key)
 				}
 			}
+
+			links := ExtractIssueLinks(apiIssue.Key, rawBytes)
+			_ = e.db.UpsertIssueLinks(apiIssue.Key, links)
 		}
 
 		// Save cursor after each completed page so a restart can skip ahead.
@@ -352,6 +355,9 @@ func (e *Engine) expandFields(fieldMap map[string]*db.FieldMapping) []string {
 		"summary", "description", "status", "priority", "assignee", "reporter",
 		"created", "updated", "resolutiondate", "labels", "components", "fixVersions",
 		"parent", "issuetype", "project", "comment",
+		"issuelinks", "resolution", "duedate",
+		"timeoriginalestimate", "timespent", "timeestimate",
+		"subtasks",
 	}
 	// Add custom fields.
 	for jiraID, f := range fieldMap {

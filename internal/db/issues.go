@@ -9,29 +9,44 @@ import (
 
 // Issue represents a row from the issues table.
 type Issue struct {
-	Key            string
-	Project        string
-	Type           string
-	Summary        string
-	Description    string
-	Status         string
-	StatusCategory string
-	Priority       string
-	Assignee       string
-	AssigneeEmail  string
-	Reporter       string
-	Created        string
-	Updated        string
-	Resolved       string
-	Labels         string
-	Components     string
-	FixVersion     string
-	ParentKey      string
-	EpicKey        string
-	StoryPoints    sql.NullFloat64
-	CommentsText   string
-	RawJSON        string
-	SyncedAt       string
+	Key              string
+	Project          string
+	Type             string
+	Summary          string
+	Description      string
+	Status           string
+	StatusCategory   string
+	Priority         string
+	Assignee         string
+	AssigneeEmail    string
+	Reporter         string
+	Created          string
+	Updated          string
+	Resolved         string
+	Labels           string
+	Components       string
+	FixVersion       string
+	ParentKey        string
+	EpicKey          string
+	StoryPoints      sql.NullFloat64
+	CommentsText     string
+	RawJSON          string
+	SyncedAt         string
+	Resolution       string
+	DueDate          string
+	OriginalEstimate sql.NullInt64
+	TimeSpent        sql.NullInt64
+	RemainingEstimate sql.NullInt64
+	SubtaskKeys      string
+}
+
+// IssueLink represents a row from the issue_links table.
+type IssueLink struct {
+	ID        string
+	IssueKey  string
+	LinkType  string
+	Direction string // "inward" or "outward"
+	LinkedKey string
 }
 
 // UpsertIssue inserts or replaces an issue row. Extra contains additional dynamic columns.
@@ -44,6 +59,9 @@ func (db *DB) UpsertIssue(issue *Issue, extra map[string]interface{}) error {
 		"labels", "components", "fix_version",
 		"parent_key", "epic_key", "story_points",
 		"comments_text", "raw_json", "synced_at",
+		"resolution", "due_date",
+		"original_estimate", "time_spent", "remaining_estimate",
+		"subtask_keys",
 	}
 	vals := []interface{}{
 		issue.Key, issue.Project, issue.Type, issue.Summary, issue.Description,
@@ -54,6 +72,9 @@ func (db *DB) UpsertIssue(issue *Issue, extra map[string]interface{}) error {
 		issue.ParentKey, issue.EpicKey, issue.StoryPoints,
 		issue.CommentsText, issue.RawJSON,
 		time.Now().UTC().Format(time.RFC3339),
+		issue.Resolution, issue.DueDate,
+		issue.OriginalEstimate, issue.TimeSpent, issue.RemainingEstimate,
+		issue.SubtaskKeys,
 	}
 
 	for k, v := range extra {
@@ -108,6 +129,22 @@ func (db *DB) GetIssue(key string) (map[string]interface{}, error) {
 		result[col] = vals[i]
 	}
 	return result, nil
+}
+
+// UpsertIssueLinks replaces all link rows for an issue.
+func (db *DB) UpsertIssueLinks(issueKey string, links []IssueLink) error {
+	if _, err := db.Exec(`DELETE FROM issue_links WHERE issue_key = ?`, issueKey); err != nil {
+		return err
+	}
+	for _, l := range links {
+		if _, err := db.Exec(
+			`INSERT OR REPLACE INTO issue_links (id, issue_key, link_type, direction, linked_key) VALUES (?,?,?,?,?)`,
+			l.ID, l.IssueKey, l.LinkType, l.Direction, l.LinkedKey,
+		); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // EnsureColumn adds a column to the issues table if it doesn't exist.

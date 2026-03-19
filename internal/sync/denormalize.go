@@ -1,6 +1,7 @@
 package sync
 
 import (
+	"database/sql"
 	"encoding/json"
 	"strings"
 	"time"
@@ -101,6 +102,26 @@ func Denormalize(raw []byte, fieldMap map[string]*db.FieldMapping) (*db.Issue, m
 	if fields.Parent != nil {
 		issue.ParentKey = fields.Parent.Key
 	}
+	if fields.Resolution != nil {
+		issue.Resolution = fields.Resolution.Name
+	}
+	issue.DueDate = normalizeDate(fields.DueDate)
+	if fields.TimeOriginalEstimate != nil {
+		issue.OriginalEstimate = sql.NullInt64{Int64: *fields.TimeOriginalEstimate, Valid: true}
+	}
+	if fields.TimeSpent != nil {
+		issue.TimeSpent = sql.NullInt64{Int64: *fields.TimeSpent, Valid: true}
+	}
+	if fields.TimeEstimate != nil {
+		issue.RemainingEstimate = sql.NullInt64{Int64: *fields.TimeEstimate, Valid: true}
+	}
+	if len(fields.Subtasks) > 0 {
+		keys := make([]string, len(fields.Subtasks))
+		for i, s := range fields.Subtasks {
+			keys[i] = s.Key
+		}
+		issue.SubtaskKeys = strings.Join(keys, ",")
+	}
 
 	// Extract custom fields as dynamic columns.
 	var rawFields map[string]json.RawMessage
@@ -191,6 +212,42 @@ func extractFieldValue(raw json.RawMessage, fieldType string) interface{} {
 		}
 	}
 	return nil
+}
+
+// ExtractIssueLinks extracts formal Jira issue links from a raw issue JSON.
+// Each link produces two rows (inward + outward perspective) so both sides are queryable.
+func ExtractIssueLinks(issueKey string, raw []byte) []db.IssueLink {
+	var apiIssue jira.Issue
+	if err := json.Unmarshal(raw, &apiIssue); err != nil {
+		return nil
+	}
+	var fields jira.IssueFields
+	if err := json.Unmarshal(apiIssue.Fields, &fields); err != nil {
+		return nil
+	}
+
+	var links []db.IssueLink
+	for _, l := range fields.IssueLinks {
+		if l.InwardIssue != nil {
+			links = append(links, db.IssueLink{
+				ID:        l.ID + "_in",
+				IssueKey:  issueKey,
+				LinkType:  l.Type.Inward,
+				Direction: "inward",
+				LinkedKey: l.InwardIssue.Key,
+			})
+		}
+		if l.OutwardIssue != nil {
+			links = append(links, db.IssueLink{
+				ID:        l.ID + "_out",
+				IssueKey:  issueKey,
+				LinkType:  l.Type.Outward,
+				Direction: "outward",
+				LinkedKey: l.OutwardIssue.Key,
+			})
+		}
+	}
+	return links
 }
 
 // ExtractComments extracts Jira comments from a raw issue JSON.

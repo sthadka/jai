@@ -60,6 +60,26 @@ type IssueFields struct {
 	Comment *struct {
 		Comments []*Comment `json:"comments"`
 	} `json:"comment"`
+	Resolution *struct {
+		Name string `json:"name"`
+	} `json:"resolution"`
+	DueDate              string `json:"duedate"`
+	TimeOriginalEstimate *int64 `json:"timeoriginalestimate"`
+	TimeSpent            *int64 `json:"timespent"`
+	TimeEstimate         *int64 `json:"timeestimate"`
+	Subtasks             []struct {
+		Key string `json:"key"`
+	} `json:"subtasks"`
+	IssueLinks []struct {
+		ID   string `json:"id"`
+		Type struct {
+			Name    string `json:"name"`
+			Inward  string `json:"inward"`
+			Outward string `json:"outward"`
+		} `json:"type"`
+		InwardIssue  *struct{ Key string `json:"key"` } `json:"inwardIssue"`
+		OutwardIssue *struct{ Key string `json:"key"` } `json:"outwardIssue"`
+	} `json:"issuelinks"`
 }
 
 // Comment is a Jira comment from the API.

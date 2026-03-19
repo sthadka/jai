@@ -38,6 +38,35 @@ var migrations = []migration{
 			return err
 		},
 	},
+	{
+		version:     4,
+		description: "add issue_links table and new issue columns (resolution, due_date, time tracking, subtask_keys)",
+		up: func(tx *sql.Tx) error {
+			stmts := []string{
+				`CREATE TABLE IF NOT EXISTS issue_links (
+					id          TEXT PRIMARY KEY,
+					issue_key   TEXT NOT NULL,
+					link_type   TEXT NOT NULL,
+					direction   TEXT NOT NULL,
+					linked_key  TEXT NOT NULL
+				)`,
+				`CREATE INDEX IF NOT EXISTS idx_issue_links_issue  ON issue_links(issue_key)`,
+				`CREATE INDEX IF NOT EXISTS idx_issue_links_linked ON issue_links(linked_key)`,
+				`ALTER TABLE issues ADD COLUMN resolution         TEXT`,
+				`ALTER TABLE issues ADD COLUMN due_date           DATETIME`,
+				`ALTER TABLE issues ADD COLUMN original_estimate  INTEGER`,
+				`ALTER TABLE issues ADD COLUMN time_spent         INTEGER`,
+				`ALTER TABLE issues ADD COLUMN remaining_estimate INTEGER`,
+				`ALTER TABLE issues ADD COLUMN subtask_keys       TEXT`,
+			}
+			for _, s := range stmts {
+				if _, err := tx.Exec(s); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	},
 }
 
 // Migrate applies any pending schema migrations in order.
