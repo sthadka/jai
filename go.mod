@@ -1,6 +1,6 @@
 module github.com/sthadka/jai
 
-go 1.24.0
+go 1.26.1
 
 require (
 	github.com/charmbracelet/bubbles v1.0.0
