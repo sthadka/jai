@@ -59,7 +59,7 @@ brews:
     description: "Query Jira with SQL — sync Jira Cloud to SQLite and query it"
     license: MIT
     tap:
-      owner: syethadk
+      owner: sthadka
       name: homebrew-tap
     commit_author:
       name: goreleaserbot
