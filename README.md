@@ -37,7 +37,7 @@ jai takes a different approach: sync once to a local SQLite database, then query
 ## Install
 
 ```sh
-brew install syethadk/tap/jai
+brew install sthadka/tap/jai
 ```
 
 Or build from source (requires Go 1.23+ and CGO):
@@ -249,13 +249,18 @@ jira:
   url: https://mycompany.atlassian.net
   email: me@company.com
   token: ${JAI_TOKEN}        # never store tokens in plaintext
-  projects: [ROX, ACS]
 
 sync:
   interval: 15m              # auto-sync interval
   rate_limit: 10             # requests/second (Jira Cloud limit)
 
 me: me@company.com           # used in {{me}} template variable
+
+sync_sources:
+  - name: my-project
+    jql: project = MYPROJ ORDER BY updated DESC
+  - name: another-team
+    jql: project = OTHER AND team = "Platform"
 
 fields:
   overrides:

@@ -2,9 +2,6 @@ jira:
   url: https://mycompany.atlassian.net
   email: me@company.com
   token: ${JAI_TOKEN}
-  projects:
-    - ROX
-    - ACS
 
 sync:
   interval: 15m
@@ -19,7 +16,13 @@ db:
   path: ~/.local/share/jai/jai.db
 
 me: me@company.com
-team: ACS Scanner
+team: My Team
+
+sync_sources:
+  - name: my-project
+    jql: project = MYPROJ ORDER BY updated DESC
+  - name: another-team
+    jql: project = OTHER AND team = "Platform"
 
 fields:
   overrides:
