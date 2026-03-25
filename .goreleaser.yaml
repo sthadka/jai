@@ -44,14 +44,12 @@ archives:
 checksum:
   name_template: "checksums.txt"
 
+release:
+  # release-please creates the GitHub release with changelog; goreleaser only uploads artifacts
+  mode: append
+
 changelog:
-  sort: asc
-  filters:
-    exclude:
-      - "^docs:"
-      - "^test:"
-      - "^chore:"
-      - "Merge pull request"
+  disable: true
 
 brews:
   - name: jai
