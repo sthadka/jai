@@ -53,9 +53,16 @@ var getCmd = &cobra.Command{
 		for i, col := range results.Columns {
 			fields[col] = row[i]
 		}
+		if g.fields != "" {
+			fields = output.FilterFields(fields, output.ParseFields(g.fields))
+		}
 
-		fmt.Printf("  %-22s %s\n", "Key:", output.ValueStr(fields["key"]))
-		fmt.Printf("  %-22s %s\n", "Summary:", output.ValueStr(fields["summary"]))
+		if v := output.ValueStr(fields["key"]); v != "" {
+			fmt.Printf("  %-22s %s\n", "Key:", v)
+		}
+		if v := output.ValueStr(fields["summary"]); v != "" {
+			fmt.Printf("  %-22s %s\n", "Summary:", v)
+		}
 		fmt.Println()
 
 		skip := map[string]bool{"key": true, "summary": true, "raw_json": true, "comments_text": true}
