@@ -330,12 +330,15 @@ func (e *Engine) syncSource(ctx context.Context, src config.SyncSource, full, re
 }
 
 // cursorToJQL converts an RFC3339 timestamp to the format Jira JQL expects.
+// Jira JQL does not support seconds in datetime strings — they cause a silent
+// 0-result response. We truncate to minute granularity, which may re-fetch
+// up to 60 seconds of already-synced issues (harmless upserts).
 func cursorToJQL(cursor string) string {
 	t, err := time.Parse(time.RFC3339, cursor)
 	if err != nil {
 		return cursor
 	}
-	return t.UTC().Format("2006-01-02 15:04:05")
+	return t.UTC().Format("2006-01-02 15:04")
 }
 
 // ensureCustomColumns creates columns in the issues table for custom fields that don't have one yet.
