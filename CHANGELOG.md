@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.1](https://github.com/sthadka/jai/compare/v1.0.0...v1.0.1) (2026-04-08)
+
+
+### Bug Fixes
+
+* repair jai status and incremental sync ([f18f702](https://github.com/sthadka/jai/commit/f18f702075d3fc1b61f93fae259ae99cc444629c))
+
 ## 1.0.0 (2026-03-25)
 
 
