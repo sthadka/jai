@@ -94,7 +94,7 @@ func TestUpsertComment(t *testing.T) {
 func TestSyncMeta(t *testing.T) {
 	db := openTestDB(t)
 
-	if err := db.UpdateSyncMeta("TEST", 1.5, 10, 10, ""); err != nil {
+	if err := db.UpdateSyncMeta("TEST", 1.5, 10, 10, "", ""); err != nil {
 		t.Fatalf("UpdateSyncMeta: %v", err)
 	}
 

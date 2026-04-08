@@ -14,6 +14,7 @@ import (
 var syncFull bool
 var syncResume bool
 var syncSourceFlag string
+var syncVerbose bool
 
 var syncCmd = &cobra.Command{
 	Use:   "sync",
@@ -35,7 +36,7 @@ var syncCmd = &cobra.Command{
 			return err
 		}
 
-		total := displaySyncProgress(ch)
+		total := displaySyncProgress(ch, syncVerbose)
 		fmt.Printf("Done. %d issues synced.\n", total)
 		return nil
 	},
@@ -46,7 +47,7 @@ var syncCmd = &cobra.Command{
 // keeps moving even between Jira page responses. Rate is computed from
 // deltas so it stabilises quickly instead of averaging from t=0.
 // Returns total issues synced across all sources.
-func displaySyncProgress(ch <-chan synce.Progress) int {
+func displaySyncProgress(ch <-chan synce.Progress, verbose bool) int {
 	spinners := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 	spinIdx := 0
 	total := 0
@@ -83,6 +84,9 @@ func displaySyncProgress(ch <-chan synce.Progress) int {
 			// Print a one-time note when a resumed sync starts.
 			if p.ResumedFrom != "" {
 				fmt.Fprintf(os.Stderr, "  ↻ %-25s resuming from %s\n", p.Project, p.ResumedFrom[:10])
+			}
+			if verbose && p.JQL != "" {
+				fmt.Fprintf(os.Stderr, "  ⋯ JQL: %s\n", p.JQL)
 			}
 
 			// Delta rate: only update when ≥500ms have elapsed and count grew.
@@ -140,5 +144,6 @@ func init() {
 	syncCmd.Flags().BoolVar(&syncFull, "full", false, "full resync (re-fetch all issues)")
 	syncCmd.Flags().BoolVar(&syncResume, "resume", false, "continue a previously interrupted --full sync (requires --full)")
 	syncCmd.Flags().StringVar(&syncSourceFlag, "source", "", "sync only this named source (from sync_sources in config)")
+	syncCmd.Flags().BoolVar(&syncVerbose, "verbose", false, "print effective JQL for each source")
 	rootCmd.AddCommand(syncCmd)
 }

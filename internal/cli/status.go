@@ -13,6 +13,11 @@ var statusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show sync and queue status",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := cmd.Context()
+
+		// Auth check.
+		me, authErr := g.jira.MySelf(ctx)
+
 		metas, err := g.db.AllSyncMeta()
 		if err != nil {
 			if g.jsonOut {
@@ -22,7 +27,8 @@ var statusCmd = &cobra.Command{
 			return err
 		}
 
-		issueCounts, _ := g.db.IssueCountBySource()
+		totalIssues, _ := g.db.TotalIssueCount()
+		countByProject, _ := g.db.IssueCountByProject()
 
 		pendingCount, err := g.db.CountPendingChanges()
 		if err != nil {
@@ -32,19 +38,28 @@ var statusCmd = &cobra.Command{
 		dbInfo, _ := os.Stat(g.cfg.DB.Path)
 
 		if g.jsonOut {
-			projects := make([]map[string]interface{}, len(metas))
+			auth := map[string]any{"ok": authErr == nil}
+			if authErr != nil {
+				auth["error"] = authErr.Error()
+			} else {
+				auth["user"] = me.DisplayName
+				auth["email"] = me.EmailAddress
+			}
+			sources := make([]map[string]any, len(metas))
 			for i, m := range metas {
-				projects[i] = map[string]interface{}{
-					"project":            m.Project,
+				sources[i] = map[string]any{
+					"source":             m.Project,
 					"last_sync_time":     m.LastSyncTime.String,
-					"issues_count":       issueCounts[m.Project],
 					"last_sync_duration": m.LastSyncDuration.Float64,
 					"last_sync_error":    m.LastSyncError.String,
 				}
 			}
-			data := map[string]interface{}{
-				"projects":        projects,
-				"pending_changes": pendingCount,
+			data := map[string]any{
+				"auth":             auth,
+				"sources":          sources,
+				"total_issues":     totalIssues,
+				"issues_by_project": countByProject,
+				"pending_changes":  pendingCount,
 			}
 			if dbInfo != nil {
 				data["db_size_bytes"] = dbInfo.Size()
@@ -54,7 +69,14 @@ var statusCmd = &cobra.Command{
 		}
 
 		// Human output.
-		fmt.Println("Sources:")
+		fmt.Println("Auth:")
+		if authErr != nil {
+			fmt.Printf("  ✗ Failed: %s\n", authErr)
+		} else {
+			fmt.Printf("  ✓ %s (%s)\n", me.DisplayName, me.EmailAddress)
+		}
+
+		fmt.Println("\nSources:")
 		for _, m := range metas {
 			lastSync := "never"
 			if m.LastSyncTime.Valid && m.LastSyncTime.String != "" {
@@ -62,14 +84,35 @@ var statusCmd = &cobra.Command{
 					lastSync = humanDuration(time.Since(t)) + " ago"
 				}
 			}
-			fmt.Printf("  %s: %d issues, last sync %s\n",
-				m.Project, issueCounts[m.Project], lastSync)
+			fmt.Printf("  %s: last sync %s", m.Project, lastSync)
+			if m.IssuesSynced.Valid && m.IssuesSynced.Int64 > 0 {
+				fmt.Printf(" (%d synced)", m.IssuesSynced.Int64)
+			}
+			if m.LastIssueUpdated.Valid && m.LastIssueUpdated.String != "" {
+				fmt.Printf(", data through %s", m.LastIssueUpdated.String[:10])
+			}
+			fmt.Println()
 			if m.LastSyncError.Valid && m.LastSyncError.String != "" {
 				fmt.Printf("    Error: %s\n", m.LastSyncError.String)
 			}
 		}
 
-		fmt.Printf("\nPending changes: %d\n", pendingCount)
+		fmt.Printf("\nIssues: %d total", totalIssues)
+		if len(countByProject) > 0 {
+			fmt.Printf(" (")
+			first := true
+			for proj, n := range countByProject {
+				if !first {
+					fmt.Printf(", ")
+				}
+				fmt.Printf("%s: %d", proj, n)
+				first = false
+			}
+			fmt.Printf(")")
+		}
+		fmt.Println()
+
+		fmt.Printf("Pending changes: %d\n", pendingCount)
 
 		if dbInfo != nil {
 			fmt.Printf("DB size: %s\n", humanBytes(dbInfo.Size()))

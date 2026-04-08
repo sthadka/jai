@@ -7,23 +7,24 @@ import (
 
 // SyncMeta holds sync metadata for a project.
 type SyncMeta struct {
-	Project           string
-	LastSyncTime      sql.NullString
-	LastFullSync      sql.NullString
-	IssuesTotal       sql.NullInt64
-	IssuesSynced      sql.NullInt64
-	LastSyncDuration  sql.NullFloat64
-	LastSyncError     sql.NullString
+	Project            string
+	LastSyncTime       sql.NullString
+	LastFullSync       sql.NullString
+	IssuesTotal        sql.NullInt64
+	IssuesSynced       sql.NullInt64
+	LastSyncDuration   sql.NullFloat64
+	LastSyncError      sql.NullString
+	LastIssueUpdated   sql.NullString
 }
 
 // GetSyncMeta retrieves sync metadata for a project. Returns zero value if not found.
 func (db *DB) GetSyncMeta(project string) (*SyncMeta, error) {
 	m := &SyncMeta{Project: project}
 	err := db.QueryRow(
-		`SELECT project, last_sync_time, last_full_sync, issues_total, issues_synced, last_sync_duration, last_sync_error
+		`SELECT project, last_sync_time, last_full_sync, issues_total, issues_synced, last_sync_duration, last_sync_error, last_issue_updated
 		 FROM sync_metadata WHERE project = ?`,
 		project,
-	).Scan(&m.Project, &m.LastSyncTime, &m.LastFullSync, &m.IssuesTotal, &m.IssuesSynced, &m.LastSyncDuration, &m.LastSyncError)
+	).Scan(&m.Project, &m.LastSyncTime, &m.LastFullSync, &m.IssuesTotal, &m.IssuesSynced, &m.LastSyncDuration, &m.LastSyncError, &m.LastIssueUpdated)
 	if err == sql.ErrNoRows {
 		return m, nil
 	}
@@ -31,22 +32,28 @@ func (db *DB) GetSyncMeta(project string) (*SyncMeta, error) {
 }
 
 // UpdateSyncMeta upserts sync metadata for a project.
-func (db *DB) UpdateSyncMeta(project string, duration float64, total, synced int, syncErr string) error {
+// hwm is the RFC3339 timestamp of the most recently updated issue seen in this sync run (empty to leave unchanged).
+func (db *DB) UpdateSyncMeta(project string, duration float64, total, synced int, syncErr, hwm string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	var errVal interface{}
 	if syncErr != "" {
 		errVal = syncErr
 	}
+	var hwmVal interface{}
+	if hwm != "" {
+		hwmVal = hwm
+	}
 	_, err := db.Exec(`
-		INSERT INTO sync_metadata (project, last_sync_time, issues_total, issues_synced, last_sync_duration, last_sync_error)
-		VALUES (?, ?, ?, ?, ?, ?)
+		INSERT INTO sync_metadata (project, last_sync_time, issues_total, issues_synced, last_sync_duration, last_sync_error, last_issue_updated)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(project) DO UPDATE SET
 			last_sync_time = excluded.last_sync_time,
 			issues_total = excluded.issues_total,
 			issues_synced = excluded.issues_synced,
 			last_sync_duration = excluded.last_sync_duration,
-			last_sync_error = excluded.last_sync_error`,
-		project, now, total, synced, duration, errVal,
+			last_sync_error = excluded.last_sync_error,
+			last_issue_updated = CASE WHEN excluded.last_issue_updated IS NOT NULL THEN excluded.last_issue_updated ELSE last_issue_updated END`,
+		project, now, total, synced, duration, errVal, hwmVal,
 	)
 	return err
 }
@@ -93,10 +100,8 @@ func (db *DB) ClearResumeCursor(source string) error {
 	return err
 }
 
-// IssueCountBySource returns a map of source-name/project → live issue count
-// from the issues table. For project-keyed sources the project column is used;
-// sources whose name doesn't match any project key will have a zero count.
-func (db *DB) IssueCountBySource() (map[string]int, error) {
+// IssueCountByProject returns a map of Jira project key → issue count.
+func (db *DB) IssueCountByProject() (map[string]int, error) {
 	rows, err := db.Query(`SELECT project, COUNT(*) FROM issues GROUP BY project`)
 	if err != nil {
 		return nil, err
@@ -114,10 +119,17 @@ func (db *DB) IssueCountBySource() (map[string]int, error) {
 	return counts, rows.Err()
 }
 
+// TotalIssueCount returns the total number of issues in the database.
+func (db *DB) TotalIssueCount() (int, error) {
+	var n int
+	err := db.QueryRow(`SELECT COUNT(*) FROM issues`).Scan(&n)
+	return n, err
+}
+
 // AllSyncMeta returns sync metadata for all projects.
 func (db *DB) AllSyncMeta() ([]*SyncMeta, error) {
 	rows, err := db.Query(
-		`SELECT project, last_sync_time, last_full_sync, issues_total, issues_synced, last_sync_duration, last_sync_error
+		`SELECT project, last_sync_time, last_full_sync, issues_total, issues_synced, last_sync_duration, last_sync_error, last_issue_updated
 		 FROM sync_metadata ORDER BY project`,
 	)
 	if err != nil {
@@ -128,7 +140,7 @@ func (db *DB) AllSyncMeta() ([]*SyncMeta, error) {
 	var metas []*SyncMeta
 	for rows.Next() {
 		m := &SyncMeta{}
-		if err := rows.Scan(&m.Project, &m.LastSyncTime, &m.LastFullSync, &m.IssuesTotal, &m.IssuesSynced, &m.LastSyncDuration, &m.LastSyncError); err != nil {
+		if err := rows.Scan(&m.Project, &m.LastSyncTime, &m.LastFullSync, &m.IssuesTotal, &m.IssuesSynced, &m.LastSyncDuration, &m.LastSyncError, &m.LastIssueUpdated); err != nil {
 			return nil, err
 		}
 		metas = append(metas, m)

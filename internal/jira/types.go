@@ -9,6 +9,8 @@ import (
 type SearchResponse struct {
 	Issues        []*Issue `json:"issues"`
 	NextPageToken string   `json:"nextPageToken"`
+	ErrorMessages []string `json:"errorMessages"`
+	WarningMessages []string `json:"warningMessages"`
 }
 
 // Issue is a Jira issue from the API.

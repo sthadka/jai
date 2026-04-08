@@ -67,6 +67,14 @@ var migrations = []migration{
 			return nil
 		},
 	},
+	{
+		version:     5,
+		description: "add last_issue_updated high-water mark to sync_metadata",
+		up: func(tx *sql.Tx) error {
+			_, err := tx.Exec(`ALTER TABLE sync_metadata ADD COLUMN last_issue_updated DATETIME`)
+			return err
+		},
+	},
 }
 
 // Migrate applies any pending schema migrations in order.

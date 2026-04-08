@@ -201,6 +201,11 @@ func (c *Client) SearchAll(ctx context.Context, jql string, fields []string) fun
 				return
 			}
 
+			if len(resp.ErrorMessages) > 0 {
+				yield(nil, fmt.Errorf("jira JQL error: %s", strings.Join(resp.ErrorMessages, "; ")))
+				return
+			}
+
 			if len(resp.Issues) == 0 {
 				return
 			}

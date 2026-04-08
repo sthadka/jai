@@ -248,7 +248,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 		stepFail("Sync failed: " + err.Error())
 		return fmt.Errorf("sync failed: %w", err)
 	}
-	total := displaySyncProgress(ch)
+	total := displaySyncProgress(ch, false)
 	stepOK(fmt.Sprintf("%d issues synced", total))
 
 	// ── Done ──────────────────────────────────────────────────────────────────
