@@ -29,8 +29,8 @@ func TestMigrations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("currentVersion: %v", err)
 	}
-	if version != 4 {
-		t.Errorf("expected version 4, got %d", version)
+	if version != 5 {
+		t.Errorf("expected version 5, got %d", version)
 	}
 }
 
