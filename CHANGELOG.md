@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.2](https://github.com/sthadka/jai/compare/v1.0.1...v1.0.2) (2026-04-09)
+
+
+### Bug Fixes
+
+* apply --fields filter to human text output in jai get ([0056f02](https://github.com/sthadka/jai/commit/0056f0223e78dc1d46f0d75b91c5234499d3305c))
+* strip seconds from JQL datetime in cursorToJQL ([1db77f5](https://github.com/sthadka/jai/commit/1db77f562115d2f0c93184358812cd62bbf7b13d))
+
 ## [1.0.1](https://github.com/sthadka/jai/compare/v1.0.0...v1.0.1) (2026-04-08)
 
 
