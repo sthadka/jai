@@ -169,6 +169,15 @@ func (c *Client) GetProject(ctx context.Context, key string) (*ProjectInfo, erro
 	return &p, nil
 }
 
+// GetIssue fetches a single issue by key from the Jira API.
+func (c *Client) GetIssue(ctx context.Context, key string) (*Issue, error) {
+	var issue Issue
+	if err := c.get(ctx, "/rest/api/3/issue/"+key, &issue); err != nil {
+		return nil, err
+	}
+	return &issue, nil
+}
+
 // Fields fetches all field definitions.
 func (c *Client) Fields(ctx context.Context) ([]*Field, error) {
 	var fields []*Field

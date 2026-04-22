@@ -1,10 +1,14 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
 	"sort"
+	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/sthadka/jai/internal/jira"
 	"github.com/sthadka/jai/internal/output"
 )
 
@@ -25,64 +29,131 @@ var getCmd = &cobra.Command{
 		}
 
 		if len(results.Rows) == 0 {
-			msg := fmt.Sprintf("issue %s not found in local database (try: jai sync)", key)
+			issue, apiErr := g.jira.GetIssue(cmd.Context(), key)
+			if apiErr != nil {
+				msg := fmt.Sprintf("issue %s not found in local database (try: jai sync)", key)
+				if g.jsonOut {
+					fmt.Println(string(output.Err("NotFoundError", msg)))
+					return nil
+				}
+				return fmt.Errorf("%s", msg)
+			}
+			var f jira.IssueFields
+			_ = json.Unmarshal(issue.Fields, &f)
+			fields := issueFieldsToMap(issue.Key, &f)
+			if g.fields != "" {
+				fields = output.FilterFields(fields, output.ParseFields(g.fields))
+			}
 			if g.jsonOut {
-				fmt.Println(string(output.Err("NotFoundError", msg)))
+				fmt.Println(string(output.OK(fields)))
 				return nil
 			}
-			return fmt.Errorf("%s", msg)
-		}
-
-		if g.jsonOut {
-			// Build map from first row.
-			data := make(map[string]interface{}, len(results.Columns))
-			for i, col := range results.Columns {
-				data[col] = results.Rows[0][i]
-			}
-			// Apply --fields filter.
-			if g.fields != "" {
-				data = output.FilterFields(data, output.ParseFields(g.fields))
-			}
-			fmt.Println(string(output.OK(data)))
+			fmt.Fprintln(os.Stderr, "(live from Jira API — not in local database)")
+			printIssueMap(fields)
 			return nil
 		}
 
-		// Human output: key-value pairs.
-		row := results.Rows[0]
-		fields := make(map[string]interface{}, len(results.Columns))
+		data := make(map[string]interface{}, len(results.Columns))
 		for i, col := range results.Columns {
-			fields[col] = row[i]
+			data[col] = results.Rows[0][i]
 		}
 		if g.fields != "" {
-			fields = output.FilterFields(fields, output.ParseFields(g.fields))
+			data = output.FilterFields(data, output.ParseFields(g.fields))
 		}
-
-		if v := output.ValueStr(fields["key"]); v != "" {
-			fmt.Printf("  %-22s %s\n", "Key:", v)
+		if g.jsonOut {
+			fmt.Println(string(output.OK(data)))
+			return nil
 		}
-		if v := output.ValueStr(fields["summary"]); v != "" {
-			fmt.Printf("  %-22s %s\n", "Summary:", v)
-		}
-		fmt.Println()
-
-		skip := map[string]bool{"key": true, "summary": true, "raw_json": true, "comments_text": true}
-		keys := make([]string, 0, len(fields))
-		for k := range fields {
-			if !skip[k] {
-				keys = append(keys, k)
-			}
-		}
-		sort.Strings(keys)
-		for _, k := range keys {
-			v := fields[k]
-			if v == nil || output.ValueStr(v) == "" {
-				continue
-			}
-			fmt.Print(output.KV(toTitle(k), v))
-		}
-
+		printIssueMap(data)
 		return nil
 	},
+}
+
+func printIssueMap(fields map[string]interface{}) {
+	if v := output.ValueStr(fields["key"]); v != "" {
+		fmt.Printf("  %-22s %s\n", "Key:", v)
+	}
+	if v := output.ValueStr(fields["summary"]); v != "" {
+		fmt.Printf("  %-22s %s\n", "Summary:", v)
+	}
+	fmt.Println()
+
+	skip := map[string]bool{"key": true, "summary": true, "raw_json": true, "comments_text": true}
+	keys := make([]string, 0, len(fields))
+	for k := range fields {
+		if !skip[k] {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		v := fields[k]
+		if v == nil || output.ValueStr(v) == "" {
+			continue
+		}
+		fmt.Print(output.KV(toTitle(k), v))
+	}
+}
+
+func issueFieldsToMap(key string, f *jira.IssueFields) map[string]interface{} {
+	m := map[string]interface{}{"key": key}
+	m["summary"] = f.Summary
+	if f.Status != nil {
+		m["status"] = f.Status.Name
+	}
+	if f.Priority != nil {
+		m["priority"] = f.Priority.Name
+	}
+	if f.Assignee != nil {
+		m["assignee"] = f.Assignee.DisplayName
+	}
+	if f.Reporter != nil {
+		m["reporter"] = f.Reporter.DisplayName
+	}
+	if f.IssueType != nil {
+		m["issue_type"] = f.IssueType.Name
+	}
+	if f.Project != nil {
+		m["project_key"] = f.Project.Key
+	}
+	if f.Parent != nil {
+		m["parent_key"] = f.Parent.Key
+	}
+	if f.Resolution != nil {
+		m["resolution"] = f.Resolution.Name
+	}
+	m["created"] = f.Created
+	m["updated"] = f.Updated
+	m["due_date"] = f.DueDate
+	m["resolution_date"] = f.ResolutionDate
+	if len(f.Labels) > 0 {
+		m["labels"] = strings.Join(f.Labels, ", ")
+	}
+	if len(f.Components) > 0 {
+		names := make([]string, len(f.Components))
+		for i, c := range f.Components {
+			names[i] = c.Name
+		}
+		m["components"] = strings.Join(names, ", ")
+	}
+	if len(f.FixVersions) > 0 {
+		names := make([]string, len(f.FixVersions))
+		for i, v := range f.FixVersions {
+			names[i] = v.Name
+		}
+		m["fix_versions"] = strings.Join(names, ", ")
+	}
+	if len(f.Subtasks) > 0 {
+		keys := make([]string, len(f.Subtasks))
+		for i, s := range f.Subtasks {
+			keys[i] = s.Key
+		}
+		m["subtasks"] = strings.Join(keys, ", ")
+	}
+	if desc := jira.ADFToPlaintext(f.Description); desc != "" {
+		m["description"] = desc
+	}
+	return m
 }
 
 func toTitle(s string) string {
