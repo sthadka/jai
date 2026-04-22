@@ -8,9 +8,12 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/sthadka/jai/internal/db"
 	"github.com/sthadka/jai/internal/jira"
 	"github.com/sthadka/jai/internal/output"
 )
+
+var getShowComments bool
 
 var getCmd = &cobra.Command{
 	Use:   "get <key>",
@@ -44,12 +47,22 @@ var getCmd = &cobra.Command{
 			if g.fields != "" {
 				fields = output.FilterFields(fields, output.ParseFields(g.fields))
 			}
+			var apiComments []map[string]interface{}
+			if getShowComments && f.Comment != nil {
+				apiComments = apiCommentsToMaps(f.Comment.Comments)
+			}
 			if g.jsonOut {
+				if getShowComments {
+					fields["comments"] = apiComments
+				}
 				fmt.Println(string(output.OK(fields)))
 				return nil
 			}
 			fmt.Fprintln(os.Stderr, "(live from Jira API — not in local database)")
 			printIssueMap(fields)
+			if getShowComments {
+				printCommentsSection(apiComments)
+			}
 			return nil
 		}
 
@@ -60,11 +73,23 @@ var getCmd = &cobra.Command{
 		if g.fields != "" {
 			data = output.FilterFields(data, output.ParseFields(g.fields))
 		}
+		var dbComments []map[string]interface{}
+		if getShowComments {
+			if cs, err := g.db.GetComments(key); err == nil {
+				dbComments = dbCommentsToMaps(cs)
+			}
+		}
 		if g.jsonOut {
+			if getShowComments {
+				data["comments"] = dbComments
+			}
 			fmt.Println(string(output.OK(data)))
 			return nil
 		}
 		printIssueMap(data)
+		if getShowComments {
+			printCommentsSection(dbComments)
+		}
 		return nil
 	},
 }
@@ -156,6 +181,55 @@ func issueFieldsToMap(key string, f *jira.IssueFields) map[string]interface{} {
 	return m
 }
 
+func dbCommentsToMaps(comments []*db.Comment) []map[string]interface{} {
+	out := make([]map[string]interface{}, len(comments))
+	for i, c := range comments {
+		out[i] = map[string]interface{}{
+			"id":      c.ID,
+			"author":  c.Author,
+			"created": c.Created,
+			"body":    c.Body,
+		}
+	}
+	return out
+}
+
+func apiCommentsToMaps(comments []*jira.Comment) []map[string]interface{} {
+	out := make([]map[string]interface{}, len(comments))
+	for i, c := range comments {
+		author := ""
+		if c.Author != nil {
+			author = c.Author.DisplayName
+		}
+		out[i] = map[string]interface{}{
+			"id":      c.ID,
+			"author":  author,
+			"created": c.Created,
+			"body":    jira.ADFToPlaintext(c.Body),
+		}
+	}
+	return out
+}
+
+func printCommentsSection(comments []map[string]interface{}) {
+	fmt.Printf("\n  Comments (%d)\n", len(comments))
+	if len(comments) == 0 {
+		fmt.Println("  (none)")
+		return
+	}
+	sep := strings.Repeat("─", 60)
+	for _, c := range comments {
+		fmt.Printf("  %s\n", sep)
+		fmt.Printf("  %-14s %s  |  %s\n", "Author:", output.ValueStr(c["author"]), output.ValueStr(c["created"]))
+		if body := output.ValueStr(c["body"]); body != "" {
+			for _, line := range strings.Split(strings.TrimRight(body, "\n"), "\n") {
+				fmt.Printf("  %s\n", line)
+			}
+		}
+	}
+	fmt.Printf("  %s\n", sep)
+}
+
 func toTitle(s string) string {
 	result := make([]byte, 0, len(s))
 	capitalize := true
@@ -179,4 +253,5 @@ func toTitle(s string) string {
 
 func init() {
 	rootCmd.AddCommand(getCmd)
+	getCmd.Flags().BoolVar(&getShowComments, "comments", false, "include comments in output")
 }
