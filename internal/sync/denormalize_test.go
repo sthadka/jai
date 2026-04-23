@@ -1,6 +1,7 @@
 package sync
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/sthadka/jai/internal/db"
@@ -89,27 +90,45 @@ func TestDenormalize_CustomFields(t *testing.T) {
 	}
 }
 
-func TestDenormalize_TeamObjectField(t *testing.T) {
-	raw := []byte(`{
-		"key": "TEST-3",
-		"fields": {
-			"summary": "Team field test",
-			"project": {"key": "TEST"},
-			"customfield_10001": {"id": "abc-123", "name": "ACS Cloud Service", "isShared": true}
-		}
-	}`)
-
-	fieldMap := map[string]*db.FieldMapping{
-		"customfield_10001": {JiraID: "customfield_10001", Name: "team", Type: "text", IsCustom: true, IsColumn: true},
+func TestDenormalize_ObjectFieldFallback(t *testing.T) {
+	tests := []struct {
+		name     string
+		fieldType string
+		rawValue string
+		want     string
+	}{
+		{"name key (Team-type)", "text", `{"id":"abc","name":"ACS Cloud Service","isShared":true}`, "ACS Cloud Service"},
+		{"value key", "text", `{"id":"xyz","value":"High Impact"}`, "High Impact"},
+		{"displayName key", "text", `{"self":"http://...","displayName":"Jane Doe"}`, "Jane Doe"},
+		{"title key", "text", `{"id":"t1","title":"Sprint 42"}`, "Sprint 42"},
+		{"name key on option type", "option", `{"id":"o1","name":"Fallback Name"}`, "Fallback Name"},
+		{"priority order: name wins over title", "text", `{"name":"Preferred","title":"Alt"}`, "Preferred"},
 	}
 
-	_, extra, err := Denormalize(raw, fieldMap)
-	if err != nil {
-		t.Fatalf("Denormalize: %v", err)
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			raw := []byte(fmt.Sprintf(`{
+				"key": "TEST-FB",
+				"fields": {
+					"summary": "Fallback test",
+					"project": {"key": "TEST"},
+					"customfield_99999": %s
+				}
+			}`, tt.rawValue))
 
-	if extra["team"] != "ACS Cloud Service" {
-		t.Errorf("expected team 'ACS Cloud Service', got %v", extra["team"])
+			fieldMap := map[string]*db.FieldMapping{
+				"customfield_99999": {JiraID: "customfield_99999", Name: "test_field", Type: tt.fieldType, IsCustom: true, IsColumn: true},
+			}
+
+			_, extra, err := Denormalize(raw, fieldMap)
+			if err != nil {
+				t.Fatalf("Denormalize: %v", err)
+			}
+
+			if extra["test_field"] != tt.want {
+				t.Errorf("expected %q, got %v", tt.want, extra["test_field"])
+			}
+		})
 	}
 }
 

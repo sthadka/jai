@@ -158,13 +158,6 @@ func extractFieldValue(raw json.RawMessage, fieldType string) interface{} {
 		if v := jira.ADFToPlaintext(raw); v != "" {
 			return v
 		}
-		// Some Jira field types (e.g. Team) return objects with a name property.
-		var obj struct {
-			Name string `json:"name"`
-		}
-		if err := json.Unmarshal(raw, &obj); err == nil && obj.Name != "" {
-			return obj.Name
-		}
 
 	case "number":
 		var f float64
@@ -219,6 +212,22 @@ func extractFieldValue(raw json.RawMessage, fieldType string) interface{} {
 			return strings.Join(strs, ",")
 		}
 	}
+
+	// Generic fallback: some Jira field types (e.g. Team) return objects whose
+	// structure doesn't match their declared schema type. Try common string keys
+	// so values aren't silently lost on unfamiliar Jira instances.
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err == nil {
+		for _, key := range []string{"name", "value", "displayName", "title"} {
+			if v, ok := obj[key]; ok {
+				var s string
+				if err := json.Unmarshal(v, &s); err == nil && s != "" {
+					return s
+				}
+			}
+		}
+	}
+
 	return nil
 }
 
