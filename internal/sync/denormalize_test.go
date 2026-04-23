@@ -89,6 +89,30 @@ func TestDenormalize_CustomFields(t *testing.T) {
 	}
 }
 
+func TestDenormalize_TeamObjectField(t *testing.T) {
+	raw := []byte(`{
+		"key": "TEST-3",
+		"fields": {
+			"summary": "Team field test",
+			"project": {"key": "TEST"},
+			"customfield_10001": {"id": "abc-123", "name": "ACS Cloud Service", "isShared": true}
+		}
+	}`)
+
+	fieldMap := map[string]*db.FieldMapping{
+		"customfield_10001": {JiraID: "customfield_10001", Name: "team", Type: "text", IsCustom: true, IsColumn: true},
+	}
+
+	_, extra, err := Denormalize(raw, fieldMap)
+	if err != nil {
+		t.Fatalf("Denormalize: %v", err)
+	}
+
+	if extra["team"] != "ACS Cloud Service" {
+		t.Errorf("expected team 'ACS Cloud Service', got %v", extra["team"])
+	}
+}
+
 func TestExtractComments(t *testing.T) {
 	raw := []byte(`{
 		"key": "TEST-1",

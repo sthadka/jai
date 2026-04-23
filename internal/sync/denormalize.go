@@ -155,8 +155,16 @@ func extractFieldValue(raw json.RawMessage, fieldType string) interface{} {
 		if err := json.Unmarshal(raw, &s); err == nil {
 			return s
 		}
-		// Try ADF.
-		return jira.ADFToPlaintext(raw)
+		if v := jira.ADFToPlaintext(raw); v != "" {
+			return v
+		}
+		// Some Jira field types (e.g. Team) return objects with a name property.
+		var obj struct {
+			Name string `json:"name"`
+		}
+		if err := json.Unmarshal(raw, &obj); err == nil && obj.Name != "" {
+			return obj.Name
+		}
 
 	case "number":
 		var f float64
