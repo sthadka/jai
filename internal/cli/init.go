@@ -125,8 +125,11 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 	existingToken := defaultFor("token")
 	tokenDefault := ""
-	if existingToken != "" {
+	if existingToken != "" && !strings.Contains(existingToken, "${") {
 		tokenDefault = "<existing — press Enter to keep>"
+	} else if strings.Contains(existingToken, "${") {
+		stepWarn("Existing token is an unresolved env var (" + existingToken + ") — enter the token value directly.")
+		existingToken = ""
 	}
 	tokenInput := prompt(reader, "API Token "+dim("(stored as ${JAI_TOKEN})"), tokenDefault)
 	token := tokenInput
