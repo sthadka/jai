@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.1.0](https://github.com/sthadka/jai/compare/v1.0.1...v1.1.0) (2026-04-23)
+
+
+### Features
+
+* add --comments flag to jai get ([9dad24e](https://github.com/sthadka/jai/commit/9dad24e3e56a45126768f0bad63eb72d35a5f9d0))
+* add jai create command for creating Jira issues ([ae6b804](https://github.com/sthadka/jai/commit/ae6b804211ff49fb89b46b6fdef457f2bed387e8))
+* fall back to Jira API in jai get when issue not in local DB ([483006f](https://github.com/sthadka/jai/commit/483006fc1385672b7c45369c5b788ddaedac3fa4))
+
+
+### Bug Fixes
+
+* apply --fields filter to human text output in jai get ([0056f02](https://github.com/sthadka/jai/commit/0056f0223e78dc1d46f0d75b91c5234499d3305c))
+* handle Jira Team field objects in text-type denormalization ([3a9f772](https://github.com/sthadka/jai/commit/3a9f772e2f3c6e665dcf4cc53a863323abbc4023))
+* strip seconds from JQL datetime in cursorToJQL ([1db77f5](https://github.com/sthadka/jai/commit/1db77f562115d2f0c93184358812cd62bbf7b13d))
+* warn and prompt when existing token is an unresolved env var in jai init ([99a793a](https://github.com/sthadka/jai/commit/99a793a179444c09684b48cc8252284804c75b63))
+
+
+### Refactoring
+
+* generic object fallback in field value extraction ([6d5409b](https://github.com/sthadka/jai/commit/6d5409b59cf7cef797b280bf69fa23acd448cdc2))
+
 ## [1.0.1](https://github.com/sthadka/jai/compare/v1.0.0...v1.0.1) (2026-04-08)
 
 
