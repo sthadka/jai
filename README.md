@@ -224,6 +224,25 @@ views:
 Changes queue locally and sync to Jira on the next `jai push` or background sync cycle.
 
 ```sh
+# Create a new issue (hits Jira API directly, returns key immediately)
+jai create ROX --type Bug --summary "Login fails on SSO" --priority High --labels backend,auth
+# → ✓ Created ROX-4901: Login fails on SSO
+
+# Create with all the bells and whistles
+jai create ROX --type Story \
+  --summary "Add search" \
+  --description "Implement full-text search across all fields" \
+  --parent ROX-100 \
+  --labels backend,search \
+  --components Platform \
+  --priority Medium \
+  --assignee user@example.com \
+  --fix-version v4.6 \
+  --due-date 2025-03-15 \
+  --field customfield_10001='{"value":"Team Alpha"}' \
+  --json
+# → {"ok":true,"data":{"key":"ROX-4902","id":"12345","project":"ROX","status":"created"}}
+
 # Update a field
 jai set ROX-4821 status "In Progress"
 # → ROX-4821: status → "In Progress" (pending sync)
@@ -296,6 +315,7 @@ Both paths can be overridden with `--config` and `--db` flags, or by setting `db
 | `jai fields` | List available fields and mappings |
 | `jai schema <command>` | Command schema for agents |
 | `jai status` | Sync status and pending changes |
+| `jai create <project>` | Create a new issue |
 | `jai set <key> <field> <value>` | Update an issue field |
 | `jai comment <key> <text>` | Add a comment |
 | `jai push` | Push pending changes to Jira |

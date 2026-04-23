@@ -9,6 +9,25 @@ import (
 	"net/http"
 )
 
+// CreateIssueResponse is the response from POST /rest/api/3/issue.
+type CreateIssueResponse struct {
+	ID   string `json:"id"`
+	Key  string `json:"key"`
+	Self string `json:"self"`
+}
+
+// CreateIssue creates a new Jira issue and returns the created issue's key.
+func (c *Client) CreateIssue(ctx context.Context, fields map[string]interface{}) (*CreateIssueResponse, error) {
+	payload := map[string]interface{}{
+		"fields": fields,
+	}
+	var resp CreateIssueResponse
+	if err := c.postDecode(ctx, "/rest/api/3/issue", payload, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
 // UpdateField updates a single field on a Jira issue.
 func (c *Client) UpdateField(ctx context.Context, issueKey, fieldID string, value interface{}) error {
 	payload := map[string]interface{}{
