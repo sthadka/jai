@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/sthadka/jai/internal/output"
@@ -25,6 +26,13 @@ var searchCmd = &cobra.Command{
 			LIMIT %d`, searchLimit)
 
 		results, err := g.query.Execute(sql, text)
+		if err != nil && strings.Contains(err.Error(), "fts5: missing row") {
+			fmt.Fprintln(cmd.ErrOrStderr(), "FTS index out of sync, rebuilding...")
+			if rbErr := g.db.RebuildFTS(); rbErr != nil {
+				return fmt.Errorf("rebuilding FTS index: %w", rbErr)
+			}
+			results, err = g.query.Execute(sql, text)
+		}
 		if err != nil {
 			if g.jsonOut {
 				fmt.Println(string(output.Err("QueryError", err.Error())))

@@ -46,6 +46,13 @@ func Open(path string) (*DB, error) {
 	return db, nil
 }
 
+// RebuildFTS rebuilds the issues_fts index from the current issues table.
+// Call when the FTS index becomes inconsistent (e.g. "fts5: missing row" errors).
+func (db *DB) RebuildFTS() error {
+	_, err := db.Exec(`INSERT INTO issues_fts(issues_fts) VALUES('rebuild')`)
+	return err
+}
+
 func (db *DB) applyPragmas() error {
 	pragmas := []string{
 		"PRAGMA journal_mode=WAL",
