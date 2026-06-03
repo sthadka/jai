@@ -75,11 +75,11 @@ func TestGetFieldsHumanOutput(t *testing.T) {
 		}
 	})
 
-	if strings.Contains(out, "Summary:") {
-		t.Errorf("expected Summary to be filtered out, got:\n%s", out)
+	if strings.Contains(out, "summary:") {
+		t.Errorf("expected summary to be filtered out, got:\n%s", out)
 	}
-	if strings.Contains(out, "Key:") {
-		t.Errorf("expected Key to be filtered out, got:\n%s", out)
+	if strings.Contains(out, "key:") {
+		t.Errorf("expected key to be filtered out, got:\n%s", out)
 	}
 	if !strings.Contains(out, "In Progress") {
 		t.Errorf("expected status value 'In Progress' in output, got:\n%s", out)
@@ -87,7 +87,7 @@ func TestGetFieldsHumanOutput(t *testing.T) {
 }
 
 // TestGetFieldsHumanOutput_KeySummary verifies that key and summary appear
-// in the header when included in --fields.
+// in front matter when included in --fields.
 func TestGetFieldsHumanOutput_KeySummary(t *testing.T) {
 	setupTestGlobals(t)
 	g.fields = "key,summary"
@@ -98,11 +98,11 @@ func TestGetFieldsHumanOutput_KeySummary(t *testing.T) {
 		}
 	})
 
-	if !strings.Contains(out, "Key:") {
-		t.Errorf("expected Key: in output, got:\n%s", out)
+	if !strings.Contains(out, "key: TEST-1") {
+		t.Errorf("expected 'key: TEST-1' in output, got:\n%s", out)
 	}
-	if !strings.Contains(out, "Summary:") {
-		t.Errorf("expected Summary: in output, got:\n%s", out)
+	if !strings.Contains(out, "summary:") {
+		t.Errorf("expected 'summary:' in output, got:\n%s", out)
 	}
 	if !strings.Contains(out, "TEST-1") {
 		t.Errorf("expected TEST-1 in output, got:\n%s", out)
@@ -153,10 +153,13 @@ func TestGetNoFields(t *testing.T) {
 		}
 	})
 
-	if !strings.Contains(out, "Key:") {
-		t.Errorf("expected Key: in full output, got:\n%s", out)
+	if !strings.Contains(out, "key: TEST-1") {
+		t.Errorf("expected 'key: TEST-1' in full output, got:\n%s", out)
 	}
-	if !strings.Contains(out, "Summary:") {
-		t.Errorf("expected Summary: in full output, got:\n%s", out)
+	if !strings.Contains(out, "summary:") {
+		t.Errorf("expected 'summary:' in full output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "---") {
+		t.Errorf("expected YAML front matter delimiter in full output, got:\n%s", out)
 	}
 }

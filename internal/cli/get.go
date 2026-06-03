@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -59,7 +58,7 @@ var getCmd = &cobra.Command{
 				return nil
 			}
 			fmt.Fprintln(os.Stderr, "(live from Jira API — not in local database)")
-			printIssueMap(fields)
+			printMarkdownDoc(fields)
 			if getShowComments {
 				printCommentsSection(apiComments)
 			}
@@ -98,7 +97,7 @@ var getCmd = &cobra.Command{
 				}
 			}
 		}
-		printIssueMap(data)
+		printMarkdownDoc(data)
 		if getShowComments {
 			printCommentsSection(dbComments)
 		}
@@ -106,39 +105,114 @@ var getCmd = &cobra.Command{
 	},
 }
 
-func printIssueMap(fields map[string]interface{}) {
-	if v := output.ValueStr(fields["key"]); v != "" {
-		fmt.Printf("  %-22s %s\n", "Key:", v)
-	}
-	if v := output.ValueStr(fields["summary"]); v != "" {
-		fmt.Printf("  %-22s %s\n", "Summary:", v)
-	}
-	fmt.Println()
+// frontMatterEntries defines the curated, ordered fields for YAML front matter.
+// field is the map key; yamlKey is the name written to the front matter.
+var frontMatterEntries = []struct{ field, yamlKey string }{
+	{"key", "key"},
+	{"summary", "summary"},
+	{"status", "status"},
+	{"type", "type"},
+	{"size", "size"},
+	{"priority", "priority"},
+	{"assignee", "assignee"},
+	{"reporter", "reporter"},
+	{"fix_version", "fix_version"},
+	{"labels", "labels"},
+	{"components", "components"},
+	{"parent_key", "parent"},
+	{"team", "team"},
+	{"product_manager", "product_manager"},
+	{"activity_type", "activity_type"},
+	{"release_note_text", "release_note"},
+	{"release_note_type", "release_note_type"},
+	{"release_type", "release_type"},
+	{"product_documentation_required", "product_docs"},
+	{"due_date", "due"},
+	{"target_version", "target_version"},
+	{"resolution", "resolution"},
+	{"created", "created"},
+	{"updated", "updated"},
+	{"resolved", "resolved"},
+}
 
-	skip := map[string]bool{"key": true, "summary": true, "raw_json": true, "comments_text": true}
-	keys := make([]string, 0, len(fields))
-	for k := range fields {
-		if !skip[k] {
-			keys = append(keys, k)
-		}
-	}
-	sort.Strings(keys)
-	for _, k := range keys {
-		v := fields[k]
-		s := output.ValueStr(v)
-		if v == nil || s == "" {
+// arrayFMFields holds comma-separated values that become YAML arrays.
+var arrayFMFields = map[string]bool{
+	"labels": true, "components": true, "fix_version": true,
+}
+
+// zeroSkipFMFields are omitted when their value is zero/false/none.
+var zeroSkipFMFields = map[string]bool{
+	"effort": true, "reach": true, "rice_score": true,
+	"blocked": true, "blocked_reason": true, "ready": true,
+}
+
+func printMarkdownDoc(fields map[string]interface{}) {
+	fmt.Println("---")
+	for _, e := range frontMatterEntries {
+		s := output.ValueStr(fields[e.field])
+		if s == "" {
 			continue
 		}
-		if strings.ContainsRune(s, '\n') {
-			fmt.Printf("  %s:\n", toTitle(k))
-			for _, line := range strings.Split(strings.TrimRight(s, "\n"), "\n") {
-				fmt.Printf("    %s\n", line)
+		if zeroSkipFMFields[e.field] && isZeroOrFalseOrNone(s) {
+			continue
+		}
+		if arrayFMFields[e.field] {
+			items := strings.Split(s, ",")
+			for i := range items {
+				items[i] = strings.TrimSpace(items[i])
 			}
-			fmt.Println()
+			fmt.Printf("%s: [%s]\n", e.yamlKey, strings.Join(items, ", "))
 		} else {
-			fmt.Print(output.KV(toTitle(k), v))
+			fmt.Printf("%s: %s\n", e.yamlKey, fmQuote(s))
 		}
 	}
+	fmt.Println("---")
+	fmt.Println()
+
+	if summary := output.ValueStr(fields["summary"]); summary != "" {
+		fmt.Printf("# %s\n\n", summary)
+	}
+	if desc := output.ValueStr(fields["description"]); desc != "" {
+		fmt.Println(strings.TrimRight(desc, "\n"))
+		fmt.Println()
+	}
+	if ss := strings.TrimSpace(output.ValueStr(fields["status_summary"])); ss != "" {
+		// Strip leading lone colons left by ADF artifacts.
+		ss = strings.TrimLeft(ss, ": \n")
+		if ss != "" {
+			fmt.Println("## Status Summary")
+			fmt.Println()
+			fmt.Println(strings.TrimRight(ss, "\n"))
+			fmt.Println()
+		}
+	}
+}
+
+// fmQuote formats a scalar value for YAML front matter.
+// ISO datetimes are truncated to YYYY-MM-DD; values with special chars are double-quoted.
+func fmQuote(s string) string {
+	if isISODatetime(s) {
+		s = s[:10]
+	}
+	for _, r := range s {
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') || r == '-' || r == '_' || r == '.') {
+			return `"` + strings.ReplaceAll(s, `"`, `\"`) + `"`
+		}
+	}
+	return s
+}
+
+func isISODatetime(s string) bool {
+	return len(s) > 10 && s[4] == '-' && s[7] == '-'
+}
+
+func isZeroOrFalseOrNone(s string) bool {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "0", "false", "none", "{}":
+		return true
+	}
+	return false
 }
 
 func issueFieldsToMap(key string, f *jira.IssueFields) map[string]interface{} {
@@ -233,44 +307,19 @@ func apiCommentsToMaps(comments []*jira.Comment) []map[string]interface{} {
 }
 
 func printCommentsSection(comments []map[string]interface{}) {
-	fmt.Printf("\n  Comments (%d)\n", len(comments))
 	if len(comments) == 0 {
-		fmt.Println("  (none)")
 		return
 	}
-	sep := strings.Repeat("─", 60)
+	fmt.Printf("---\n\n## Comments (%d)\n", len(comments))
 	for _, c := range comments {
-		fmt.Printf("  %s\n", sep)
-		fmt.Printf("  %-14s %s  |  %s\n", "Author:", output.ValueStr(c["author"]), output.ValueStr(c["created"]))
+		fmt.Printf("\n**%s** · %s\n\n", output.ValueStr(c["author"]), output.ValueStr(c["created"]))
 		if body := output.ValueStr(c["body"]); body != "" {
-			for _, line := range strings.Split(strings.TrimRight(body, "\n"), "\n") {
-				fmt.Printf("  %s\n", line)
-			}
+			fmt.Println(strings.TrimRight(body, "\n"))
 		}
+		fmt.Println()
 	}
-	fmt.Printf("  %s\n", sep)
 }
 
-func toTitle(s string) string {
-	result := make([]byte, 0, len(s))
-	capitalize := true
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if c == '_' {
-			result = append(result, ' ')
-			capitalize = true
-			continue
-		}
-		if capitalize {
-			if c >= 'a' && c <= 'z' {
-				c -= 32
-			}
-			capitalize = false
-		}
-		result = append(result, c)
-	}
-	return string(result)
-}
 
 func init() {
 	rootCmd.AddCommand(getCmd)
