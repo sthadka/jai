@@ -86,6 +86,18 @@ var getCmd = &cobra.Command{
 			fmt.Println(string(output.OK(data)))
 			return nil
 		}
+		if rawJSON := output.ValueStr(data["raw_json"]); rawJSON != "" {
+			var wrapper struct {
+				Fields struct {
+					Description json.RawMessage `json:"description"`
+				} `json:"fields"`
+			}
+			if err := json.Unmarshal([]byte(rawJSON), &wrapper); err == nil {
+				if md := jira.ADFToMarkdown(wrapper.Fields.Description); md != "" {
+					data["description"] = md
+				}
+			}
+		}
 		printIssueMap(data)
 		if getShowComments {
 			printCommentsSection(dbComments)
@@ -113,10 +125,19 @@ func printIssueMap(fields map[string]interface{}) {
 	sort.Strings(keys)
 	for _, k := range keys {
 		v := fields[k]
-		if v == nil || output.ValueStr(v) == "" {
+		s := output.ValueStr(v)
+		if v == nil || s == "" {
 			continue
 		}
-		fmt.Print(output.KV(toTitle(k), v))
+		if strings.ContainsRune(s, '\n') {
+			fmt.Printf("  %s:\n", toTitle(k))
+			for _, line := range strings.Split(strings.TrimRight(s, "\n"), "\n") {
+				fmt.Printf("    %s\n", line)
+			}
+			fmt.Println()
+		} else {
+			fmt.Print(output.KV(toTitle(k), v))
+		}
 	}
 }
 
@@ -175,7 +196,7 @@ func issueFieldsToMap(key string, f *jira.IssueFields) map[string]interface{} {
 		}
 		m["subtasks"] = strings.Join(keys, ", ")
 	}
-	if desc := jira.ADFToPlaintext(f.Description); desc != "" {
+	if desc := jira.ADFToMarkdown(f.Description); desc != "" {
 		m["description"] = desc
 	}
 	return m
@@ -205,7 +226,7 @@ func apiCommentsToMaps(comments []*jira.Comment) []map[string]interface{} {
 			"id":      c.ID,
 			"author":  author,
 			"created": c.Created,
-			"body":    jira.ADFToPlaintext(c.Body),
+			"body":    jira.ADFToMarkdown(c.Body),
 		}
 	}
 	return out
