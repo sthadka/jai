@@ -258,25 +258,28 @@ func (e *Engine) syncSource(ctx context.Context, src config.SyncSource, full, re
 				continue
 			}
 
-			existing, _ := e.db.GetIssue(apiIssue.Key)
-			if existing == nil {
-				newCount++
-			} else {
-				updatedCount++
-			}
-
 			issue, extra, err := Denormalize(rawBytes, fieldMap)
 			if err != nil {
 				continue
 			}
 
-			if err := e.db.UpsertIssue(issue, extra); err != nil {
-				continue
-			}
-
-			// Track max updated for resume cursor.
+			// Track max updated for resume cursor regardless of skip.
 			if issue.Updated > lastUpdated {
 				lastUpdated = issue.Updated
+			}
+
+			existingUpdated, _ := e.db.GetIssueUpdated(apiIssue.Key)
+			if existingUpdated == "" {
+				newCount++
+			} else if existingUpdated == issue.Updated {
+				// Issue unchanged since last sync — skip upsert.
+				continue
+			} else {
+				updatedCount++
+			}
+
+			if err := e.db.UpsertIssue(issue, extra); err != nil {
+				continue
 			}
 
 			comments, err := ExtractComments(apiIssue.Key, rawBytes)

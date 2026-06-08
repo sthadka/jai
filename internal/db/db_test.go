@@ -61,6 +61,38 @@ func TestUpsertIssue(t *testing.T) {
 	}
 }
 
+func TestGetIssueUpdated(t *testing.T) {
+	db := openTestDB(t)
+
+	// Non-existent issue returns empty string.
+	updated, err := db.GetIssueUpdated("NOPE-1")
+	if err != nil {
+		t.Fatalf("GetIssueUpdated: %v", err)
+	}
+	if updated != "" {
+		t.Errorf("expected empty, got %q", updated)
+	}
+
+	// Insert an issue with an updated timestamp.
+	issue := &Issue{
+		Key:     "UPD-1",
+		Project: "UPD",
+		Updated: "2026-06-08T10:30:00Z",
+		RawJSON: `{}`,
+	}
+	if err := db.UpsertIssue(issue, nil); err != nil {
+		t.Fatalf("UpsertIssue: %v", err)
+	}
+
+	updated, err = db.GetIssueUpdated("UPD-1")
+	if err != nil {
+		t.Fatalf("GetIssueUpdated: %v", err)
+	}
+	if updated != "2026-06-08T10:30:00Z" {
+		t.Errorf("expected 2026-06-08T10:30:00Z, got %q", updated)
+	}
+}
+
 func TestUpsertComment(t *testing.T) {
 	db := openTestDB(t)
 

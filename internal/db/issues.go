@@ -97,6 +97,19 @@ func (db *DB) UpsertIssue(issue *Issue, extra map[string]interface{}) error {
 	return err
 }
 
+// GetIssueUpdated returns the stored "updated" timestamp for an issue, or "" if not found.
+func (db *DB) GetIssueUpdated(key string) (string, error) {
+	var updated sql.NullString
+	err := db.QueryRow("SELECT updated FROM issues WHERE key = ?", key).Scan(&updated)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return updated.String, nil
+}
+
 // GetIssue retrieves a single issue by key.
 func (db *DB) GetIssue(key string) (map[string]interface{}, error) {
 	rows, err := db.Query("SELECT * FROM issues WHERE key = ?", key)
