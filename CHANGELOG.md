@@ -1,5 +1,29 @@
 # Changelog
 
+## [2.0.0](https://github.com/sthadka/jai/compare/v1.1.0...v2.0.0) (2026-06-09)
+
+
+### ⚠ BREAKING CHANGES
+
+* store array fields as JSON arrays instead of comma-separated text
+
+### Features
+
+* add --stats flag to jai fields for population counts ([9f7176a](https://github.com/sthadka/jai/commit/9f7176a0ca71ccda1500b3c5d3150c6559ba53b5))
+* include jira_name in schema db output ([6fc51f4](https://github.com/sthadka/jai/commit/6fc51f46ecdaa26ecda83485bbafcbf2218423f6))
+* output jai get as YAML front matter + markdown document ([5b84fa6](https://github.com/sthadka/jai/commit/5b84fa6ba4306c078831edc6057452306b9996f4))
+* render description and comment bodies as markdown in jai get ([37cc218](https://github.com/sthadka/jai/commit/37cc2184954d39a7f46739854ba0e8715520f740))
+* show jira_name column in jai fields human output ([b660403](https://github.com/sthadka/jai/commit/b66040368c3e1f2e6d36ae7c4dbf0d9f5c91ba13))
+* store array fields as JSON arrays instead of comma-separated text ([5f5baca](https://github.com/sthadka/jai/commit/5f5baca7b08f149e29a159c9115ac5166678c533))
+* warn on field name collisions during sync ([33125fd](https://github.com/sthadka/jai/commit/33125fdbf2514c66631f54af3dde13d86870d7d1))
+
+
+### Bug Fixes
+
+* auto-rebuild FTS index when out of sync in jai search ([8c1fdbe](https://github.com/sthadka/jai/commit/8c1fdbe85fd4604793522e29e47fb329722e1570))
+* drop FTS triggers during v6 array migration to prevent hang ([08bb0ef](https://github.com/sthadka/jai/commit/08bb0efd16cc2ad74ceea5c68526823e72f6a70d))
+* skip unchanged issues during incremental sync ([e2e727f](https://github.com/sthadka/jai/commit/e2e727fdf02829fd1544db4af601b79758996681))
+
 ## [1.1.0](https://github.com/sthadka/jai/compare/v1.0.1...v1.1.0) (2026-04-23)
 
 
