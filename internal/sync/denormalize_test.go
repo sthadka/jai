@@ -50,14 +50,14 @@ func TestDenormalize_Basic(t *testing.T) {
 	if issue.Assignee != "Jane Doe" {
 		t.Errorf("expected assignee 'Jane Doe', got %s", issue.Assignee)
 	}
-	if issue.Labels != "security,auth" {
-		t.Errorf("expected labels 'security,auth', got %s", issue.Labels)
+	if issue.Labels != `["security","auth"]` {
+		t.Errorf("expected labels as JSON array, got %s", issue.Labels)
 	}
-	if issue.Components != "Backend" {
-		t.Errorf("expected components 'Backend', got %s", issue.Components)
+	if issue.Components != `["Backend"]` {
+		t.Errorf("expected components as JSON array, got %s", issue.Components)
 	}
-	if issue.FixVersion != "v1.0" {
-		t.Errorf("expected fix_version 'v1.0', got %s", issue.FixVersion)
+	if issue.FixVersion != `["v1.0"]` {
+		t.Errorf("expected fix_version as JSON array, got %s", issue.FixVersion)
 	}
 }
 
@@ -87,6 +87,31 @@ func TestDenormalize_CustomFields(t *testing.T) {
 	}
 	if extra["story_points"] != 8.0 {
 		t.Errorf("expected story_points 8.0, got %v", extra["story_points"])
+	}
+}
+
+func TestDenormalize_CustomArrayField(t *testing.T) {
+	raw := []byte(`{
+		"key": "TEST-3",
+		"fields": {
+			"summary": "Array field test",
+			"project": {"key": "TEST"},
+			"customfield_11128": ["123","456","789"]
+		}
+	}`)
+
+	fieldMap := map[string]*db.FieldMapping{
+		"customfield_11128": {JiraID: "customfield_11128", Name: "ebs_account_number", Type: "array", IsCustom: true, IsColumn: true},
+	}
+
+	_, extra, err := Denormalize(raw, fieldMap)
+	if err != nil {
+		t.Fatalf("Denormalize: %v", err)
+	}
+
+	want := `["123","456","789"]`
+	if extra["ebs_account_number"] != want {
+		t.Errorf("expected %s, got %v", want, extra["ebs_account_number"])
 	}
 }
 

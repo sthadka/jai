@@ -258,9 +258,12 @@ func (d *DetailPane) buildRight(width int) []string {
 	// ── People ──────────────────────────────────────────────────────────────
 	addRow("Assignee", strVal("assignee"))
 	addRow("Reporter", strVal("reporter"))
-	// Labels (comma-separated → one per line)
 	if labels := strVal("labels"); labels != "" {
-		for i, label := range strings.Split(labels, ",") {
+		var labelList []string
+		if err := json.Unmarshal([]byte(labels), &labelList); err != nil {
+			labelList = strings.Split(labels, ",")
+		}
+		for i, label := range labelList {
 			label = strings.TrimSpace(label)
 			if label == "" {
 				continue

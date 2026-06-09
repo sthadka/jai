@@ -135,7 +135,19 @@ var frontMatterEntries = []struct{ field, yamlKey string }{
 	{"resolved", "resolved"},
 }
 
-// arrayFMFields holds comma-separated values that become YAML arrays.
+func parseJSONOrCSV(s string) []string {
+	var items []string
+	if json.Unmarshal([]byte(s), &items) == nil {
+		return items
+	}
+	parts := strings.Split(s, ",")
+	for i := range parts {
+		parts[i] = strings.TrimSpace(parts[i])
+	}
+	return parts
+}
+
+// arrayFMFields holds array values that become YAML arrays.
 var arrayFMFields = map[string]bool{
 	"labels": true, "components": true, "fix_version": true,
 }
@@ -157,10 +169,7 @@ func printMarkdownDoc(fields map[string]interface{}) {
 			continue
 		}
 		if arrayFMFields[e.field] {
-			items := strings.Split(s, ",")
-			for i := range items {
-				items[i] = strings.TrimSpace(items[i])
-			}
+			items := parseJSONOrCSV(s)
 			fmt.Printf("%s: [%s]\n", e.yamlKey, strings.Join(items, ", "))
 		} else {
 			fmt.Printf("%s: %s\n", e.yamlKey, fmQuote(s))

@@ -2,7 +2,9 @@ package db
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -75,6 +77,91 @@ var migrations = []migration{
 			return err
 		},
 	},
+	{
+		version:     6,
+		description: "convert comma-separated array columns to JSON arrays",
+		up: func(tx *sql.Tx) error {
+			builtinArrayCols := []string{"labels", "components", "fix_version", "subtask_keys"}
+			for _, col := range builtinArrayCols {
+				if err := convertCSVToJSON(tx, col); err != nil {
+					return fmt.Errorf("converting %s: %w", col, err)
+				}
+			}
+
+			rows, err := tx.Query(`SELECT name FROM field_map WHERE type = 'array' AND is_column = 1`)
+			if err != nil {
+				return err
+			}
+			var customCols []string
+			for rows.Next() {
+				var n string
+				if rows.Scan(&n) == nil {
+					customCols = append(customCols, n)
+				}
+			}
+			rows.Close()
+
+			for _, col := range customCols {
+				if err := convertCSVToJSON(tx, col); err != nil {
+					return fmt.Errorf("converting custom column %s: %w", col, err)
+				}
+			}
+			return nil
+		},
+	},
+}
+
+func convertCSVToJSON(tx *sql.Tx, column string) error {
+	if !safeColumnRe.MatchString(column) {
+		return fmt.Errorf("invalid column name: %s", column)
+	}
+
+	q := fmt.Sprintf(
+		`SELECT rowid, "%s" FROM issues WHERE "%s" IS NOT NULL AND "%s" != '' AND "%s" NOT LIKE '[%%'`,
+		column, column, column, column,
+	)
+	rows, err := tx.Query(q)
+	if err != nil {
+		return err
+	}
+
+	type row struct {
+		rowid int64
+		val   string
+	}
+	var updates []row
+	for rows.Next() {
+		var r row
+		if rows.Scan(&r.rowid, &r.val) == nil {
+			updates = append(updates, r)
+		}
+	}
+	rows.Close()
+
+	if len(updates) == 0 {
+		return nil
+	}
+
+	stmt, err := tx.Prepare(fmt.Sprintf(`UPDATE issues SET "%s" = ? WHERE rowid = ?`, column))
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for _, u := range updates {
+		parts := strings.Split(u.val, ",")
+		for i := range parts {
+			parts[i] = strings.TrimSpace(parts[i])
+		}
+		b, err := json.Marshal(parts)
+		if err != nil {
+			continue
+		}
+		if _, err := stmt.Exec(string(b), u.rowid); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Migrate applies any pending schema migrations in order.

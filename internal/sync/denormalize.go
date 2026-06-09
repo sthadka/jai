@@ -3,12 +3,16 @@ package sync
 import (
 	"database/sql"
 	"encoding/json"
-	"strings"
 	"time"
 
 	"github.com/sthadka/jai/internal/db"
 	"github.com/sthadka/jai/internal/jira"
 )
+
+func marshalJSONArray(items []string) string {
+	b, _ := json.Marshal(items)
+	return string(b)
+}
 
 // jiraDateFormats lists the timestamp formats Jira Cloud uses.
 // The colon-less timezone offset (+0000) is not RFC3339, so go-sqlite3
@@ -83,21 +87,21 @@ func Denormalize(raw []byte, fieldMap map[string]*db.FieldMapping) (*db.Issue, m
 	issue.Resolved = normalizeDate(fields.ResolutionDate)
 
 	if len(fields.Labels) > 0 {
-		issue.Labels = strings.Join(fields.Labels, ",")
+		issue.Labels = marshalJSONArray(fields.Labels)
 	}
 	if len(fields.Components) > 0 {
 		names := make([]string, len(fields.Components))
 		for i, c := range fields.Components {
 			names[i] = c.Name
 		}
-		issue.Components = strings.Join(names, ",")
+		issue.Components = marshalJSONArray(names)
 	}
 	if len(fields.FixVersions) > 0 {
 		names := make([]string, len(fields.FixVersions))
 		for i, v := range fields.FixVersions {
 			names[i] = v.Name
 		}
-		issue.FixVersion = strings.Join(names, ",")
+		issue.FixVersion = marshalJSONArray(names)
 	}
 	if fields.Parent != nil {
 		issue.ParentKey = fields.Parent.Key
@@ -120,7 +124,7 @@ func Denormalize(raw []byte, fieldMap map[string]*db.FieldMapping) (*db.Issue, m
 		for i, s := range fields.Subtasks {
 			keys[i] = s.Key
 		}
-		issue.SubtaskKeys = strings.Join(keys, ",")
+		issue.SubtaskKeys = marshalJSONArray(keys)
 	}
 
 	// Extract custom fields as dynamic columns.
@@ -203,13 +207,13 @@ func extractFieldValue(raw json.RawMessage, fieldType string) interface{} {
 				}
 			}
 			if len(names) > 0 {
-				return strings.Join(names, ",")
+				return marshalJSONArray(names)
 			}
 		}
 		// Try array of strings.
 		var strs []string
 		if err := json.Unmarshal(raw, &strs); err == nil {
-			return strings.Join(strs, ",")
+			return marshalJSONArray(strs)
 		}
 	}
 
