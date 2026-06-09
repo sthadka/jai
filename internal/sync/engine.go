@@ -99,6 +99,8 @@ func (e *Engine) DiscoverFields(ctx context.Context, overrides map[string]string
 			if strings.HasPrefix(suffix, "customfield_") {
 				suffix = suffix[len("customfield_"):]
 			}
+			fmt.Fprintf(os.Stderr, "warning: field %q (%s) renamed to %s_%s (name collision with %s)\n",
+				f.Name, f.ID, name, suffix, ownerID)
 			name = name + "_" + suffix
 		}
 		takenNames[name] = f.ID
