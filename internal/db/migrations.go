@@ -81,6 +81,13 @@ var migrations = []migration{
 		version:     6,
 		description: "convert comma-separated array columns to JSON arrays",
 		up: func(tx *sql.Tx) error {
+			// Drop FTS triggers to avoid O(rows×columns) FTS rebuilds during bulk update.
+			for _, name := range []string{"issues_fts_insert", "issues_fts_update", "issues_fts_delete"} {
+				if _, err := tx.Exec(fmt.Sprintf("DROP TRIGGER IF EXISTS %s", name)); err != nil {
+					return fmt.Errorf("dropping trigger %s: %w", name, err)
+				}
+			}
+
 			builtinArrayCols := []string{"labels", "components", "fix_version", "subtask_keys"}
 			for _, col := range builtinArrayCols {
 				if err := convertCSVToJSON(tx, col); err != nil {
@@ -106,6 +113,35 @@ var migrations = []migration{
 					return fmt.Errorf("converting custom column %s: %w", col, err)
 				}
 			}
+
+			// Recreate FTS triggers.
+			triggers := []string{
+				`CREATE TRIGGER IF NOT EXISTS issues_fts_insert AFTER INSERT ON issues BEGIN
+					INSERT INTO issues_fts(rowid, key, summary, description, comments_text, labels)
+					VALUES (new.rowid, new.key, new.summary, new.description, new.comments_text, new.labels);
+				END`,
+				`CREATE TRIGGER IF NOT EXISTS issues_fts_update AFTER UPDATE ON issues BEGIN
+					INSERT INTO issues_fts(issues_fts, rowid, key, summary, description, comments_text, labels)
+					VALUES ('delete', old.rowid, old.key, old.summary, old.description, old.comments_text, old.labels);
+					INSERT INTO issues_fts(rowid, key, summary, description, comments_text, labels)
+					VALUES (new.rowid, new.key, new.summary, new.description, new.comments_text, new.labels);
+				END`,
+				`CREATE TRIGGER IF NOT EXISTS issues_fts_delete AFTER DELETE ON issues BEGIN
+					INSERT INTO issues_fts(issues_fts, rowid, key, summary, description, comments_text, labels)
+					VALUES ('delete', old.rowid, old.key, old.summary, old.description, old.comments_text, old.labels);
+				END`,
+			}
+			for _, t := range triggers {
+				if _, err := tx.Exec(t); err != nil {
+					return fmt.Errorf("recreating FTS trigger: %w", err)
+				}
+			}
+
+			// Rebuild FTS index once to pick up the new labels format.
+			if _, err := tx.Exec(`INSERT INTO issues_fts(issues_fts) VALUES('rebuild')`); err != nil {
+				return fmt.Errorf("rebuilding FTS index: %w", err)
+			}
+
 			return nil
 		},
 	},
