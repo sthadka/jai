@@ -56,14 +56,14 @@ var fieldsCmd = &cobra.Command{
 		}
 
 		// Human output.
-		cols := []string{"name", "jira_id", "type", "fts"}
+		cols := []string{"name", "jira_name", "jira_id", "type", "fts"}
 		rows := make([][]interface{}, len(mappings))
 		for i, m := range mappings {
 			fts := ""
 			if m.Searchable {
 				fts = "*"
 			}
-			rows[i] = []interface{}{m.Name, m.JiraID, m.Type, fts}
+			rows[i] = []interface{}{m.Name, m.JiraName, m.JiraID, m.Type, fts}
 		}
 		fmt.Print(output.Table(cols, rows))
 		return nil
