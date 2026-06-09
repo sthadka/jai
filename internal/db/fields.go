@@ -1,5 +1,9 @@
 package db
 
+import "regexp"
+
+var safeColumnRe = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
+
 // FieldMapping represents a row from the field_map table.
 type FieldMapping struct {
 	JiraID       string
@@ -54,6 +58,63 @@ func (db *DB) AllFieldMappings() ([]*FieldMapping, error) {
 		fields = append(fields, f)
 	}
 	return fields, rows.Err()
+}
+
+// FieldStats holds population statistics for a single field column.
+type FieldStats struct {
+	NonNull int
+	Total   int
+	Sample  string
+}
+
+// FieldPopulationStats returns non-null counts for the given columns in the issues table.
+// If project is non-empty, counts are scoped to that project.
+func (db *DB) FieldPopulationStats(columns []string, project string) (map[string]*FieldStats, error) {
+	where := ""
+	var totalArgs []interface{}
+	if project != "" {
+		where = " WHERE project = ?"
+		totalArgs = append(totalArgs, project)
+	}
+
+	var total int
+	if err := db.QueryRow("SELECT COUNT(*) FROM issues"+where, totalArgs...).Scan(&total); err != nil {
+		return nil, err
+	}
+
+	result := make(map[string]*FieldStats, len(columns))
+	for _, col := range columns {
+		if !safeColumnRe.MatchString(col) {
+			continue
+		}
+
+		cond := `"` + col + `" IS NOT NULL AND "` + col + `" != ''`
+		if project != "" {
+			cond += " AND project = ?"
+		}
+
+		var args []interface{}
+		if project != "" {
+			args = append(args, project)
+		}
+
+		var count int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM issues WHERE `+cond, args...).Scan(&count); err != nil {
+			result[col] = &FieldStats{Total: total}
+			continue
+		}
+
+		var sample string
+		row := db.QueryRow(`SELECT "`+col+`" FROM issues WHERE `+cond+` LIMIT 1`, args...)
+		_ = row.Scan(&sample)
+		if len(sample) > 60 {
+			sample = sample[:60] + "..."
+		}
+
+		result[col] = &FieldStats{NonNull: count, Total: total, Sample: sample}
+	}
+
+	return result, nil
 }
 
 // FieldMapByJiraID returns a map of jiraID → FieldMapping.

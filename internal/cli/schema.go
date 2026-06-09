@@ -91,8 +91,10 @@ var commandSchemas = []CommandSchema{
 		Name:        "fields",
 		Description: "List available fields and their Jira mappings",
 		Flags: map[string]ParamSchema{
-			"json":   {Type: "bool", Description: "Output as JSON"},
-			"filter": {Type: "string", Description: "Filter by name pattern"},
+			"json":    {Type: "bool", Description: "Output as JSON"},
+			"filter":  {Type: "string", Description: "Filter by name pattern"},
+			"stats":   {Type: "bool", Description: "Show population counts per field"},
+			"project": {Type: "string", Description: "Scope --stats to a specific project"},
 		},
 	},
 	{

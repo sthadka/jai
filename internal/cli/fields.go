@@ -5,10 +5,15 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/sthadka/jai/internal/db"
 	"github.com/sthadka/jai/internal/output"
 )
 
-var fieldsFilter string
+var (
+	fieldsFilter  string
+	fieldsStats   bool
+	fieldsProject string
+)
 
 var fieldsCmd = &cobra.Command{
 	Use:   "fields",
@@ -36,10 +41,22 @@ var fieldsCmd = &cobra.Command{
 			mappings = filtered
 		}
 
+		// Optionally gather population stats.
+		var stats map[string]*db.FieldStats
+		if fieldsStats {
+			var colNames []string
+			for _, m := range mappings {
+				if m.IsColumn {
+					colNames = append(colNames, m.Name)
+				}
+			}
+			stats, _ = g.db.FieldPopulationStats(colNames, fieldsProject)
+		}
+
 		if g.jsonOut {
 			fields := make([]map[string]interface{}, len(mappings))
 			for i, m := range mappings {
-				fields[i] = map[string]interface{}{
+				f := map[string]interface{}{
 					"name":       m.Name,
 					"jira_id":    m.JiraID,
 					"jira_name":  m.JiraName,
@@ -47,6 +64,14 @@ var fieldsCmd = &cobra.Command{
 					"is_custom":  m.IsCustom,
 					"searchable": m.Searchable,
 				}
+				if s, ok := stats[m.Name]; ok {
+					f["populated"] = s.NonNull
+					f["total"] = s.Total
+					if s.Sample != "" {
+						f["sample"] = s.Sample
+					}
+				}
+				fields[i] = f
 			}
 			fmt.Println(string(output.OK(map[string]interface{}{
 				"fields": fields,
@@ -57,13 +82,28 @@ var fieldsCmd = &cobra.Command{
 
 		// Human output.
 		cols := []string{"name", "jira_name", "jira_id", "type", "fts"}
+		if fieldsStats {
+			cols = append(cols, "populated")
+		}
 		rows := make([][]interface{}, len(mappings))
 		for i, m := range mappings {
 			fts := ""
 			if m.Searchable {
 				fts = "*"
 			}
-			rows[i] = []interface{}{m.Name, m.JiraName, m.JiraID, m.Type, fts}
+			row := []interface{}{m.Name, m.JiraName, m.JiraID, m.Type, fts}
+			if fieldsStats {
+				if s, ok := stats[m.Name]; ok {
+					pct := 0.0
+					if s.Total > 0 {
+						pct = float64(s.NonNull) / float64(s.Total) * 100
+					}
+					row = append(row, fmt.Sprintf("%d/%d (%.1f%%)", s.NonNull, s.Total, pct))
+				} else {
+					row = append(row, "N/A")
+				}
+			}
+			rows[i] = row
 		}
 		fmt.Print(output.Table(cols, rows))
 		return nil
@@ -72,5 +112,7 @@ var fieldsCmd = &cobra.Command{
 
 func init() {
 	fieldsCmd.Flags().StringVar(&fieldsFilter, "filter", "", "filter by name pattern")
+	fieldsCmd.Flags().BoolVar(&fieldsStats, "stats", false, "show population counts per field")
+	fieldsCmd.Flags().StringVar(&fieldsProject, "project", "", "scope --stats to a specific project")
 	rootCmd.AddCommand(fieldsCmd)
 }
