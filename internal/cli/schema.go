@@ -154,9 +154,10 @@ var schemaDBCmd = &cobra.Command{
 		defer rows.Close()
 
 		type col struct {
-			Name    string `json:"name"`
-			Type    string `json:"type"`
-			Custom  bool   `json:"custom,omitempty"`
+			Name     string `json:"name"`
+			Type     string `json:"type"`
+			Custom   bool   `json:"custom,omitempty"`
+			JiraName string `json:"jira_name,omitempty"`
 		}
 
 		var columns []col
@@ -176,20 +177,26 @@ var schemaDBCmd = &cobra.Command{
 		}
 		rows.Close()
 
-		// Mark custom columns from field_map.
-		customRows, err := g.db.Query("SELECT name FROM field_map WHERE is_custom = 1 AND is_column = 1")
+		// Enrich columns with jira_name and custom flag from field_map.
+		metaRows, err := g.db.Query("SELECT name, jira_name, is_custom FROM field_map WHERE is_column = 1")
 		if err == nil {
-			customNames := map[string]bool{}
-			for customRows.Next() {
-				var n string
-				if err := customRows.Scan(&n); err == nil {
-					customNames[n] = true
+			type fieldMeta struct {
+				jiraName string
+				isCustom bool
+			}
+			metas := map[string]fieldMeta{}
+			for metaRows.Next() {
+				var n, jn string
+				var custom bool
+				if err := metaRows.Scan(&n, &jn, &custom); err == nil {
+					metas[n] = fieldMeta{jiraName: jn, isCustom: custom}
 				}
 			}
-			customRows.Close()
+			metaRows.Close()
 			for i, c := range columns {
-				if customNames[c.Name] {
-					columns[i].Custom = true
+				if fm, ok := metas[c.Name]; ok {
+					columns[i].Custom = fm.isCustom
+					columns[i].JiraName = fm.jiraName
 				}
 			}
 		}
