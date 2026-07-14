@@ -189,6 +189,81 @@ func TestExtractComments(t *testing.T) {
 	}
 }
 
+func TestExtractChangelog(t *testing.T) {
+	resp := &jira.ChangelogResponse{
+		Key: "TEST-1",
+		Changelog: &jira.Changelog{
+			Histories: []jira.ChangelogHistory{
+				{
+					ID:      "100",
+					Author:  &struct{ DisplayName string `json:"displayName"` }{"Jane Doe"},
+					Created: "2026-06-10T14:30:00.000+0000",
+					Items: []jira.ChangelogItem{
+						{Field: "status", FieldType: "jira", From: "10001", FromString: "In Progress", To: "10002", ToString: "Release Pending"},
+					},
+				},
+				{
+					ID:      "101",
+					Author:  &struct{ DisplayName string `json:"displayName"` }{"Bob Smith"},
+					Created: "2026-06-01T10:00:00.000+0000",
+					Items: []jira.ChangelogItem{
+						{Field: "status", FieldType: "jira", From: "10000", FromString: "New", To: "10001", ToString: "In Progress"},
+						{Field: "assignee", FieldType: "jira", FromString: "", ToString: "Jane Doe"},
+					},
+				},
+			},
+		},
+	}
+
+	entries := ExtractChangelog("TEST-1", resp)
+	if len(entries) != 3 {
+		t.Fatalf("expected 3 entries, got %d", len(entries))
+	}
+
+	// First history, first item
+	if entries[0].ID != "100_0" {
+		t.Errorf("expected ID '100_0', got %q", entries[0].ID)
+	}
+	if entries[0].IssueKey != "TEST-1" {
+		t.Errorf("expected issue key 'TEST-1', got %q", entries[0].IssueKey)
+	}
+	if entries[0].Author != "Jane Doe" {
+		t.Errorf("expected author 'Jane Doe', got %q", entries[0].Author)
+	}
+	if entries[0].Field != "status" {
+		t.Errorf("expected field 'status', got %q", entries[0].Field)
+	}
+	if entries[0].FromString != "In Progress" {
+		t.Errorf("expected fromString 'In Progress', got %q", entries[0].FromString)
+	}
+	if entries[0].ToString != "Release Pending" {
+		t.Errorf("expected toString 'Release Pending', got %q", entries[0].ToString)
+	}
+	if entries[0].ChangedAt != "2026-06-10T14:30:00Z" {
+		t.Errorf("expected normalized date '2026-06-10T14:30:00Z', got %q", entries[0].ChangedAt)
+	}
+
+	// Second history, second item (assignee change)
+	if entries[2].ID != "101_1" {
+		t.Errorf("expected ID '101_1', got %q", entries[2].ID)
+	}
+	if entries[2].Field != "assignee" {
+		t.Errorf("expected field 'assignee', got %q", entries[2].Field)
+	}
+}
+
+func TestExtractChangelog_Nil(t *testing.T) {
+	entries := ExtractChangelog("TEST-1", nil)
+	if len(entries) != 0 {
+		t.Errorf("expected 0 entries for nil response, got %d", len(entries))
+	}
+
+	entries = ExtractChangelog("TEST-1", &jira.ChangelogResponse{Key: "TEST-1"})
+	if len(entries) != 0 {
+		t.Errorf("expected 0 entries for nil changelog, got %d", len(entries))
+	}
+}
+
 func TestInferColumnName(t *testing.T) {
 	tests := []struct {
 		name     string

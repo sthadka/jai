@@ -97,6 +97,37 @@ type Comment struct {
 	Updated string          `json:"updated"`
 }
 
+// ChangelogResponse is the response from GET /rest/api/3/issue/{key}?expand=changelog.
+type ChangelogResponse struct {
+	Key       string     `json:"key"`
+	Changelog *Changelog `json:"changelog"`
+}
+
+// Changelog contains the history of changes to an issue.
+type Changelog struct {
+	Histories []ChangelogHistory `json:"histories"`
+}
+
+// ChangelogHistory is a single changelog entry (one user action at one timestamp).
+type ChangelogHistory struct {
+	ID      string `json:"id"`
+	Author  *struct {
+		DisplayName string `json:"displayName"`
+	} `json:"author"`
+	Created string          `json:"created"`
+	Items   []ChangelogItem `json:"items"`
+}
+
+// ChangelogItem is a single field change within a changelog history.
+type ChangelogItem struct {
+	Field      string `json:"field"`
+	FieldType  string `json:"fieldtype"`
+	From       string `json:"from"`
+	FromString string `json:"fromString"`
+	To         string `json:"to"`
+	ToString   string `json:"toString"`
+}
+
 // Field is a Jira field from /rest/api/3/field.
 type Field struct {
 	ID     string       `json:"id"`

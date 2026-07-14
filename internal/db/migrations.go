@@ -145,6 +145,35 @@ var migrations = []migration{
 			return nil
 		},
 	},
+	{
+		version:     7,
+		description: "add changelog table for status transition history",
+		up: func(tx *sql.Tx) error {
+			stmts := []string{
+				`CREATE TABLE IF NOT EXISTS changelog (
+					id          TEXT PRIMARY KEY,
+					issue_key   TEXT NOT NULL,
+					author      TEXT,
+					field       TEXT,
+					field_type  TEXT,
+					from_value  TEXT,
+					from_string TEXT,
+					to_value    TEXT,
+					to_string   TEXT,
+					changed_at  DATETIME
+				)`,
+				`CREATE INDEX IF NOT EXISTS idx_changelog_issue ON changelog(issue_key)`,
+				`CREATE INDEX IF NOT EXISTS idx_changelog_time ON changelog(changed_at)`,
+				`CREATE INDEX IF NOT EXISTS idx_changelog_field_to ON changelog(field, to_string)`,
+			}
+			for _, s := range stmts {
+				if _, err := tx.Exec(s); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	},
 }
 
 func convertCSVToJSON(tx *sql.Tx, column string) error {

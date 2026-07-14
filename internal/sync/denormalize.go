@@ -3,6 +3,7 @@ package sync
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/sthadka/jai/internal/db"
@@ -233,6 +234,38 @@ func extractFieldValue(raw json.RawMessage, fieldType string) interface{} {
 	}
 
 	return nil
+}
+
+// ExtractChangelog extracts changelog entries from a Jira changelog API response.
+func ExtractChangelog(issueKey string, resp *jira.ChangelogResponse) []*db.ChangelogEntry {
+	if resp == nil || resp.Changelog == nil {
+		return nil
+	}
+
+	var entries []*db.ChangelogEntry
+	for _, h := range resp.Changelog.Histories {
+		author := ""
+		if h.Author != nil {
+			author = h.Author.DisplayName
+		}
+		changedAt := normalizeDate(h.Created)
+
+		for i, item := range h.Items {
+			entries = append(entries, &db.ChangelogEntry{
+				ID:         fmt.Sprintf("%s_%d", h.ID, i),
+				IssueKey:   issueKey,
+				Author:     author,
+				Field:      item.Field,
+				FieldType:  item.FieldType,
+				FromValue:  item.From,
+				FromString: item.FromString,
+				ToValue:    item.To,
+				ToString:   item.ToString,
+				ChangedAt:  changedAt,
+			})
+		}
+	}
+	return entries
 }
 
 // ExtractIssueLinks extracts formal Jira issue links from a raw issue JSON.
