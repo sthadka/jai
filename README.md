@@ -125,6 +125,33 @@ jai search "authentication token expired"
 
 ---
 
+## Status transition history
+
+`jai sync --changelogs` fetches the full changelog for each issue from the Jira API and stores status transitions in a `changelog` table. This enables time-series analysis of when features moved between statuses.
+
+```sh
+jai sync --changelogs                                    # sync changelogs for all sources
+jai sync --changelogs --source "project = OCPSTRAT"      # sync changelogs for one source
+```
+
+The changelog sync is incremental — it only fetches issues that are missing changelog data or have been updated since the last sync. It uses per-issue API calls (`?expand=changelog`), so it's slower than the regular issue sync.
+
+```sql
+-- When did each 5.0 feature enter Release Pending?
+jai query "SELECT issue_key, changed_at FROM changelog
+  WHERE field='status' AND to_string='Release Pending'
+  AND issue_key IN (SELECT key FROM issues WHERE target_version LIKE '%5.0%')"
+
+-- Compare completion curves across releases
+jai query "SELECT substr(changed_at, 1, 7) as month, COUNT(*) as completed
+  FROM changelog c JOIN issues i ON c.issue_key = i.key
+  WHERE c.field='status' AND c.to_string='Release Pending'
+  AND i.target_version LIKE '%4.22%'
+  GROUP BY month ORDER BY month"
+```
+
+---
+
 ## Agent mode
 
 Every command supports `--json` for compact, structured output and `--fields` to select specific columns.
@@ -308,6 +335,7 @@ Both paths can be overridden with `--config` and `--db` flags, or by setting `db
 | `jai init` | Interactive setup wizard |
 | `jai sync` | Incremental sync from Jira |
 | `jai sync --full` | Full resync with deletion detection |
+| `jai sync --changelogs` | Sync status transition history from Jira changelogs |
 | `jai query <sql>` | Execute SQL against local DB |
 | `jai get <key>` | Fetch a single issue |
 | `jai search <text>` | FTS5 full-text search |
