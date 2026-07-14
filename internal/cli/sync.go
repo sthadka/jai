@@ -15,6 +15,7 @@ var syncFull bool
 var syncResume bool
 var syncSourceFlag string
 var syncVerbose bool
+var syncChangelogs bool
 
 var syncCmd = &cobra.Command{
 	Use:   "sync",
@@ -38,6 +39,15 @@ var syncCmd = &cobra.Command{
 
 		total := displaySyncProgress(ch, syncVerbose)
 		fmt.Printf("Done. %d issues synced.\n", total)
+
+		if syncChangelogs {
+			clCh, err := g.sync.SyncChangelogs(ctx, syncSourceFlag)
+			if err != nil {
+				return fmt.Errorf("changelog sync: %w", err)
+			}
+			displayChangelogProgress(clCh)
+		}
+
 		return nil
 	},
 }
@@ -140,10 +150,59 @@ func displaySyncProgress(ch <-chan synce.Progress, verbose bool) int {
 	}
 }
 
+// displayChangelogProgress shows changelog sync progress with a spinner.
+func displayChangelogProgress(ch <-chan synce.ChangelogProgress) {
+	spinners := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+	spinIdx := 0
+
+	var mu sync.Mutex
+	var latest synce.ChangelogProgress
+	allDone := make(chan struct{})
+
+	go func() {
+		defer close(allDone)
+		for p := range ch {
+			mu.Lock()
+			latest = p
+			if p.Done {
+				if p.Error != nil {
+					fmt.Fprintf(os.Stderr, "\r  ✗ changelogs           ERROR: %v\033[K\n", p.Error)
+				} else {
+					fmt.Fprintf(os.Stderr, "\r  ✓ changelogs           %d/%d issues synced", p.Synced, p.Total)
+					if p.Skipped > 0 {
+						fmt.Fprintf(os.Stderr, " (%d skipped)", p.Skipped)
+					}
+					fmt.Fprintf(os.Stderr, "\033[K\n")
+				}
+			}
+			mu.Unlock()
+		}
+	}()
+
+	ticker := time.NewTicker(80 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			mu.Lock()
+			if !latest.Done && latest.Total > 0 {
+				spin := spinners[spinIdx%len(spinners)]
+				fmt.Fprintf(os.Stderr, "\r  %s changelogs           %d/%d issues\033[K", spin, latest.Synced, latest.Total)
+				spinIdx++
+			}
+			mu.Unlock()
+		case <-allDone:
+			return
+		}
+	}
+}
+
 func init() {
 	syncCmd.Flags().BoolVar(&syncFull, "full", false, "full resync (re-fetch all issues)")
 	syncCmd.Flags().BoolVar(&syncResume, "resume", false, "continue a previously interrupted --full sync (requires --full)")
 	syncCmd.Flags().StringVar(&syncSourceFlag, "source", "", "sync only this named source (from sync_sources in config)")
 	syncCmd.Flags().BoolVar(&syncVerbose, "verbose", false, "print effective JQL for each source")
+	syncCmd.Flags().BoolVar(&syncChangelogs, "changelogs", false, "sync changelog/status transition history (slower, per-issue API calls)")
 	rootCmd.AddCommand(syncCmd)
 }

@@ -178,6 +178,15 @@ func (c *Client) GetIssue(ctx context.Context, key string) (*Issue, error) {
 	return &issue, nil
 }
 
+// GetIssueChangelog fetches a single issue with its full changelog.
+func (c *Client) GetIssueChangelog(ctx context.Context, key string) (*ChangelogResponse, error) {
+	var resp ChangelogResponse
+	if err := c.get(ctx, "/rest/api/3/issue/"+key+"?expand=changelog&fields=key", &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
 // Fields fetches all field definitions.
 func (c *Client) Fields(ctx context.Context) ([]*Field, error) {
 	var fields []*Field

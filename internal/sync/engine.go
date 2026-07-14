@@ -334,6 +334,82 @@ func (e *Engine) syncSource(ctx context.Context, src config.SyncSource, full, re
 	ch <- Progress{Project: src.Name, New: newCount, Updated: updatedCount, Total: total, Done: true}
 }
 
+// ChangelogProgress reports changelog sync progress.
+type ChangelogProgress struct {
+	Total     int
+	Synced    int
+	Skipped   int
+	Error     error
+	Done      bool
+}
+
+// SyncChangelogs fetches changelogs for issues that need them.
+// It queries the DB for issues missing changelog data or with stale data,
+// then fetches each issue's changelog individually from the Jira API.
+func (e *Engine) SyncChangelogs(ctx context.Context, sourceFilter string) (<-chan ChangelogProgress, error) {
+	// Determine which projects to sync changelogs for.
+	var projectFilter string
+	if sourceFilter != "" {
+		sources, err := effectiveSources(e.cfg, sourceFilter)
+		if err != nil {
+			return nil, err
+		}
+		if len(sources) == 1 && len(sources[0].Projects) == 1 {
+			projectFilter = sources[0].Projects[0]
+		}
+	}
+
+	if err := e.db.EnsureChangelogTable(); err != nil {
+		return nil, fmt.Errorf("ensuring changelog table: %w", err)
+	}
+
+	candidates, err := e.db.GetChangelogSyncCandidates(projectFilter)
+	if err != nil {
+		return nil, fmt.Errorf("getting changelog candidates: %w", err)
+	}
+
+	ch := make(chan ChangelogProgress, 64)
+	go func() {
+		defer close(ch)
+
+		total := len(candidates)
+		synced := 0
+		skipped := 0
+
+		ch <- ChangelogProgress{Total: total}
+
+		for _, key := range candidates {
+			select {
+			case <-ctx.Done():
+				ch <- ChangelogProgress{Total: total, Synced: synced, Skipped: skipped, Error: ctx.Err(), Done: true}
+				return
+			default:
+			}
+
+			resp, err := e.client.GetIssueChangelog(ctx, key)
+			if err != nil {
+				skipped++
+				ch <- ChangelogProgress{Total: total, Synced: synced, Skipped: skipped}
+				continue
+			}
+
+			entries := ExtractChangelog(key, resp)
+			for _, entry := range entries {
+				_ = e.db.UpsertChangelog(entry)
+			}
+			synced++
+
+			if synced%10 == 0 {
+				ch <- ChangelogProgress{Total: total, Synced: synced, Skipped: skipped}
+			}
+		}
+
+		ch <- ChangelogProgress{Total: total, Synced: synced, Skipped: skipped, Done: true}
+	}()
+
+	return ch, nil
+}
+
 // cursorToJQL converts an RFC3339 timestamp to the format Jira JQL expects.
 // Jira JQL does not support seconds in datetime strings — they cause a silent
 // 0-result response. We truncate to minute granularity, which may re-fetch
