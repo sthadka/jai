@@ -36,6 +36,7 @@ jobs:
         with:
           version: v2.12.2
           args: --build-tags fts5
+          only-new-issues: true
 
   release:
     name: Release
