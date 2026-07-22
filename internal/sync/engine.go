@@ -348,19 +348,15 @@ type ChangelogProgress struct {
 // then fetches each issue's changelog individually from the Jira API.
 func (e *Engine) SyncChangelogs(ctx context.Context, sourceFilter string) (<-chan ChangelogProgress, error) {
 	// Determine which projects to sync changelogs for.
-	var projectFilter string
+	var projectFilter []string
 	if sourceFilter != "" {
 		sources, err := effectiveSources(e.cfg, sourceFilter)
 		if err != nil {
 			return nil, err
 		}
-		if len(sources) == 1 && len(sources[0].Projects) == 1 {
-			projectFilter = sources[0].Projects[0]
+		if len(sources) == 1 {
+			projectFilter = sources[0].Projects
 		}
-	}
-
-	if err := e.db.EnsureChangelogTable(); err != nil {
-		return nil, fmt.Errorf("ensuring changelog table: %w", err)
 	}
 
 	candidates, err := e.db.GetChangelogSyncCandidates(projectFilter)
@@ -395,7 +391,7 @@ func (e *Engine) SyncChangelogs(ctx context.Context, sourceFilter string) (<-cha
 
 			entries := ExtractChangelog(key, resp)
 			for _, entry := range entries {
-				_ = e.db.UpsertChangelog(entry)
+				_ = e.db.InsertChangelog(entry)
 			}
 			synced++
 
