@@ -5,9 +5,11 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/sthadka/jai/internal/output"
+	"github.com/sthadka/jai/internal/query"
 )
 
 // CommandSchema describes a command's parameters and flags.
@@ -309,9 +311,59 @@ var schemaTemplatesCmd = &cobra.Command{
 	},
 }
 
+// schemaSnippetsCmd lists available SQL snippets from config.
+var schemaSnippetsCmd = &cobra.Command{
+	Use:   "snippets",
+	Short: "List available SQL snippets (for AI agents)",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if g.cfg == nil || len(g.cfg.Snippets) == 0 {
+			fmt.Println(string(output.OK(map[string]interface{}{
+				"snippets": []interface{}{},
+				"count":    0,
+			})))
+			return nil
+		}
+
+		names := make([]string, 0, len(g.cfg.Snippets))
+		for name := range g.cfg.Snippets {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+
+		type snippetInfo struct {
+			Name     string `json:"name"`
+			Raw      string `json:"raw"`
+			Expanded string `json:"expanded"`
+		}
+
+		snippets := make([]snippetInfo, 0, len(names))
+		now := time.Now()
+		for _, name := range names {
+			raw := g.cfg.Snippets[name]
+			expanded, err := query.ExpandSnippet(raw, now, g.cfg)
+			if err != nil {
+				expanded = fmt.Sprintf("<error: %s>", err.Error())
+			}
+			snippets = append(snippets, snippetInfo{
+				Name:     name,
+				Raw:      raw,
+				Expanded: expanded,
+			})
+		}
+
+		fmt.Println(string(output.OK(map[string]interface{}{
+			"snippets": snippets,
+			"count":    len(snippets),
+			"hint":     "Use {{snippet_name}} in any SQL query to expand a snippet",
+		})))
+		return nil
+	},
+}
+
 func init() {
 	schemaCmd.AddCommand(schemaDBCmd)
 	schemaCmd.AddCommand(schemaValuesCmd)
 	schemaCmd.AddCommand(schemaTemplatesCmd)
+	schemaCmd.AddCommand(schemaSnippetsCmd)
 	rootCmd.AddCommand(schemaCmd)
 }

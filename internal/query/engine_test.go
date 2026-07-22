@@ -2,6 +2,7 @@ package query
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -81,7 +82,10 @@ func TestResolveTemplates_BuiltinTimeVars(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := resolveTemplatesAt(tc.input, now, cfg)
+			got, err := resolveTemplatesAt(tc.input, now, cfg)
+			if err != nil {
+				t.Fatalf("resolveTemplatesAt(%q) error: %v", tc.input, err)
+			}
 			if got != tc.expected {
 				t.Errorf("resolveTemplatesAt(%q) = %q, want %q", tc.input, got, tc.expected)
 			}
@@ -94,7 +98,10 @@ func TestResolveTemplates_ThisWeekAlwaysMonday(t *testing.T) {
 	// Check every day of a week (Mon 2024-07-15 .. Sun 2024-07-21)
 	for d := 15; d <= 21; d++ {
 		now := time.Date(2024, 7, d, 12, 0, 0, 0, time.UTC)
-		got := resolveTemplatesAt("{{this_week}}", now, cfg)
+		got, err := resolveTemplatesAt("{{this_week}}", now, cfg)
+		if err != nil {
+			t.Fatalf("day=%d: error: %v", d, err)
+		}
 		if got != "2024-07-15" {
 			t.Errorf("day=%d (%s): this_week = %q, want 2024-07-15", d, now.Weekday(), got)
 		}
@@ -119,7 +126,10 @@ func TestResolveTemplates_ThisQuarterBoundaries(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.date.Format("2006-01-02"), func(t *testing.T) {
-			got := resolveTemplatesAt("{{this_quarter}}", tc.date, cfg)
+			got, err := resolveTemplatesAt("{{this_quarter}}", tc.date, cfg)
+			if err != nil {
+				t.Fatalf("error: %v", err)
+			}
 			if got != tc.expected {
 				t.Errorf("this_quarter on %s = %q, want %q", tc.date.Format("2006-01-02"), got, tc.expected)
 			}
@@ -146,7 +156,10 @@ func TestResolveTemplates_ParameterizedVars(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := resolveTemplatesAt(tc.input, now, cfg)
+			got, err := resolveTemplatesAt(tc.input, now, cfg)
+			if err != nil {
+				t.Fatalf("resolveTemplatesAt(%q) error: %v", tc.input, err)
+			}
 			if got != tc.expected {
 				t.Errorf("resolveTemplatesAt(%q) = %q, want %q", tc.input, got, tc.expected)
 			}
@@ -158,8 +171,14 @@ func TestResolveTemplates_DaysAgo7EqualsWeekAgo(t *testing.T) {
 	now := time.Date(2024, 7, 17, 12, 0, 0, 0, time.UTC)
 	cfg := &config.Config{}
 
-	daysAgo := resolveTemplatesAt("{{days_ago:7}}", now, cfg)
-	weekAgo := resolveTemplatesAt("{{week_ago}}", now, cfg)
+	daysAgo, err := resolveTemplatesAt("{{days_ago:7}}", now, cfg)
+	if err != nil {
+		t.Fatalf("days_ago error: %v", err)
+	}
+	weekAgo, err := resolveTemplatesAt("{{week_ago}}", now, cfg)
+	if err != nil {
+		t.Fatalf("week_ago error: %v", err)
+	}
 	if daysAgo != weekAgo {
 		t.Errorf("days_ago:7 (%s) != week_ago (%s)", daysAgo, weekAgo)
 	}
@@ -173,8 +192,14 @@ func TestResolveTemplates_MonthsAgo1EqualsMonthAgo(t *testing.T) {
 	now := time.Date(2024, 7, 30, 12, 0, 0, 0, time.UTC)
 	cfg := &config.Config{}
 
-	monthsAgo := resolveTemplatesAt("{{months_ago:1}}", now, cfg)
-	monthAgo := resolveTemplatesAt("{{month_ago}}", now, cfg)
+	monthsAgo, err := resolveTemplatesAt("{{months_ago:1}}", now, cfg)
+	if err != nil {
+		t.Fatalf("months_ago error: %v", err)
+	}
+	monthAgo, err := resolveTemplatesAt("{{month_ago}}", now, cfg)
+	if err != nil {
+		t.Fatalf("month_ago error: %v", err)
+	}
 
 	// months_ago:1 on July 30 → June 30
 	if monthsAgo != "2024-06-30" {
@@ -200,7 +225,10 @@ func TestResolveTemplates_InvalidParameterizedLeftAsIs(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := resolveTemplatesAt(tc.input, now, cfg)
+			got, err := resolveTemplatesAt(tc.input, now, cfg)
+			if err != nil {
+				t.Fatalf("error: %v", err)
+			}
 			if got != tc.input {
 				t.Errorf("expected %q to be left as-is, got %q", tc.input, got)
 			}
@@ -253,7 +281,10 @@ func TestResolveTemplates_Projects(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := resolveTemplatesAt("{{projects}}", now, tc.cfg)
+			got, err := resolveTemplatesAt("{{projects}}", now, tc.cfg)
+			if err != nil {
+				t.Fatalf("error: %v", err)
+			}
 			if got != tc.expected {
 				t.Errorf("projects = %q, want %q", got, tc.expected)
 			}
@@ -272,7 +303,10 @@ func TestResolveTemplates_MultipleVarsInQuery(t *testing.T) {
 
 	input := "SELECT * FROM issues WHERE assignee = '{{me}}' AND updated >= '{{days_ago:14}}' AND project IN ({{projects}})"
 	expected := "SELECT * FROM issues WHERE assignee = 'user@example.com' AND updated >= '2024-07-03' AND project IN ('PROJ1')"
-	got := resolveTemplatesAt(input, now, cfg)
+	got, err := resolveTemplatesAt(input, now, cfg)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
 	if got != expected {
 		t.Errorf("multi-var query:\ngot:  %s\nwant: %s", got, expected)
 	}
@@ -295,6 +329,169 @@ func TestTable_Format(t *testing.T) {
 	out := r.Table()
 	if out == "" {
 		t.Error("expected non-empty table output")
+	}
+}
+
+func TestResolveTemplates_Snippets(t *testing.T) {
+	now := time.Date(2024, 7, 17, 12, 0, 0, 0, time.UTC)
+
+	tests := []struct {
+		name     string
+		input    string
+		cfg      *config.Config
+		expected string
+		wantErr  bool
+		errMsg   string
+	}{
+		{
+			name:  "simple snippet",
+			input: "SELECT * FROM issues WHERE {{active}}",
+			cfg: &config.Config{
+				Snippets: map[string]string{
+					"active": "status NOT IN ('Done', 'Closed')",
+				},
+			},
+			expected: "SELECT * FROM issues WHERE status NOT IN ('Done', 'Closed')",
+		},
+		{
+			name:  "snippet referencing built-in variable",
+			input: "SELECT * FROM issues WHERE {{my_open}}",
+			cfg: &config.Config{
+				Me: "user@example.com",
+				Snippets: map[string]string{
+					"my_open": "assignee = 'user@example.com' AND status != 'Done'",
+				},
+			},
+			expected: "SELECT * FROM issues WHERE assignee = 'user@example.com' AND status != 'Done'",
+		},
+		{
+			name:  "recursive snippet — snippet references another snippet",
+			input: "SELECT * FROM issues WHERE {{my_open}}",
+			cfg: &config.Config{
+				Me: "user@example.com",
+				Snippets: map[string]string{
+					"active":  "status NOT IN ('Done', 'Closed')",
+					"my_open": "assignee = 'user@example.com' AND {{active}}",
+				},
+			},
+			expected: "SELECT * FROM issues WHERE assignee = 'user@example.com' AND status NOT IN ('Done', 'Closed')",
+		},
+		{
+			name:  "snippet with built-in var inside",
+			input: "SELECT * FROM issues WHERE {{my_tasks}}",
+			cfg: &config.Config{
+				Me: "user@example.com",
+				Snippets: map[string]string{
+					"my_tasks": "assignee = '{{me}}'",
+				},
+			},
+			// {{me}} is resolved first by resolveBuiltins, then snippet expands
+			expected: "SELECT * FROM issues WHERE assignee = 'user@example.com'",
+		},
+		{
+			name:  "circular reference A→B→A",
+			input: "{{a}}",
+			cfg: &config.Config{
+				Snippets: map[string]string{
+					"a": "{{b}}",
+					"b": "{{a}}",
+				},
+			},
+			wantErr: true,
+			errMsg:  "circular snippet reference: a",
+		},
+		{
+			name:  "self-referencing snippet",
+			input: "{{loop}}",
+			cfg: &config.Config{
+				Snippets: map[string]string{
+					"loop": "{{loop}}",
+				},
+			},
+			wantErr: true,
+			errMsg:  "circular snippet reference: loop",
+		},
+		{
+			name:  "unknown snippet left as-is",
+			input: "SELECT * FROM issues WHERE {{unknown_snippet}}",
+			cfg: &config.Config{
+				Snippets: map[string]string{
+					"active": "status != 'Done'",
+				},
+			},
+			expected: "SELECT * FROM issues WHERE {{unknown_snippet}}",
+		},
+		{
+			name:  "empty snippets map",
+			input: "SELECT * FROM issues WHERE {{active}}",
+			cfg:   &config.Config{},
+			// No snippets defined — left as-is
+			expected: "SELECT * FROM issues WHERE {{active}}",
+		},
+		{
+			name:  "multiple snippets in one query",
+			input: "SELECT * FROM issues WHERE {{active}} AND {{high_pri}}",
+			cfg: &config.Config{
+				Snippets: map[string]string{
+					"active":   "status != 'Done'",
+					"high_pri": "priority IN ('Highest', 'High')",
+				},
+			},
+			expected: "SELECT * FROM issues WHERE status != 'Done' AND priority IN ('Highest', 'High')",
+		},
+		{
+			name:  "deep recursive chain within limit",
+			input: "{{s1}}",
+			cfg: &config.Config{
+				Snippets: map[string]string{
+					"s1": "{{s2}}",
+					"s2": "{{s3}}",
+					"s3": "resolved",
+				},
+			},
+			expected: "resolved",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := resolveTemplatesAt(tc.input, now, tc.cfg)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error containing %q, got nil", tc.errMsg)
+				}
+				if !strings.Contains(err.Error(), tc.errMsg) {
+					t.Errorf("error = %q, want it to contain %q", err.Error(), tc.errMsg)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tc.expected {
+				t.Errorf("got %q, want %q", got, tc.expected)
+			}
+		})
+	}
+}
+
+func TestExpandSnippet(t *testing.T) {
+	now := time.Date(2024, 7, 17, 12, 0, 0, 0, time.UTC)
+	cfg := &config.Config{
+		Me: "user@example.com",
+		Snippets: map[string]string{
+			"active":  "status NOT IN ('Done', 'Closed')",
+			"my_open": "assignee = '{{me}}' AND {{active}}",
+		},
+	}
+
+	// Test expanding my_open, which references {{me}} (built-in) and {{active}} (snippet).
+	got, err := ExpandSnippet(cfg.Snippets["my_open"], now, cfg)
+	if err != nil {
+		t.Fatalf("ExpandSnippet error: %v", err)
+	}
+	expected := "assignee = 'user@example.com' AND status NOT IN ('Done', 'Closed')"
+	if got != expected {
+		t.Errorf("ExpandSnippet = %q, want %q", got, expected)
 	}
 }
 
