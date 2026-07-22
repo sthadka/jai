@@ -143,6 +143,135 @@ func TestGetIssueChangelog(t *testing.T) {
 	}
 }
 
+func TestBulkFetchChangelogs(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/rest/api/3/changelog/bulkfetch" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Method != http.MethodPost {
+			t.Errorf("expected POST, got %s", r.Method)
+		}
+
+		var req BulkChangelogRequest
+		json.NewDecoder(r.Body).Decode(&req)
+		if len(req.IssueIdsOrKeys) != 2 {
+			t.Errorf("expected 2 keys, got %d", len(req.IssueIdsOrKeys))
+		}
+
+		resp := BulkChangelogResponse{
+			StartAt:    0,
+			MaxResults: 1000,
+			Total:      3,
+			Values: []BulkChangelogEntry{
+				{
+					ID:      "100",
+					IssueID: "10042",
+					Author:  &struct{ DisplayName string `json:"displayName"` }{"Jane"},
+					Created: "2026-06-10T14:30:00.000+0000",
+					Items:   []ChangelogItem{{Field: "status", FieldType: "jira", ToString: "Done"}},
+				},
+				{
+					ID:      "101",
+					IssueID: "10042",
+					Author:  &struct{ DisplayName string `json:"displayName"` }{"Bob"},
+					Created: "2026-06-01T10:00:00.000+0000",
+					Items:   []ChangelogItem{{Field: "status", FieldType: "jira", ToString: "In Progress"}},
+				},
+				{
+					ID:      "102",
+					IssueID: "10043",
+					Author:  &struct{ DisplayName string `json:"displayName"` }{"Jane"},
+					Created: "2026-06-05T08:00:00.000+0000",
+					Items:   []ChangelogItem{{Field: "priority", FieldType: "jira", ToString: "High"}},
+				},
+			},
+		}
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer srv.Close()
+
+	client := newTestClient(srv)
+	entries, err := client.BulkFetchChangelogs(context.Background(), []string{"TEST-1", "TEST-2"})
+	if err != nil {
+		t.Fatalf("BulkFetchChangelogs: %v", err)
+	}
+	if len(entries) != 3 {
+		t.Fatalf("expected 3 entries, got %d", len(entries))
+	}
+	if entries[0].IssueID != "10042" {
+		t.Errorf("expected issueId 10042, got %q", entries[0].IssueID)
+	}
+	if entries[2].Items[0].ToString != "High" {
+		t.Errorf("expected 'High', got %q", entries[2].Items[0].ToString)
+	}
+}
+
+func TestBulkFetchChangelogs_Pagination(t *testing.T) {
+	page := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		page++
+		startAt := 0
+		if page == 2 {
+			startAt = 3
+		}
+
+		var resp BulkChangelogResponse
+		if page == 1 {
+			resp = BulkChangelogResponse{
+				StartAt:    0,
+				MaxResults: 3,
+				Total:      5,
+				Values: []BulkChangelogEntry{
+					{ID: "100", IssueID: "10042", Items: []ChangelogItem{{Field: "status"}}},
+					{ID: "101", IssueID: "10042", Items: []ChangelogItem{{Field: "priority"}}},
+					{ID: "102", IssueID: "10043", Items: []ChangelogItem{{Field: "status"}}},
+				},
+			}
+		} else {
+			resp = BulkChangelogResponse{
+				StartAt:    startAt,
+				MaxResults: 3,
+				Total:      5,
+				Values: []BulkChangelogEntry{
+					{ID: "103", IssueID: "10043", Items: []ChangelogItem{{Field: "assignee"}}},
+					{ID: "104", IssueID: "10044", Items: []ChangelogItem{{Field: "status"}}},
+				},
+			}
+		}
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer srv.Close()
+
+	client := newTestClient(srv)
+	entries, err := client.BulkFetchChangelogs(context.Background(), []string{"TEST-1", "TEST-2", "TEST-3"})
+	if err != nil {
+		t.Fatalf("BulkFetchChangelogs: %v", err)
+	}
+	if len(entries) != 5 {
+		t.Fatalf("expected 5 entries across 2 pages, got %d", len(entries))
+	}
+	if page != 2 {
+		t.Errorf("expected 2 pages fetched, got %d", page)
+	}
+}
+
+func TestBulkFetchChangelogs_Empty(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(BulkChangelogResponse{Total: 0})
+	}))
+	defer srv.Close()
+
+	client := newTestClient(srv)
+	entries, err := client.BulkFetchChangelogs(context.Background(), []string{"TEST-1"})
+	if err != nil {
+		t.Fatalf("BulkFetchChangelogs: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("expected 0 entries, got %d", len(entries))
+	}
+}
+
 func TestSearchAll_Retry429(t *testing.T) {
 	attempt := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

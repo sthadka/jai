@@ -344,10 +344,9 @@ type ChangelogProgress struct {
 }
 
 // SyncChangelogs fetches changelogs for issues that need them.
-// It queries the DB for issues missing changelog data or with stale data,
-// then fetches each issue's changelog individually from the Jira API.
+// Uses the bulk changelog API (up to 100 issues per request) with automatic
+// fallback to per-issue fetching if the bulk endpoint is unavailable.
 func (e *Engine) SyncChangelogs(ctx context.Context, sourceFilter string) (<-chan ChangelogProgress, error) {
-	// Determine which projects to sync changelogs for.
 	var projectFilter []string
 	if sourceFilter != "" {
 		sources, err := effectiveSources(e.cfg, sourceFilter)
@@ -374,7 +373,78 @@ func (e *Engine) SyncChangelogs(ctx context.Context, sourceFilter string) (<-cha
 
 		ch <- ChangelogProgress{Total: total}
 
+		if total == 0 {
+			ch <- ChangelogProgress{Total: 0, Done: true}
+			return
+		}
+
+		idToKey, err := e.db.GetIssueIDToKeyMap(candidates)
+		if err != nil {
+			idToKey = nil
+		}
+
+		// Split candidates: those with known IDs use bulk, the rest use per-issue.
+		var bulkKeys, fallbackKeys []string
+		keyToID := make(map[string]bool)
+		if idToKey != nil {
+			for _, key := range idToKey {
+				keyToID[key] = true
+			}
+		}
 		for _, key := range candidates {
+			if keyToID[key] {
+				bulkKeys = append(bulkKeys, key)
+			} else {
+				fallbackKeys = append(fallbackKeys, key)
+			}
+		}
+
+		// Bulk fetch in batches of 100.
+		bulkFailed := false
+		const batchSize = 100
+		for i := 0; i < len(bulkKeys); i += batchSize {
+			select {
+			case <-ctx.Done():
+				ch <- ChangelogProgress{Total: total, Synced: synced, Skipped: skipped, Error: ctx.Err(), Done: true}
+				return
+			default:
+			}
+
+			end := i + batchSize
+			if end > len(bulkKeys) {
+				end = len(bulkKeys)
+			}
+			batch := bulkKeys[i:end]
+
+			entries, err := e.client.BulkFetchChangelogs(ctx, batch)
+			if err != nil {
+				if i == 0 {
+					bulkFailed = true
+					fallbackKeys = append(fallbackKeys, bulkKeys...)
+					break
+				}
+				skipped += len(batch)
+				ch <- ChangelogProgress{Total: total, Synced: synced, Skipped: skipped}
+				continue
+			}
+
+			dbEntries := ExtractBulkChangelog(entries, idToKey)
+			if err := e.db.InsertChangelogBatch(dbEntries); err != nil {
+				skipped += len(batch)
+				ch <- ChangelogProgress{Total: total, Synced: synced, Skipped: skipped}
+				continue
+			}
+
+			synced += len(batch)
+			ch <- ChangelogProgress{Total: total, Synced: synced, Skipped: skipped}
+		}
+
+		if bulkFailed {
+			fmt.Fprintf(os.Stderr, "  ⚠ bulk changelog API unavailable, falling back to per-issue fetch\n")
+		}
+
+		// Per-issue fallback for issues without ID mapping or if bulk failed.
+		for _, key := range fallbackKeys {
 			select {
 			case <-ctx.Done():
 				ch <- ChangelogProgress{Total: total, Synced: synced, Skipped: skipped, Error: ctx.Err(), Done: true}
@@ -389,8 +459,8 @@ func (e *Engine) SyncChangelogs(ctx context.Context, sourceFilter string) (<-cha
 				continue
 			}
 
-			entries := ExtractChangelog(key, resp)
-			for _, entry := range entries {
+			dbEntries := ExtractChangelog(key, resp)
+			for _, entry := range dbEntries {
 				_ = e.db.InsertChangelog(entry)
 			}
 			synced++

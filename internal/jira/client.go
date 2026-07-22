@@ -187,6 +187,34 @@ func (c *Client) GetIssueChangelog(ctx context.Context, key string) (*ChangelogR
 	return &resp, nil
 }
 
+// BulkFetchChangelogs fetches changelogs for up to 100 issues in one API call.
+// Handles pagination internally — accumulates all values across pages.
+func (c *Client) BulkFetchChangelogs(ctx context.Context, keys []string) ([]BulkChangelogEntry, error) {
+	var all []BulkChangelogEntry
+	startAt := 0
+
+	for {
+		req := map[string]any{
+			"issueIdsOrKeys": keys,
+		}
+		path := fmt.Sprintf("/rest/api/3/changelog/bulkfetch?startAt=%d", startAt)
+
+		var resp BulkChangelogResponse
+		if err := c.postDecode(ctx, path, req, &resp); err != nil {
+			return nil, err
+		}
+
+		all = append(all, resp.Values...)
+
+		if startAt+len(resp.Values) >= resp.Total || len(resp.Values) == 0 {
+			break
+		}
+		startAt += len(resp.Values)
+	}
+
+	return all, nil
+}
+
 // Fields fetches all field definitions.
 func (c *Client) Fields(ctx context.Context) ([]*Field, error) {
 	var fields []*Field

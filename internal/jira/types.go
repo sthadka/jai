@@ -16,6 +16,7 @@ type SearchResponse struct {
 
 // Issue is a Jira issue from the API.
 type Issue struct {
+	ID     string          `json:"id"`
 	Key    string          `json:"key"`
 	Fields json.RawMessage `json:"fields"`
 }
@@ -126,6 +127,30 @@ type ChangelogItem struct {
 	FromString string `json:"fromString"`
 	To         string `json:"to"`
 	ToString   string `json:"toString"`
+}
+
+// BulkChangelogRequest is the request body for POST /rest/api/3/changelog/bulkfetch.
+type BulkChangelogRequest struct {
+	IssueIdsOrKeys []string `json:"issueIdsOrKeys"`
+}
+
+// BulkChangelogResponse is the paginated response from the bulk changelog endpoint.
+type BulkChangelogResponse struct {
+	StartAt    int                  `json:"startAt"`
+	MaxResults int                  `json:"maxResults"`
+	Total      int                  `json:"total"`
+	Values     []BulkChangelogEntry `json:"values"`
+}
+
+// BulkChangelogEntry is a single changelog history from the bulk response.
+type BulkChangelogEntry struct {
+	ID      string `json:"id"`
+	IssueID string `json:"issueId"`
+	Author  *struct {
+		DisplayName string `json:"displayName"`
+	} `json:"author"`
+	Created string          `json:"created"`
+	Items   []ChangelogItem `json:"items"`
 }
 
 // Field is a Jira field from /rest/api/3/field.

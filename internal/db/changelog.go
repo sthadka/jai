@@ -31,6 +31,70 @@ func (db *DB) InsertChangelog(e *ChangelogEntry) error {
 	return err
 }
 
+// InsertChangelogBatch inserts multiple changelog entries in a single transaction.
+func (db *DB) InsertChangelogBatch(entries []*ChangelogEntry) error {
+	if len(entries) == 0 {
+		return nil
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare(`
+		INSERT OR IGNORE INTO changelog
+			(id, issue_key, author, field, field_type, from_value, from_string, to_value, to_string, changed_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for _, e := range entries {
+		if _, err := stmt.Exec(e.ID, e.IssueKey, e.Author, e.Field, e.FieldType,
+			e.FromValue, e.FromString, e.ToValue, e.ToString, e.ChangedAt); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// GetIssueIDToKeyMap returns a map of Jira numeric issue ID to issue key.
+// Uses json_extract on raw_json to pull the ID. Issues synced before the ID
+// field was added to jira.Issue will have NULL and are skipped.
+func (db *DB) GetIssueIDToKeyMap(keys []string) (map[string]string, error) {
+	if len(keys) == 0 {
+		return nil, nil
+	}
+
+	placeholders := make([]string, len(keys))
+	args := make([]any, len(keys))
+	for i, k := range keys {
+		placeholders[i] = "?"
+		args[i] = k
+	}
+	query := fmt.Sprintf(
+		`SELECT json_extract(raw_json, '$.id'), key FROM issues WHERE key IN (%s)`,
+		strings.Join(placeholders, ", "),
+	)
+
+	sqlRows, err := db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer sqlRows.Close()
+
+	m := make(map[string]string)
+	for sqlRows.Next() {
+		var id, key *string
+		if sqlRows.Scan(&id, &key) == nil && id != nil && key != nil && *id != "" {
+			m[*id] = *key
+		}
+	}
+	return m, nil
+}
+
 // GetChangelogSyncCandidates returns issue keys that need changelog sync.
 // An issue needs sync if it has no changelog rows, or if its updated timestamp
 // is newer than the most recent changelog entry for that issue.

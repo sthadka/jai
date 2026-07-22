@@ -264,6 +264,72 @@ func TestExtractChangelog_Nil(t *testing.T) {
 	}
 }
 
+func TestExtractBulkChangelog(t *testing.T) {
+	entries := []jira.BulkChangelogEntry{
+		{
+			ID:      "200",
+			IssueID: "10042",
+			Author:  &struct{ DisplayName string `json:"displayName"` }{"Jane Doe"},
+			Created: "2026-06-10T14:30:00.000+0000",
+			Items: []jira.ChangelogItem{
+				{Field: "status", FieldType: "jira", From: "10001", FromString: "In Progress", To: "10002", ToString: "Release Pending"},
+			},
+		},
+		{
+			ID:      "201",
+			IssueID: "10043",
+			Author:  &struct{ DisplayName string `json:"displayName"` }{"Bob Smith"},
+			Created: "2026-06-01T10:00:00.000+0000",
+			Items: []jira.ChangelogItem{
+				{Field: "status", FieldType: "jira", FromString: "New", ToString: "In Progress"},
+				{Field: "assignee", FieldType: "jira", ToString: "Jane Doe"},
+			},
+		},
+	}
+
+	idToKey := map[string]string{
+		"10042": "TEST-1",
+		"10043": "TEST-2",
+	}
+
+	result := ExtractBulkChangelog(entries, idToKey)
+	if len(result) != 3 {
+		t.Fatalf("expected 3 entries, got %d", len(result))
+	}
+
+	if result[0].ID != "200_0" {
+		t.Errorf("expected ID '200_0', got %q", result[0].ID)
+	}
+	if result[0].IssueKey != "TEST-1" {
+		t.Errorf("expected issue key 'TEST-1', got %q", result[0].IssueKey)
+	}
+	if result[0].ChangedAt != "2026-06-10T14:30:00Z" {
+		t.Errorf("expected normalized date, got %q", result[0].ChangedAt)
+	}
+	if result[2].ID != "201_1" {
+		t.Errorf("expected ID '201_1', got %q", result[2].ID)
+	}
+	if result[2].IssueKey != "TEST-2" {
+		t.Errorf("expected issue key 'TEST-2', got %q", result[2].IssueKey)
+	}
+}
+
+func TestExtractBulkChangelog_UnknownID(t *testing.T) {
+	entries := []jira.BulkChangelogEntry{
+		{
+			ID:      "300",
+			IssueID: "99999",
+			Created: "2026-06-10T14:30:00.000+0000",
+			Items:   []jira.ChangelogItem{{Field: "status", ToString: "Done"}},
+		},
+	}
+
+	result := ExtractBulkChangelog(entries, map[string]string{"10042": "TEST-1"})
+	if len(result) != 0 {
+		t.Errorf("expected 0 entries for unknown issue ID, got %d", len(result))
+	}
+}
+
 func TestInferColumnName(t *testing.T) {
 	tests := []struct {
 		name     string
