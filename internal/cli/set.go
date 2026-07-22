@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/sthadka/jai/internal/output"
@@ -88,35 +89,56 @@ For array fields (labels, components, fixVersions):
 		if hasAdd || hasRemove {
 			return setArrayField(cmd, issueKey, fieldName, jiraID)
 		}
-		return setScalarField(cmd, issueKey, fieldName, jiraID, args[2])
+		return setScalarField(cmd, issueKey, fieldName, jiraID, args[2], fieldType)
 	},
 }
 
-func setScalarField(cmd *cobra.Command, issueKey, fieldName, jiraID, value string) error {
-	payload, _ := json.Marshal(map[string]string{"field": jiraID, "value": value})
+func setScalarField(cmd *cobra.Command, issueKey, fieldName, jiraID, value, fieldType string) error {
+	var payloadVal interface{} = value
+	localVal := value
+
+	if fieldType == "array" {
+		arr := parseArrayValue(value)
+		payloadVal = arr
+		j, _ := json.Marshal(arr)
+		localVal = string(j)
+	}
+
+	payload, _ := json.Marshal(map[string]interface{}{"field": jiraID, "value": payloadVal})
 	if err := g.db.InsertPendingChange(issueKey, "set_field", string(payload)); err != nil {
 		return err
 	}
 
 	_, err := g.db.Exec(
 		fmt.Sprintf("UPDATE issues SET %s = ?, synced_at = datetime('now') WHERE key = ?", fieldName),
-		value, issueKey,
+		localVal, issueKey,
 	)
 	if err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "warning: local update failed: %v\n", err)
 	}
 
 	if g.jsonOut {
-		fmt.Println(string(output.OK(map[string]string{
+		fmt.Println(string(output.OK(map[string]interface{}{
 			"issue_key": issueKey,
 			"field":     fieldName,
-			"value":     value,
+			"value":     payloadVal,
 			"status":    "pending",
 		})))
 		return nil
 	}
-	fmt.Printf("%s: %s → %q (pending sync)\n", issueKey, fieldName, value)
+	fmt.Printf("%s: %s → %q (pending sync)\n", issueKey, fieldName, localVal)
 	return nil
+}
+
+func parseArrayValue(value string) []string {
+	parts := strings.Split(value, ",")
+	result := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if v := strings.TrimSpace(p); v != "" {
+			result = append(result, v)
+		}
+	}
+	return result
 }
 
 func setArrayField(cmd *cobra.Command, issueKey, fieldName, jiraID string) error {

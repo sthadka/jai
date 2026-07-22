@@ -86,6 +86,37 @@ func (c *Client) ExecuteTransition(ctx context.Context, issueKey, transitionID s
 	return c.post(ctx, fmt.Sprintf("/rest/api/3/issue/%s/transitions", issueKey), payload)
 }
 
+// LinkType represents an issue link type from the Jira API.
+type LinkType struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Inward  string `json:"inward"`
+	Outward string `json:"outward"`
+}
+
+type linkTypesResponse struct {
+	IssueLinkTypes []LinkType `json:"issueLinkTypes"`
+}
+
+// GetLinkTypes returns the available issue link types.
+func (c *Client) GetLinkTypes(ctx context.Context) ([]LinkType, error) {
+	var resp linkTypesResponse
+	if err := c.get(ctx, "/rest/api/3/issueLinkType", &resp); err != nil {
+		return nil, err
+	}
+	return resp.IssueLinkTypes, nil
+}
+
+// CreateLink creates a link between two issues.
+func (c *Client) CreateLink(ctx context.Context, linkType, inwardKey, outwardKey string) error {
+	payload := map[string]interface{}{
+		"type":         map[string]string{"name": linkType},
+		"inwardIssue":  map[string]string{"key": inwardKey},
+		"outwardIssue": map[string]string{"key": outwardKey},
+	}
+	return c.post(ctx, "/rest/api/3/issueLink", payload)
+}
+
 func (c *Client) put(ctx context.Context, path string, body interface{}) error {
 	data, err := json.Marshal(body)
 	if err != nil {
