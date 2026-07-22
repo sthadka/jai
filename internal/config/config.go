@@ -35,6 +35,7 @@ type Config struct {
 	Hierarchy   HierarchyConfig   `yaml:"hierarchy"`
 	Detail      DetailConfig      `yaml:"detail"`
 	Templates   map[string]string `yaml:"templates"`
+	Snippets    map[string]string `yaml:"snippets"`
 }
 
 // HierarchyLevel defines one level in the issue hierarchy.
