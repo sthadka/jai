@@ -1,5 +1,28 @@
 # Changelog
 
+## [2.1.0](https://github.com/sthadka/jai/compare/v2.0.0...v2.1.0) (2026-07-22)
+
+
+### Features
+
+* bulk changelog sync via POST /changelog/bulkfetch ([262d059](https://github.com/sthadka/jai/commit/262d059c86f32c414396dc4740d834231a383d87))
+* sync and store Jira changelog/status transition history ([7bc6f2c](https://github.com/sthadka/jai/commit/7bc6f2c6ed9127f72be0339e7a371a90270d5abb)), closes [#5](https://github.com/sthadka/jai/issues/5)
+
+
+### Bug Fixes
+
+* address PR review feedback on changelog sync ([a995bc4](https://github.com/sthadka/jai/commit/a995bc40ea4cfe8b75f8e9a9ef0c40c07444dad4))
+* **ci:** upgrade golangci-lint to v2.12.2 for Go 1.25+ support ([fd2051e](https://github.com/sthadka/jai/commit/fd2051eed6664b1fd737ef8d9fbe42695eb8a7a2))
+* handle pre-existing id column in migration 8 ([f48f330](https://github.com/sthadka/jai/commit/f48f330d7c30688f48e939f3243ed630ec5df0b3))
+* load all issue ID mappings to avoid SQL variable limit ([f9e95a7](https://github.com/sthadka/jai/commit/f9e95a774d0b3b2b7050260757e9143bfb92c5b1))
+* populate issue numeric ID so bulk changelog sync works ([c8dbba6](https://github.com/sthadka/jai/commit/c8dbba6b20a553e7b932c81bb62a567a5b209aea))
+* remove unnecessary nil check before range in changelog sync ([b148542](https://github.com/sthadka/jai/commit/b148542a8da985a24aecac098e15a82ef8eb7690))
+
+
+### Documentation
+
+* document --changelogs flag and changelog table in README ([121a115](https://github.com/sthadka/jai/commit/121a11551d37bee5dd6b1b2be41cadf5e775eb9f))
+
 ## [2.0.0](https://github.com/sthadka/jai/compare/v1.1.0...v2.0.0) (2026-06-09)
 
 
