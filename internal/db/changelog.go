@@ -60,25 +60,10 @@ func (db *DB) InsertChangelogBatch(entries []*ChangelogEntry) error {
 	return tx.Commit()
 }
 
-// GetIssueIDToKeyMap returns a map of Jira numeric issue ID to issue key.
-// Issues synced before the id column was populated will have NULL and are skipped.
-func (db *DB) GetIssueIDToKeyMap(keys []string) (map[string]string, error) {
-	if len(keys) == 0 {
-		return nil, nil
-	}
-
-	placeholders := make([]string, len(keys))
-	args := make([]any, len(keys))
-	for i, k := range keys {
-		placeholders[i] = "?"
-		args[i] = k
-	}
-	query := fmt.Sprintf(
-		`SELECT id, key FROM issues WHERE key IN (%s) AND id IS NOT NULL`,
-		strings.Join(placeholders, ", "),
-	)
-
-	sqlRows, err := db.Query(query, args...)
+// GetIssueIDToKeyMap returns a map of Jira numeric issue ID to issue key
+// for all issues that have a populated id.
+func (db *DB) GetIssueIDToKeyMap() (map[string]string, error) {
+	sqlRows, err := db.Query(`SELECT id, key FROM issues WHERE id IS NOT NULL AND id != ''`)
 	if err != nil {
 		return nil, err
 	}
@@ -86,9 +71,9 @@ func (db *DB) GetIssueIDToKeyMap(keys []string) (map[string]string, error) {
 
 	m := make(map[string]string)
 	for sqlRows.Next() {
-		var id, key *string
-		if sqlRows.Scan(&id, &key) == nil && id != nil && key != nil && *id != "" {
-			m[*id] = *key
+		var id, key string
+		if sqlRows.Scan(&id, &key) == nil {
+			m[id] = key
 		}
 	}
 	return m, nil

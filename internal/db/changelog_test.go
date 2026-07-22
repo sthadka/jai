@@ -82,7 +82,7 @@ func TestGetIssueIDToKeyMap(t *testing.T) {
 		t.Fatalf("inserting issue: %v", err)
 	}
 
-	m, err := db.GetIssueIDToKeyMap([]string{"TEST-1", "TEST-2", "TEST-3"})
+	m, err := db.GetIssueIDToKeyMap()
 	if err != nil {
 		t.Fatalf("GetIssueIDToKeyMap: %v", err)
 	}
