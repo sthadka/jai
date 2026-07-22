@@ -1,8 +1,84 @@
 package cli
 
 import (
+	"encoding/json"
 	"testing"
 )
+
+func TestParseArrayValue(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  []string
+	}{
+		{
+			name:  "single value",
+			input: "bug",
+			want:  []string{"bug"},
+		},
+		{
+			name:  "comma separated",
+			input: "bug,security",
+			want:  []string{"bug", "security"},
+		},
+		{
+			name:  "comma separated with spaces",
+			input: "bug, security, rit-escalated",
+			want:  []string{"bug", "security", "rit-escalated"},
+		},
+		{
+			name:  "empty segments skipped",
+			input: "bug,,security",
+			want:  []string{"bug", "security"},
+		},
+		{
+			name:  "whitespace only segments skipped",
+			input: "bug, ,security",
+			want:  []string{"bug", "security"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseArrayValue(tt.input)
+			if len(got) != len(tt.want) {
+				t.Fatalf("got %v, want %v", got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Fatalf("got[%d]=%q, want %q", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestArrayFieldPayloadSerialization(t *testing.T) {
+	arr := parseArrayValue("bug,security")
+	payload, err := json.Marshal(map[string]interface{}{"field": "labels", "value": arr})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var decoded struct {
+		Field string      `json:"field"`
+		Value interface{} `json:"value"`
+	}
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		t.Fatal(err)
+	}
+
+	values, ok := decoded.Value.([]interface{})
+	if !ok {
+		t.Fatalf("expected []interface{}, got %T", decoded.Value)
+	}
+	if len(values) != 2 {
+		t.Fatalf("expected 2 values, got %d", len(values))
+	}
+	if values[0] != "bug" || values[1] != "security" {
+		t.Fatalf("expected [bug, security], got %v", values)
+	}
+}
 
 func TestApplyArrayOps(t *testing.T) {
 	tests := []struct {
