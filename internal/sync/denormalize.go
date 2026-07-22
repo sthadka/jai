@@ -269,6 +269,39 @@ func ExtractChangelog(issueKey string, resp *jira.ChangelogResponse) []*db.Chang
 	return entries
 }
 
+// ExtractBulkChangelog converts bulk changelog API entries into DB entries.
+// issueIDToKey maps Jira numeric issue IDs to keys (e.g. "10042" -> "ROX-123").
+func ExtractBulkChangelog(entries []jira.BulkChangelogEntry, issueIDToKey map[string]string) []*db.ChangelogEntry {
+	var result []*db.ChangelogEntry
+	for _, e := range entries {
+		issueKey, ok := issueIDToKey[e.IssueID]
+		if !ok {
+			continue
+		}
+		author := ""
+		if e.Author != nil {
+			author = e.Author.DisplayName
+		}
+		changedAt := normalizeDate(e.Created)
+
+		for i, item := range e.Items {
+			result = append(result, &db.ChangelogEntry{
+				ID:         fmt.Sprintf("%s_%d", e.ID, i),
+				IssueKey:   issueKey,
+				Author:     author,
+				Field:      item.Field,
+				FieldType:  item.FieldType,
+				FromValue:  item.From,
+				FromString: item.FromString,
+				ToValue:    item.To,
+				ToString:   item.ToString,
+				ChangedAt:  changedAt,
+			})
+		}
+	}
+	return result
+}
+
 // ExtractIssueLinks extracts formal Jira issue links from a raw issue JSON.
 // Each link produces two rows (inward + outward perspective) so both sides are queryable.
 func ExtractIssueLinks(issueKey string, raw []byte) []db.IssueLink {
