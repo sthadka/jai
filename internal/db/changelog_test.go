@@ -64,20 +64,20 @@ func TestInsertChangelogBatch_Empty(t *testing.T) {
 func TestGetIssueIDToKeyMap(t *testing.T) {
 	db := openTestDB(t)
 
-	// Insert issues with raw_json containing numeric IDs.
-	_, err := db.Exec(`INSERT INTO issues (key, project, summary, raw_json) VALUES (?, ?, '', ?)`,
-		"TEST-1", "TEST", `{"id":"10042","key":"TEST-1","fields":{}}`)
+	// Insert issues with numeric IDs.
+	_, err := db.Exec(`INSERT INTO issues (id, key, project, summary) VALUES (?, ?, ?, '')`,
+		"10042", "TEST-1", "TEST")
 	if err != nil {
 		t.Fatalf("inserting issue: %v", err)
 	}
-	_, err = db.Exec(`INSERT INTO issues (key, project, summary, raw_json) VALUES (?, ?, '', ?)`,
-		"TEST-2", "TEST", `{"id":"10043","key":"TEST-2","fields":{}}`)
+	_, err = db.Exec(`INSERT INTO issues (id, key, project, summary) VALUES (?, ?, ?, '')`,
+		"10043", "TEST-2", "TEST")
 	if err != nil {
 		t.Fatalf("inserting issue: %v", err)
 	}
-	// Issue without ID in raw_json (old sync data).
-	_, err = db.Exec(`INSERT INTO issues (key, project, summary, raw_json) VALUES (?, ?, '', ?)`,
-		"TEST-3", "TEST", `{"key":"TEST-3","fields":{}}`)
+	// Issue without ID (old sync data).
+	_, err = db.Exec(`INSERT INTO issues (key, project, summary) VALUES (?, ?, '')`,
+		"TEST-3", "TEST")
 	if err != nil {
 		t.Fatalf("inserting issue: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestGetIssueIDToKeyMap(t *testing.T) {
 		t.Errorf("expected 10043->TEST-2, got %q", m["10043"])
 	}
 	if _, ok := m["TEST-3"]; ok {
-		t.Error("TEST-3 should not be in map (no ID in raw_json)")
+		t.Error("TEST-3 should not be in map (no ID)")
 	}
 	if len(m) != 2 {
 		t.Errorf("expected 2 entries, got %d", len(m))

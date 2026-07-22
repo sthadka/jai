@@ -9,6 +9,7 @@ import (
 
 // Issue represents a row from the issues table.
 type Issue struct {
+	ID               string
 	Key              string
 	Project          string
 	Type             string
@@ -52,7 +53,7 @@ type IssueLink struct {
 // UpsertIssue inserts or replaces an issue row. Extra contains additional dynamic columns.
 func (db *DB) UpsertIssue(issue *Issue, extra map[string]interface{}) error {
 	cols := []string{
-		"key", "project", "type", "summary", "description",
+		"id", "key", "project", "type", "summary", "description",
 		"status", "status_category", "priority",
 		"assignee", "assignee_email", "reporter",
 		"created", "updated", "resolved",
@@ -64,7 +65,7 @@ func (db *DB) UpsertIssue(issue *Issue, extra map[string]interface{}) error {
 		"subtask_keys",
 	}
 	vals := []interface{}{
-		issue.Key, issue.Project, issue.Type, issue.Summary, issue.Description,
+		issue.ID, issue.Key, issue.Project, issue.Type, issue.Summary, issue.Description,
 		issue.Status, issue.StatusCategory, issue.Priority,
 		issue.Assignee, issue.AssigneeEmail, issue.Reporter,
 		issue.Created, issue.Updated, issue.Resolved,

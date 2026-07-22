@@ -174,6 +174,14 @@ var migrations = []migration{
 			return nil
 		},
 	},
+	{
+		version:     8,
+		description: "add id column to issues for Jira numeric issue ID",
+		up: func(tx *sql.Tx) error {
+			_, err := tx.Exec(`ALTER TABLE issues ADD COLUMN id TEXT`)
+			return err
+		},
+	},
 }
 
 func convertCSVToJSON(tx *sql.Tx, column string) error {
