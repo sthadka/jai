@@ -117,6 +117,41 @@ func (c *Client) CreateLink(ctx context.Context, linkType, inwardKey, outwardKey
 	return c.post(ctx, "/rest/api/3/issueLink", payload)
 }
 
+// AddWatcher adds a watcher to a Jira issue.
+// The Jira Cloud watchers API expects a quoted accountId string as the request body.
+func (c *Client) AddWatcher(ctx context.Context, issueKey, accountID string) error {
+	return c.post(ctx, fmt.Sprintf("/rest/api/3/issue/%s/watchers", issueKey), accountID)
+}
+
+// RemoveWatcher removes a watcher from a Jira issue.
+func (c *Client) RemoveWatcher(ctx context.Context, issueKey, accountID string) error {
+	return c.del(ctx, fmt.Sprintf("/rest/api/3/issue/%s/watchers?accountId=%s", issueKey, accountID))
+}
+
+// CreateRemoteLink creates a remote (web URL) link on a Jira issue.
+func (c *Client) CreateRemoteLink(ctx context.Context, issueKey, url, title string) error {
+	payload := map[string]interface{}{
+		"object": map[string]string{
+			"url":   url,
+			"title": title,
+		},
+	}
+	return c.post(ctx, fmt.Sprintf("/rest/api/3/issue/%s/remotelink", issueKey), payload)
+}
+
+func (c *Client) del(ctx context.Context, path string) error {
+	resp, err := c.doRequest(ctx, http.MethodDelete, path, nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		b, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("jira DELETE %s: %d %s", path, resp.StatusCode, string(b))
+	}
+	return nil
+}
+
 func (c *Client) put(ctx context.Context, path string, body interface{}) error {
 	data, err := json.Marshal(body)
 	if err != nil {
