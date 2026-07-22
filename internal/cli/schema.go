@@ -111,6 +111,14 @@ var commandSchemas = []CommandSchema{
 			"command": {Type: "string", Description: "Command name (omit to list all)"},
 		},
 	},
+	{
+		Name:        "db",
+		Description: "Manage the local database: 'db reset' (delete and recreate), 'db path' (print file path), 'db info' (show stats)",
+		Flags: map[string]ParamSchema{
+			"json":  {Type: "bool", Description: "Output as JSON (db info only)"},
+			"force": {Type: "bool", Description: "Skip confirmation prompt (db reset only)"},
+		},
+	},
 }
 
 var schemaCmd = &cobra.Command{
