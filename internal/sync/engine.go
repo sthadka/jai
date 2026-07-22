@@ -386,10 +386,8 @@ func (e *Engine) SyncChangelogs(ctx context.Context, sourceFilter string) (<-cha
 		// Split candidates: those with known IDs use bulk, the rest use per-issue.
 		var bulkKeys, fallbackKeys []string
 		keyToID := make(map[string]bool)
-		if idToKey != nil {
-			for _, key := range idToKey {
-				keyToID[key] = true
-			}
+		for _, key := range idToKey {
+			keyToID[key] = true
 		}
 		for _, key := range candidates {
 			if keyToID[key] {
