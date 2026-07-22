@@ -43,6 +43,7 @@ var noAutoSync = map[string]bool{
 	"values":     true, // schema values sub-command
 	"fields":     true,
 	"completion": true,
+	"open":       true,
 	"help":       true,
 }
 
