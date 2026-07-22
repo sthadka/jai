@@ -46,6 +46,14 @@ var noAutoSync = map[string]bool{
 	"help":       true,
 }
 
+// noDBRequired lists `db` sub-commands that only need config loaded, not an
+// open DB connection — they operate on the DB file directly (reset) or don't
+// touch it at all (path), so they must work even if the DB is corrupt/missing.
+var noDBRequired = map[string]bool{
+	"reset": true,
+	"path":  true,
+}
+
 func newRootCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "jai",
@@ -74,6 +82,11 @@ func newRootCmd() *cobra.Command {
 				g.cfg.DB.Path = g.dbPath
 			}
 
+			underDB := cmd.Parent() != nil && cmd.Parent().Name() == "db"
+			if underDB && noDBRequired[cmd.Name()] {
+				return nil
+			}
+
 			database, err := db.Open(g.cfg.DB.Path)
 			if err != nil {
 				return fmt.Errorf("opening database: %w", err)
@@ -84,7 +97,7 @@ func newRootCmd() *cobra.Command {
 			g.query = query.New(database, cfg)
 			g.sync = synce.New(database, g.jira, cfg)
 
-			if !g.noSync && !noAutoSync[cmd.Name()] {
+			if !g.noSync && !noAutoSync[cmd.Name()] && !underDB {
 				if shouldAutoSync(database, cfg) {
 					runAutoSync(cmd.Context())
 				}
