@@ -13,25 +13,80 @@ import (
 var (
 	setAddValues    []string
 	setRemoveValues []string
+	setQuery        string
 )
 
 var setCmd = &cobra.Command{
-	Use:   "set <key> <field> [value]",
-	Short: "Set a field value on a Jira issue (queued locally until 'jai push')",
-	Long: `Set a field value on a Jira issue (queued locally until 'jai push').
+	Use:   "set [key] <field> [value]",
+	Short: "Set a field value on one or more Jira issues (queued locally until 'jai push')",
+	Long: `Set a field value on one or more Jira issues (queued locally until 'jai push').
 
 For scalar fields:
   jai set ROX-123 priority High
 
 For array fields (labels, components, fixVersions):
   jai set ROX-123 --add labels rit-escalated
-  jai set ROX-123 --remove labels old-label`,
-	Args: cobra.RangeArgs(2, 3),
+  jai set ROX-123 --remove labels old-label
+
+Bulk operations with comma-separated keys:
+  jai set ROX-1,ROX-2,ROX-3 priority Major
+
+Bulk operations with a SQL query:
+  jai set --query "SELECT key FROM issues WHERE type='Bug'" priority Major`,
+	Args: func(cmd *cobra.Command, args []string) error {
+		if setQuery != "" {
+			if len(args) < 1 || len(args) > 2 {
+				return fmt.Errorf("with --query, provide <field> [value] (got %d args)", len(args))
+			}
+			return nil
+		}
+		return cobra.RangeArgs(2, 3)(cmd, args)
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		issueKey, fieldName := args[0], args[1]
+		var keys []string
+		var fieldName string
+		var scalarValue string
 		hasAdd := len(setAddValues) > 0
 		hasRemove := len(setRemoveValues) > 0
-		hasScalarValue := len(args) == 3
+
+		if setQuery != "" {
+			fieldName = args[0]
+			if len(args) == 2 {
+				scalarValue = args[1]
+			}
+			results, err := g.query.Execute(setQuery)
+			if err != nil {
+				if g.jsonOut {
+					fmt.Println(string(output.Err("QueryError", err.Error())))
+					return nil
+				}
+				return fmt.Errorf("query: %w", err)
+			}
+			keys, err = extractKeys(results.Columns, results.Rows)
+			if err != nil {
+				if g.jsonOut {
+					fmt.Println(string(output.Err("QueryError", err.Error())))
+					return nil
+				}
+				return err
+			}
+			if len(keys) == 0 {
+				msg := "query returned 0 rows"
+				if g.jsonOut {
+					fmt.Println(string(output.Err("QueryError", msg)))
+					return nil
+				}
+				return fmt.Errorf("%s", msg)
+			}
+		} else {
+			keys = expandKeys(args[0])
+			fieldName = args[1]
+			if len(args) == 3 {
+				scalarValue = args[2]
+			}
+		}
+
+		hasScalarValue := scalarValue != ""
 
 		if (hasAdd || hasRemove) && hasScalarValue {
 			msg := "cannot combine --add/--remove with a positional value"
@@ -86,10 +141,15 @@ For array fields (labels, components, fixVersions):
 			return fmt.Errorf("%s", msg)
 		}
 
+		if len(keys) > 1 {
+			return setBulk(cmd, keys, fieldName, jiraID, scalarValue, fieldType)
+		}
+
+		issueKey := keys[0]
 		if hasAdd || hasRemove {
 			return setArrayField(cmd, issueKey, fieldName, jiraID)
 		}
-		return setScalarField(cmd, issueKey, fieldName, jiraID, args[2], fieldType)
+		return setScalarField(cmd, issueKey, fieldName, jiraID, scalarValue, fieldType)
 	},
 }
 
@@ -139,6 +199,78 @@ func parseArrayValue(value string) []string {
 		}
 	}
 	return result
+}
+
+func expandKeys(keyArg string) []string {
+	parts := strings.Split(keyArg, ",")
+	keys := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if k := strings.TrimSpace(p); k != "" {
+			keys = append(keys, k)
+		}
+	}
+	return keys
+}
+
+func extractKeys(columns []string, rows [][]interface{}) ([]string, error) {
+	keyCol := -1
+	for i, col := range columns {
+		if strings.EqualFold(col, "key") {
+			keyCol = i
+			break
+		}
+	}
+	if keyCol == -1 {
+		return nil, fmt.Errorf("query must return a 'key' column")
+	}
+	keys := make([]string, 0, len(rows))
+	for _, row := range rows {
+		if keyCol < len(row) && row[keyCol] != nil {
+			keys = append(keys, fmt.Sprint(row[keyCol]))
+		}
+	}
+	return keys, nil
+}
+
+func setBulk(cmd *cobra.Command, keys []string, fieldName, jiraID, value, fieldType string) error {
+	hasAdd := len(setAddValues) > 0
+	hasRemove := len(setRemoveValues) > 0
+
+	for _, key := range keys {
+		if hasAdd || hasRemove {
+			for _, v := range setAddValues {
+				payload, _ := json.Marshal(map[string]string{"field": jiraID, "op": "add", "value": v})
+				if err := g.db.InsertPendingChange(key, "update_field", string(payload)); err != nil {
+					return err
+				}
+			}
+			for _, v := range setRemoveValues {
+				payload, _ := json.Marshal(map[string]string{"field": jiraID, "op": "remove", "value": v})
+				if err := g.db.InsertPendingChange(key, "update_field", string(payload)); err != nil {
+					return err
+				}
+			}
+		} else {
+			var payloadVal interface{} = value
+			if fieldType == "array" {
+				payloadVal = parseArrayValue(value)
+			}
+			payload, _ := json.Marshal(map[string]interface{}{"field": jiraID, "value": payloadVal})
+			if err := g.db.InsertPendingChange(key, "set_field", string(payload)); err != nil {
+				return err
+			}
+		}
+	}
+
+	if g.jsonOut {
+		fmt.Println(string(output.OK(map[string]interface{}{
+			"count": len(keys),
+			"keys":  keys,
+		})))
+		return nil
+	}
+	fmt.Printf("queued %d changes (pending sync)\n", len(keys))
+	return nil
 }
 
 func setArrayField(cmd *cobra.Command, issueKey, fieldName, jiraID string) error {
@@ -228,5 +360,6 @@ func applyArrayOps(current, adds, removes []string) []string {
 func init() {
 	setCmd.Flags().StringArrayVar(&setAddValues, "add", nil, "Add a value to an array field (repeatable)")
 	setCmd.Flags().StringArrayVar(&setRemoveValues, "remove", nil, "Remove a value from an array field (repeatable)")
+	setCmd.Flags().StringVar(&setQuery, "query", "", "SQL query returning a 'key' column to bulk-set")
 	rootCmd.AddCommand(setCmd)
 }
