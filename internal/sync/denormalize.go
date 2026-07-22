@@ -250,6 +250,7 @@ func ExtractChangelog(issueKey string, resp *jira.ChangelogResponse) []*db.Chang
 		}
 		changedAt := normalizeDate(h.Created)
 
+		// h.ID is globally unique across the Jira instance, so historyID_itemIndex is unique.
 		for i, item := range h.Items {
 			entries = append(entries, &db.ChangelogEntry{
 				ID:         fmt.Sprintf("%s_%d", h.ID, i),
