@@ -13,6 +13,7 @@ func TestLinkCmd_DefaultType(t *testing.T) {
 	flag := cmd.Flags().Lookup("type")
 	if flag == nil {
 		t.Fatal("expected --type flag to exist")
+		return
 	}
 	if flag.DefValue != "Relates" {
 		t.Errorf("expected default link type %q, got %q", "Relates", flag.DefValue)
@@ -24,6 +25,7 @@ func TestLinkCmd_ListTypesFlag(t *testing.T) {
 	flag := cmd.Flags().Lookup("list-types")
 	if flag == nil {
 		t.Fatal("expected --list-types flag to exist")
+		return
 	}
 	if flag.DefValue != "false" {
 		t.Errorf("expected default list-types %q, got %q", "false", flag.DefValue)

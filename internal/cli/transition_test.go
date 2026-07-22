@@ -55,6 +55,7 @@ func TestResolveTransition(t *testing.T) {
 
 			if match == nil {
 				t.Fatal("expected match, got nil")
+				return
 			}
 			if match.ID != tt.wantMatch {
 				t.Errorf("expected ID %s, got %s", tt.wantMatch, match.ID)
