@@ -178,8 +178,18 @@ var migrations = []migration{
 		version:     8,
 		description: "add id column to issues for Jira numeric issue ID",
 		up: func(tx *sql.Tx) error {
-			_, err := tx.Exec(`ALTER TABLE issues ADD COLUMN id TEXT`)
-			return err
+			// Column may already exist as a dynamic custom-field column.
+			var exists bool
+			row := tx.QueryRow(`SELECT count(*) > 0 FROM pragma_table_info('issues') WHERE name = 'id'`)
+			if err := row.Scan(&exists); err != nil {
+				return err
+			}
+			if !exists {
+				if _, err := tx.Exec(`ALTER TABLE issues ADD COLUMN id TEXT`); err != nil {
+					return err
+				}
+			}
+			return nil
 		},
 	},
 }
