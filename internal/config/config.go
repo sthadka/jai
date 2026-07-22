@@ -144,6 +144,9 @@ func Load(path string) (*Config, error) {
 
 	if cfg.DB.Path == "" {
 		cfg.DB.Path = DefaultDBPath()
+	} else if strings.HasPrefix(cfg.DB.Path, "~/") {
+		home, _ := os.UserHomeDir()
+		cfg.DB.Path = filepath.Join(home, cfg.DB.Path[2:])
 	}
 
 	return cfg, nil

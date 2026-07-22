@@ -97,9 +97,15 @@ func runInit(cmd *cobra.Command, args []string) error {
 	fmt.Println()
 	fmt.Printf("  All Jira data is synced locally — fast queries, no rate limits.\n")
 
+	// Resolve config path: --config flag > default.
+	cfgPath := g.cfgPath
+	if cfgPath == "" {
+		cfgPath = config.DefaultConfigPath()
+	}
+
 	// Load existing config to pre-populate prompts.
 	var existing *config.Config
-	if cfg, err := config.Load(config.DefaultConfigPath()); err == nil {
+	if cfg, err := config.Load(cfgPath); err == nil {
 		existing = cfg
 	}
 	defaultFor := func(field string) string {
@@ -153,7 +159,6 @@ func runInit(cmd *cobra.Command, args []string) error {
 	stepOK("Account: " + dim(me.EmailAddress))
 
 	// Write config file.
-	cfgPath := config.DefaultConfigPath()
 	if err := os.MkdirAll(filepath.Dir(cfgPath), 0700); err != nil {
 		stepFail("Could not create config directory: " + err.Error())
 		return fmt.Errorf("creating config directory: %w", err)
@@ -206,8 +211,28 @@ func runInit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("at least one sync source is required")
 	}
 
+	// Resolve DB path: --db flag > existing config > derived from config name > default.
+	dbPath := config.DefaultDBPath()
+	if cfgPath != config.DefaultConfigPath() {
+		// Non-default config: derive DB name from config filename (e.g., staging.yaml → staging.db).
+		base := strings.TrimSuffix(filepath.Base(cfgPath), filepath.Ext(cfgPath))
+		if base != "" && base != "config" {
+			dbPath = filepath.Join(filepath.Dir(config.DefaultDBPath()), base+".db")
+		}
+	}
+	if existing != nil && existing.DB.Path != "" {
+		dbPath = existing.DB.Path
+	}
+	if g.dbPath != "" {
+		dbPath = g.dbPath
+	}
+
+	// Show resolved paths.
+	stepOK("Config: " + dim(cfgPath))
+	stepOK("Database: " + dim(dbPath))
+
 	// Persist config now that we have everything.
-	cfgContent := buildConfigYAML(jiraURL, email, me.EmailAddress, sources)
+	cfgContent := buildConfigYAML(jiraURL, email, me.EmailAddress, dbPath, sources)
 	if err := os.WriteFile(cfgPath, []byte(cfgContent), 0600); err != nil {
 		stepFail("Could not write config: " + err.Error())
 		return fmt.Errorf("writing config: %w", err)
@@ -223,7 +248,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 		SyncSources: sources,
 		Sync:        config.SyncConfig{Interval: "15m", RateLimit: 10},
 		Me:          me.EmailAddress,
-		DB:          config.DBConfig{Path: config.DefaultDBPath()},
+		DB:          config.DBConfig{Path: dbPath},
 	}
 
 	database, err := db.Open(cfg.DB.Path)
@@ -286,13 +311,16 @@ func runInit(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func buildConfigYAML(jiraURL, email, meEmail string, sources []config.SyncSource) string {
+func buildConfigYAML(jiraURL, email, meEmail, dbPath string, sources []config.SyncSource) string {
 	var sb strings.Builder
 	sb.WriteString("jira:\n")
 	sb.WriteString(fmt.Sprintf("  url: %s\n", jiraURL))
 	sb.WriteString(fmt.Sprintf("  email: %s\n", email))
 	sb.WriteString("  token: ${JAI_TOKEN}\n")
 	sb.WriteString("\nsync:\n  interval: 15m\n  rate_limit: 10\n")
+	if dbPath != "" && dbPath != config.DefaultDBPath() {
+		sb.WriteString(fmt.Sprintf("\ndb:\n  path: %s\n", dbPath))
+	}
 	sb.WriteString(fmt.Sprintf("\nme: %s\n", meEmail))
 	sb.WriteString("\nsync_sources:\n")
 	for _, s := range sources {
