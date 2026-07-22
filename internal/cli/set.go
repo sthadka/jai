@@ -25,8 +25,8 @@ For scalar fields:
   jai set ROX-123 priority High
 
 For array fields (labels, components, fixVersions):
-  jai set ROX-123 --add labels rit-escalated
-  jai set ROX-123 --remove labels old-label
+  jai set ROX-123 labels --add rit-escalated
+  jai set ROX-123 labels --remove old-label
 
 Bulk operations with comma-separated keys:
   jai set ROX-1,ROX-2,ROX-3 priority Major
@@ -289,10 +289,14 @@ func setArrayField(cmd *cobra.Command, issueKey, fieldName, jiraID string) error
 
 	current := readCurrentArray(issueKey, fieldName)
 	updated := applyArrayOps(current, setAddValues, setRemoveValues)
-	newJSON, _ := json.Marshal(updated)
+	var localVal string
+	if len(updated) > 0 {
+		b, _ := json.Marshal(updated)
+		localVal = string(b)
+	}
 	_, err := g.db.Exec(
 		fmt.Sprintf("UPDATE issues SET %s = ?, synced_at = datetime('now') WHERE key = ?", fieldName),
-		string(newJSON), issueKey,
+		localVal, issueKey,
 	)
 	if err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "warning: local update failed: %v\n", err)

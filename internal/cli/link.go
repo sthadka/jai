@@ -22,8 +22,8 @@ Links are pushed immediately and are idempotent — creating the same
 link twice is a no-op.
 
 Examples:
-  jai link ROX-1 ROX-2                       # "Relates" link (default)
-  jai link ROX-1 ROX-2 --type "blocks"       # typed link
+  jai link ROX-1 ROX-2                       # default link type
+  jai link ROX-1 ROX-2 --type "Blocks"       # typed link
   jai link --list-types                       # show available link types`,
 	Args: cobra.RangeArgs(0, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -43,6 +43,16 @@ Examples:
 		fromKey := strings.ToUpper(args[0])
 		toKey := strings.ToUpper(args[1])
 		linkType := linkFlags.linkType
+
+		resolved, err := resolveLinkType(cmd, linkType)
+		if err != nil {
+			if g.jsonOut {
+				fmt.Println(string(output.Err("JiraError", err.Error())))
+				return nil
+			}
+			return err
+		}
+		linkType = resolved
 
 		if err := g.jira.CreateLink(cmd.Context(), linkType, fromKey, toKey); err != nil {
 			if g.jsonOut {
@@ -94,6 +104,23 @@ func runListLinkTypes(cmd *cobra.Command) error {
 		fmt.Printf("  - %s (inward: %q, outward: %q)\n", lt.Name, lt.Inward, lt.Outward)
 	}
 	return nil
+}
+
+func resolveLinkType(cmd *cobra.Command, name string) (string, error) {
+	linkTypes, err := g.jira.GetLinkTypes(cmd.Context())
+	if err != nil {
+		return "", fmt.Errorf("fetching link types: %w", err)
+	}
+	for _, lt := range linkTypes {
+		if strings.EqualFold(lt.Name, name) {
+			return lt.Name, nil
+		}
+	}
+	names := make([]string, len(linkTypes))
+	for i, lt := range linkTypes {
+		names[i] = lt.Name
+	}
+	return "", fmt.Errorf("unknown link type %q (available: %s)", name, strings.Join(names, ", "))
 }
 
 func init() {
