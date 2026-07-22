@@ -80,6 +80,124 @@ func TestArrayFieldPayloadSerialization(t *testing.T) {
 	}
 }
 
+func TestExpandKeys(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  []string
+	}{
+		{
+			name:  "single key",
+			input: "ROX-123",
+			want:  []string{"ROX-123"},
+		},
+		{
+			name:  "comma separated",
+			input: "ROX-1,ROX-2,ROX-3",
+			want:  []string{"ROX-1", "ROX-2", "ROX-3"},
+		},
+		{
+			name:  "with spaces",
+			input: "ROX-1, ROX-2, ROX-3",
+			want:  []string{"ROX-1", "ROX-2", "ROX-3"},
+		},
+		{
+			name:  "empty segments skipped",
+			input: "ROX-1,,ROX-2",
+			want:  []string{"ROX-1", "ROX-2"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := expandKeys(tt.input)
+			if len(got) != len(tt.want) {
+				t.Fatalf("got %v, want %v", got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Fatalf("got[%d]=%q, want %q", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestExtractKeys(t *testing.T) {
+	tests := []struct {
+		name    string
+		columns []string
+		rows    [][]interface{}
+		want    []string
+		wantErr bool
+	}{
+		{
+			name:    "extracts key column",
+			columns: []string{"key", "summary"},
+			rows: [][]interface{}{
+				{"ROX-1", "first"},
+				{"ROX-2", "second"},
+			},
+			want: []string{"ROX-1", "ROX-2"},
+		},
+		{
+			name:    "case insensitive column match",
+			columns: []string{"KEY", "summary"},
+			rows: [][]interface{}{
+				{"ROX-1", "first"},
+			},
+			want: []string{"ROX-1"},
+		},
+		{
+			name:    "no key column errors",
+			columns: []string{"summary", "status"},
+			rows: [][]interface{}{
+				{"first", "Open"},
+			},
+			wantErr: true,
+		},
+		{
+			name:    "nil values skipped",
+			columns: []string{"key"},
+			rows: [][]interface{}{
+				{"ROX-1"},
+				{nil},
+				{"ROX-3"},
+			},
+			want: []string{"ROX-1", "ROX-3"},
+		},
+		{
+			name:    "empty rows",
+			columns: []string{"key"},
+			rows:    nil,
+			want:    []string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := extractKeys(tt.columns, tt.rows)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if len(got) != len(tt.want) {
+				t.Fatalf("got %v, want %v", got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Fatalf("got[%d]=%q, want %q", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
 func TestApplyArrayOps(t *testing.T) {
 	tests := []struct {
 		name    string
