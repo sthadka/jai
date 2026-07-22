@@ -53,6 +53,7 @@ func Denormalize(raw []byte, fieldMap map[string]*db.FieldMapping) (*db.Issue, m
 	}
 
 	issue := &db.Issue{
+		ID:      apiIssue.ID,
 		Key:     apiIssue.Key,
 		Summary: fields.Summary,
 		RawJSON: string(raw),

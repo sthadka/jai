@@ -61,8 +61,7 @@ func (db *DB) InsertChangelogBatch(entries []*ChangelogEntry) error {
 }
 
 // GetIssueIDToKeyMap returns a map of Jira numeric issue ID to issue key.
-// Uses json_extract on raw_json to pull the ID. Issues synced before the ID
-// field was added to jira.Issue will have NULL and are skipped.
+// Issues synced before the id column was populated will have NULL and are skipped.
 func (db *DB) GetIssueIDToKeyMap(keys []string) (map[string]string, error) {
 	if len(keys) == 0 {
 		return nil, nil
@@ -75,7 +74,7 @@ func (db *DB) GetIssueIDToKeyMap(keys []string) (map[string]string, error) {
 		args[i] = k
 	}
 	query := fmt.Sprintf(
-		`SELECT json_extract(raw_json, '$.id'), key FROM issues WHERE key IN (%s)`,
+		`SELECT id, key FROM issues WHERE key IN (%s) AND id IS NOT NULL`,
 		strings.Join(placeholders, ", "),
 	)
 
