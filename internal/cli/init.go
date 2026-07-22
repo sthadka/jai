@@ -314,18 +314,18 @@ func runInit(cmd *cobra.Command, args []string) error {
 func buildConfigYAML(jiraURL, email, meEmail, dbPath string, sources []config.SyncSource) string {
 	var sb strings.Builder
 	sb.WriteString("jira:\n")
-	sb.WriteString(fmt.Sprintf("  url: %s\n", jiraURL))
-	sb.WriteString(fmt.Sprintf("  email: %s\n", email))
+	fmt.Fprintf(&sb, "  url: %s\n", jiraURL)
+	fmt.Fprintf(&sb, "  email: %s\n", email)
 	sb.WriteString("  token: ${JAI_TOKEN}\n")
 	sb.WriteString("\nsync:\n  interval: 15m\n  rate_limit: 10\n")
 	if dbPath != "" && dbPath != config.DefaultDBPath() {
-		sb.WriteString(fmt.Sprintf("\ndb:\n  path: %s\n", dbPath))
+		fmt.Fprintf(&sb, "\ndb:\n  path: %s\n", dbPath)
 	}
-	sb.WriteString(fmt.Sprintf("\nme: %s\n", meEmail))
+	fmt.Fprintf(&sb, "\nme: %s\n", meEmail)
 	sb.WriteString("\nsync_sources:\n")
 	for _, s := range sources {
-		sb.WriteString(fmt.Sprintf("  - name: %s\n", s.Name))
-		sb.WriteString(fmt.Sprintf("    jql: %s\n", s.JQL))
+		fmt.Fprintf(&sb, "  - name: %s\n", s.Name)
+		fmt.Fprintf(&sb, "    jql: %s\n", s.JQL)
 	}
 	sb.WriteString(`
 views:
