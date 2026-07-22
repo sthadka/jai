@@ -25,8 +25,6 @@ type TableModel struct {
 	groupBy       int      // column index in rows used for group headers, -1 = none
 	groupVals     []string // group value per row (parallel to rows)
 	filtGroupVals []string // group value per filtered row
-
-	colorRules interface{} // []config.ColorRule — stored as interface to avoid import cycle
 }
 
 // NewTableModel creates a new table model.

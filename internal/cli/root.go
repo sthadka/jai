@@ -11,7 +11,6 @@ import (
 	"github.com/sthadka/jai/internal/config"
 	"github.com/sthadka/jai/internal/db"
 	"github.com/sthadka/jai/internal/jira"
-	"github.com/sthadka/jai/internal/output"
 	"github.com/sthadka/jai/internal/query"
 	synce "github.com/sthadka/jai/internal/sync"
 )
@@ -71,7 +70,7 @@ func newRootCmd() *cobra.Command {
 
 			cfg, err := config.Load(cfgPath)
 			if err != nil {
-				return fmt.Errorf("loading config: %w\n\nRun 'jai init' to set up jai.", err)
+				return fmt.Errorf("loading config: %w -- run 'jai init' to set up jai", err)
 			}
 			if err := cfg.Validate(); err != nil {
 				return err
@@ -193,13 +192,3 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&g.fields, "fields", "", "comma-separated field names to include in output")
 }
 
-// jsonErr prints a JSON error envelope to stdout and exits.
-func jsonErr(errType, msg string) {
-	fmt.Println(string(output.Err(errType, msg)))
-	os.Exit(1)
-}
-
-// jsonError is an alias kept for backward compat within this package.
-func jsonError(errType, msg string) {
-	jsonErr(errType, msg)
-}

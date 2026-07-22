@@ -717,9 +717,10 @@ func (a *App) View() string {
 	} else if (a.mode == ModeDetail || a.mode == ModeFieldPicker || a.mode == ModeFieldValue) && a.detail != nil {
 		detailContent := a.detail.Render(a.width, a.tableHeight())
 		sb.WriteString(detailContent)
-		if a.mode == ModeFieldPicker {
+		switch a.mode {
+		case ModeFieldPicker:
 			sb.WriteString("\n" + a.renderFieldPickerModal())
-		} else if a.mode == ModeFieldValue {
+		case ModeFieldValue:
 			sb.WriteString("\n" + a.renderFieldValueModal())
 		}
 	} else {
