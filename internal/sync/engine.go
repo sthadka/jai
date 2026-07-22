@@ -378,7 +378,7 @@ func (e *Engine) SyncChangelogs(ctx context.Context, sourceFilter string) (<-cha
 			return
 		}
 
-		idToKey, err := e.db.GetIssueIDToKeyMap(candidates)
+		idToKey, err := e.db.GetIssueIDToKeyMap()
 		if err != nil {
 			idToKey = nil
 		}
