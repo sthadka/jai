@@ -47,6 +47,45 @@ jai query "SELECT key, summary, status FROM issues WHERE assignee_email = '{{me}
 
 The `{{me}}` template variable is replaced with the `me:` value from your config.
 
+### Template variables
+
+Queries support built-in and parameterized template variables:
+
+```sh
+# Built-in time variables
+jai query "SELECT key, summary FROM issues WHERE created >= '{{this_week}}'"
+jai query "SELECT key, summary FROM issues WHERE updated < '{{month_ago}}'"
+
+# Parameterized — pass any number
+jai query "SELECT key, summary FROM issues WHERE created >= '{{days_ago:14}}'"
+jai query "SELECT key, summary FROM issues WHERE created >= '{{weeks_ago:4}}'"
+jai query "SELECT key, summary FROM issues WHERE created >= '{{months_ago:3}}'"
+
+# Project list from all sync sources
+jai query "SELECT key FROM issues WHERE project IN ({{projects}})"
+```
+
+Available: `{{today}}`, `{{yesterday}}`, `{{week_ago}}`, `{{month_ago}}`, `{{quarter_ago}}`, `{{this_week}}`, `{{this_month}}`, `{{this_quarter}}`, `{{projects}}`, `{{days_ago:N}}`, `{{weeks_ago:N}}`, `{{months_ago:N}}`.
+
+### User-defined snippets
+
+Define reusable SQL fragments in your config:
+
+```yaml
+snippets:
+  active: "status NOT IN ('Done', 'Closed', 'Resolved')"
+  stale: "julianday('now') - julianday(updated) > 28"
+  my_open: "assignee_email = '{{me}}' AND {{active}}"
+```
+
+Use them in any query:
+
+```sh
+jai query "SELECT key, summary FROM issues WHERE {{my_open}} AND {{stale}}"
+```
+
+Snippets can reference other snippets and built-in variables (recursive expansion). Circular references produce an error. List available snippets with `jai schema snippets`.
+
 ### Full-text search
 
 ```sh
@@ -145,17 +184,26 @@ jai transition ROX-123 "NotAStatus"
 Create links between issues. Links push to Jira immediately.
 
 ```sh
-# Default link type
-jai link ROX-1 ROX-2
-
-# Specify link type (case-insensitive)
+# Issue-to-issue link
 jai link ROX-1 ROX-2 --type "Blocks"
+
+# Remote URL link (detected automatically)
+jai link ROX-1 https://github.com/org/repo/pull/42 "PR #42"
+jai link ROX-1 https://github.com/org/repo/pull/42    # URL used as title
 
 # List available link types
 jai link --list-types
 ```
 
-If the specified type doesn't exist on your Jira instance, jai lists the available types.
+### Watch / Unwatch
+
+Add or remove watchers on issues. Pushes to Jira immediately.
+
+```sh
+jai watch ROX-123                        # add yourself as watcher
+jai watch ROX-123 user@example.com       # add another user
+jai unwatch ROX-123                      # remove yourself
+```
 
 ### Comments
 
@@ -167,12 +215,49 @@ jai comment ROX-123 "Fixed in PR #4892"
 
 ```sh
 jai create ROX --type Bug --summary "Login fails on SSO" --priority High --labels backend,auth
+
+# Use a template (defined in config under `templates:`)
+jai create ROX --type Bug --template bug-report --summary "Login fails on SSO"
+
+# Read description from stdin
+echo "Detailed description" | jai create ROX --type Bug --summary "Login fails" --body -
+
+# Inline description
+jai create ROX --type Bug --summary "Login fails" --body "Short description here"
+```
+
+### Clone issues
+
+Create a copy of an existing issue with optional overrides:
+
+```sh
+jai clone ROX-123                                  # exact copy
+jai clone ROX-123 --summary "New title"            # override summary
+jai clone ROX-123 --set priority=High              # override fields
+jai clone ROX-123 --replace "production:staging"   # find/replace in summary + description
+```
+
+### Open in browser
+
+```sh
+jai open ROX-123                  # open in default browser
+jai open ROX-123 --url-only       # print URL to stdout
 ```
 
 ### Push
 
 ```sh
 jai push
+```
+
+### Shell completions
+
+Generate shell completion scripts:
+
+```sh
+jai completion bash > /etc/bash_completion.d/jai
+jai completion zsh > "${fpath[1]}/_jai"
+jai completion fish > ~/.config/fish/completions/jai.fish
 ```
 
 ---
