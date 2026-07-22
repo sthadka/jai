@@ -36,6 +36,7 @@ var g globals
 var noAutoSync = map[string]bool{
 	"sync":       true,
 	"init":       true,
+	"clone":      true,
 	"create":     true,
 	"schema":     true,
 	"db":         true, // schema db sub-command

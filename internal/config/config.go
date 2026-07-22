@@ -32,8 +32,9 @@ type Config struct {
 	Me          string          `yaml:"me"`
 	Team        string          `yaml:"team"`
 	SyncSources []SyncSource    `yaml:"sync_sources"`
-	Hierarchy   HierarchyConfig `yaml:"hierarchy"`
-	Detail      DetailConfig    `yaml:"detail"`
+	Hierarchy   HierarchyConfig   `yaml:"hierarchy"`
+	Detail      DetailConfig      `yaml:"detail"`
+	Templates   map[string]string `yaml:"templates"`
 }
 
 // HierarchyLevel defines one level in the issue hierarchy.
