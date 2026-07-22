@@ -76,6 +76,8 @@ func (w *Writer) process(ctx context.Context, c *db.PendingChange) error {
 	switch c.Operation {
 	case "set_field":
 		return w.processSetField(ctx, c)
+	case "update_field":
+		return w.processUpdateField(ctx, c)
 	case "add_comment":
 		return w.processAddComment(ctx, c)
 	case "transition":
@@ -94,6 +96,18 @@ func (w *Writer) processSetField(ctx context.Context, c *db.PendingChange) error
 		return fmt.Errorf("parsing set_field payload: %w", err)
 	}
 	return w.client.UpdateField(ctx, c.IssueKey, payload.Field, payload.Value)
+}
+
+func (w *Writer) processUpdateField(ctx context.Context, c *db.PendingChange) error {
+	var payload struct {
+		Field string `json:"field"`
+		Op    string `json:"op"`
+		Value string `json:"value"`
+	}
+	if err := json.Unmarshal([]byte(c.Payload), &payload); err != nil {
+		return fmt.Errorf("parsing update_field payload: %w", err)
+	}
+	return w.client.UpdateFieldOp(ctx, c.IssueKey, payload.Field, payload.Op, payload.Value)
 }
 
 func (w *Writer) processAddComment(ctx context.Context, c *db.PendingChange) error {

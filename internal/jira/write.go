@@ -38,6 +38,18 @@ func (c *Client) UpdateField(ctx context.Context, issueKey, fieldID string, valu
 	return c.put(ctx, fmt.Sprintf("/rest/api/3/issue/%s", issueKey), payload)
 }
 
+// UpdateFieldOp performs an add or remove operation on an array field using Jira's update API.
+func (c *Client) UpdateFieldOp(ctx context.Context, issueKey, fieldID, op, value string) error {
+	payload := map[string]interface{}{
+		"update": map[string]interface{}{
+			fieldID: []map[string]string{
+				{op: value},
+			},
+		},
+	}
+	return c.put(ctx, fmt.Sprintf("/rest/api/3/issue/%s", issueKey), payload)
+}
+
 // AddComment adds a comment to a Jira issue.
 func (c *Client) AddComment(ctx context.Context, issueKey, body string) error {
 	payload := map[string]interface{}{
