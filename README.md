@@ -271,8 +271,32 @@ jai create ROX --type Story \
 # → {"ok":true,"data":{"key":"ROX-4902","id":"12345","project":"ROX","status":"created"}}
 
 # Update a field
-jai set ROX-4821 status "In Progress"
-# → ROX-4821: status → "In Progress" (pending sync)
+jai set ROX-4821 priority High
+# → ROX-4821: priority → "High" (pending sync)
+
+# Array fields — add/remove individual values
+jai set ROX-4821 labels --add backend --add auth
+# → ROX-4821: labels += [backend auth] (pending sync)
+jai set ROX-4821 labels --remove backend
+# → ROX-4821: labels -= [backend] (pending sync)
+
+# Bulk set — comma-separated keys or SQL query
+jai set ROX-1,ROX-2,ROX-3 priority Major
+# → queued 3 changes (pending sync)
+jai set --query "SELECT key FROM issues WHERE type = 'Bug' LIMIT 5" priority Major
+# → queued 5 changes (pending sync)
+
+# Transition an issue (pushes immediately)
+jai transition ROX-4821 "In Progress"
+# → ROX-4821: transitioned to "In Progress"
+jai transition ROX-4821 --list
+# → Available transitions: New, Backlog, In Progress, Done, ...
+
+# Link two issues
+jai link ROX-4821 ROX-4756 --type "Blocks"
+# → ROX-4821 -> ROX-4756: linked (Blocks)
+jai link --list-types
+# → Available link types: Blocks, Related, Duplicate, ...
 
 # Add a comment
 jai comment ROX-4821 "Fixed in PR #4892, deploying to staging"
@@ -280,9 +304,10 @@ jai comment ROX-4821 "Fixed in PR #4892, deploying to staging"
 
 # Push all pending changes
 jai push
-# → ✓ ROX-4821: status → "In Progress"
+# → ✓ ROX-4821: priority → "High"
+# → ✓ ROX-4821: labels updated
 # → ✓ ROX-4821: comment added
-# → 2 succeeded, 0 failed
+# → 3 succeeded, 0 failed
 ```
 
 ---
@@ -345,6 +370,12 @@ Both paths can be overridden with `--config` and `--db` flags, or by setting `db
 | `jai status` | Sync status and pending changes |
 | `jai create <project>` | Create a new issue |
 | `jai set <key> <field> <value>` | Update an issue field |
+| `jai set <key> <field> --add <val>` | Add a value to an array field |
+| `jai set <key> <field> --remove <val>` | Remove a value from an array field |
+| `jai set K1,K2,K3 <field> <value>` | Bulk set on comma-separated keys |
+| `jai set --query <sql> <field> <value>` | Bulk set via SQL query |
+| `jai transition <key> <status>` | Transition an issue to a new status |
+| `jai link <from> <to>` | Create a link between two issues |
 | `jai comment <key> <text>` | Add a comment |
 | `jai push` | Push pending changes to Jira |
 | `jai tui` | Launch full-screen TUI |
