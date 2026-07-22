@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -109,6 +110,26 @@ var commandSchemas = []CommandSchema{
 		Description: "Show command parameter schema (for AI agents)",
 		Params: map[string]ParamSchema{
 			"command": {Type: "string", Description: "Command name (omit to list all)"},
+		},
+	},
+	{
+		Name:        "create",
+		Description: "Create a new Jira issue via the API",
+		Params: map[string]ParamSchema{
+			"project": {Type: "string", Required: true, Description: "Project key (e.g. ROX)"},
+		},
+		Flags: map[string]ParamSchema{
+			"type":        {Type: "string", Required: true, Description: "Issue type (e.g. Bug, Story, Task, Epic)"},
+			"summary":     {Type: "string", Required: true, Description: "Issue summary/title"},
+			"description": {Type: "string", Description: "Issue description"},
+			"template":    {Type: "string", Description: "Named template from config (use 'jai schema templates' to list)"},
+			"body":        {Type: "string", Description: "Description body (use - to read from stdin)"},
+			"parent":      {Type: "string", Description: "Parent issue key"},
+			"labels":      {Type: "string[]", Description: "Comma-separated labels"},
+			"priority":    {Type: "string", Description: "Priority name (e.g. High, Medium, Low)"},
+			"assignee":    {Type: "string", Description: "Assignee account ID or email"},
+			"field":       {Type: "string[]", Description: "Arbitrary field as key=value (repeatable)"},
+			"json":        {Type: "bool", Description: "Output as JSON"},
 		},
 	},
 	{
@@ -260,8 +281,37 @@ var schemaValuesCmd = &cobra.Command{
 	},
 }
 
+// schemaTemplatesCmd lists available issue templates from config.
+var schemaTemplatesCmd = &cobra.Command{
+	Use:   "templates",
+	Short: "List available issue templates (for AI agents)",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if g.cfg == nil || len(g.cfg.Templates) == 0 {
+			fmt.Println(string(output.OK(map[string]interface{}{
+				"templates": []string{},
+				"count":     0,
+			})))
+			return nil
+		}
+
+		names := make([]string, 0, len(g.cfg.Templates))
+		for name := range g.cfg.Templates {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+
+		fmt.Println(string(output.OK(map[string]interface{}{
+			"templates": names,
+			"count":     len(names),
+			"hint":      "Use --template <name> with 'jai create' to load a template as the description",
+		})))
+		return nil
+	},
+}
+
 func init() {
 	schemaCmd.AddCommand(schemaDBCmd)
 	schemaCmd.AddCommand(schemaValuesCmd)
+	schemaCmd.AddCommand(schemaTemplatesCmd)
 	rootCmd.AddCommand(schemaCmd)
 }

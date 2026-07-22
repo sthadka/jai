@@ -3,6 +3,8 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"io"
+	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -23,7 +25,12 @@ var createFlags struct {
 	fixVersion  string
 	dueDate     string
 	field       []string // key=value pairs for arbitrary fields
+	template    string
+	body        string
 }
+
+// stdinReader is the reader used for --body -. Override in tests.
+var stdinReader io.Reader = os.Stdin
 
 var createCmd = &cobra.Command{
 	Use:   "create <project>",
@@ -36,7 +43,10 @@ into the local database so it is queryable right away.
 Examples:
   jai create ROX --type Bug --summary "Login fails"
   jai create ROX --type Story --summary "Add search" --parent ROX-100 --labels backend,urgent
-  jai create ROX --type Task --summary "Fix tests" --assignee user@example.com --json`,
+  jai create ROX --type Task --summary "Fix tests" --assignee user@example.com --json
+  jai create ROX --type Bug --template bug-report --summary "Login fails"
+  jai create ROX --type Bug --summary "Fix it" --body -
+  echo "description" | jai create ROX --type Bug --summary "Fix it" --body -`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		project := strings.ToUpper(args[0])
@@ -56,6 +66,40 @@ Examples:
 				return nil
 			}
 			return fmt.Errorf("%s", msg)
+		}
+
+		// Resolve description from --template or --body (mutually exclusive).
+		if createFlags.template != "" && createFlags.body != "" {
+			msg := "--template and --body are mutually exclusive"
+			if g.jsonOut {
+				fmt.Println(string(output.Err("ValidationError", msg)))
+				return nil
+			}
+			return fmt.Errorf("%s", msg)
+		}
+
+		if createFlags.template != "" {
+			desc, err := resolveTemplate(createFlags.template)
+			if err != nil {
+				if g.jsonOut {
+					fmt.Println(string(output.Err("ValidationError", err.Error())))
+					return nil
+				}
+				return err
+			}
+			createFlags.description = desc
+		}
+
+		if createFlags.body != "" {
+			desc, err := resolveBody(createFlags.body)
+			if err != nil {
+				if g.jsonOut {
+					fmt.Println(string(output.Err("ReadError", err.Error())))
+					return nil
+				}
+				return err
+			}
+			createFlags.description = desc
 		}
 
 		fields := map[string]interface{}{
@@ -199,6 +243,32 @@ func resolveFieldID(fieldMap map[string]*db.FieldMapping, name string) string {
 	return ""
 }
 
+// resolveTemplate looks up a named template from the config and returns
+// its content. Returns an error if the template name is not found.
+func resolveTemplate(name string) (string, error) {
+	if g.cfg == nil || len(g.cfg.Templates) == 0 {
+		return "", fmt.Errorf("template not found: %s", name)
+	}
+	tmpl, ok := g.cfg.Templates[name]
+	if !ok {
+		return "", fmt.Errorf("template not found: %s", name)
+	}
+	return tmpl, nil
+}
+
+// resolveBody returns the description text. If value is "-", it reads
+// from stdin; otherwise, returns the literal value.
+func resolveBody(value string) (string, error) {
+	if value == "-" {
+		data, err := io.ReadAll(stdinReader)
+		if err != nil {
+			return "", fmt.Errorf("reading from stdin: %w", err)
+		}
+		return strings.TrimRight(string(data), "\n"), nil
+	}
+	return value, nil
+}
+
 // expandCSV splits comma-separated items within each slice element.
 func expandCSV(items []string) []string {
 	var out []string
@@ -227,4 +297,6 @@ func init() {
 	createCmd.Flags().StringVar(&createFlags.fixVersion, "fix-version", "", "fix version name")
 	createCmd.Flags().StringVar(&createFlags.dueDate, "due-date", "", "due date (YYYY-MM-DD)")
 	createCmd.Flags().StringArrayVar(&createFlags.field, "field", nil, "arbitrary field as key=value (repeatable)")
+	createCmd.Flags().StringVar(&createFlags.template, "template", "", "named template from config to use as description")
+	createCmd.Flags().StringVar(&createFlags.body, "body", "", "description body (use - to read from stdin)")
 }
