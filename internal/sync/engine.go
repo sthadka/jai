@@ -237,6 +237,7 @@ func (e *Engine) syncSource(ctx context.Context, src config.SyncSource, full, re
 	fields := e.expandFields(fieldMap)
 	var newCount, updatedCount, total int
 	var lastUpdated string // max updated timestamp seen this run (for cursor)
+	var pageUpsertedKeys []string
 
 	// Emit an initial event so the display knows we're resuming and carries the JQL.
 	ch <- Progress{Project: src.Name, ResumedFrom: resumedFrom, JQL: jql}
@@ -283,6 +284,7 @@ func (e *Engine) syncSource(ctx context.Context, src config.SyncSource, full, re
 			if err := e.db.UpsertIssue(issue, extra); err != nil {
 				continue
 			}
+			pageUpsertedKeys = append(pageUpsertedKeys, apiIssue.Key)
 
 			comments, err := ExtractComments(apiIssue.Key, rawBytes)
 			if err == nil {
@@ -296,6 +298,12 @@ func (e *Engine) syncSource(ctx context.Context, src config.SyncSource, full, re
 
 			links := ExtractIssueLinks(apiIssue.Key, rawBytes)
 			_ = e.db.UpsertIssueLinks(apiIssue.Key, links)
+		}
+
+		// Sync changelogs for the issues we just upserted in this page.
+		if len(pageUpsertedKeys) > 0 {
+			e.syncChangelogsForKeys(ctx, pageUpsertedKeys)
+			pageUpsertedKeys = pageUpsertedKeys[:0]
 		}
 
 		// Save cursor after each completed page so a restart can skip ahead.
@@ -433,6 +441,9 @@ func (e *Engine) SyncChangelogs(ctx context.Context, sourceFilter string) (<-cha
 				continue
 			}
 
+			// Mark these issues as changelog-synced (even if they had 0 entries).
+			_ = e.db.MarkChangelogSynced(batch)
+
 			synced += len(batch)
 			ch <- ChangelogProgress{Total: total, Synced: synced, Skipped: skipped}
 		}
@@ -461,6 +472,7 @@ func (e *Engine) SyncChangelogs(ctx context.Context, sourceFilter string) (<-cha
 			for _, entry := range dbEntries {
 				_ = e.db.InsertChangelog(entry)
 			}
+			_ = e.db.MarkChangelogSynced([]string{key})
 			synced++
 
 			if synced%10 == 0 {
@@ -472,6 +484,50 @@ func (e *Engine) SyncChangelogs(ctx context.Context, sourceFilter string) (<-cha
 	}()
 
 	return ch, nil
+}
+
+// syncChangelogsForKeys fetches and stores changelogs for the given issue keys.
+// Called inline during issue sync for newly upserted issues. Errors are non-fatal.
+func (e *Engine) syncChangelogsForKeys(ctx context.Context, keys []string) {
+	if len(keys) == 0 {
+		return
+	}
+
+	// Build id→key map for these keys. We can get the IDs from the DB since
+	// we just upserted them with IDs.
+	idToKey, err := e.db.GetIssueIDToKeyMapForKeys(keys)
+	if err != nil || len(idToKey) == 0 {
+		e.syncChangelogsPerIssue(ctx, keys)
+		return
+	}
+
+	// Bulk fetch (keys are ≤100, fits in one API call).
+	entries, err := e.client.BulkFetchChangelogs(ctx, keys)
+	if err != nil {
+		// Fallback to per-issue on bulk failure.
+		e.syncChangelogsPerIssue(ctx, keys)
+		return
+	}
+
+	dbEntries := ExtractBulkChangelog(entries, idToKey)
+	_ = e.db.InsertChangelogBatch(dbEntries)
+	_ = e.db.MarkChangelogSynced(keys)
+}
+
+// syncChangelogsPerIssue fetches changelogs one issue at a time, used as a
+// fallback when bulk fetch is unavailable or an issue has no ID mapping yet.
+func (e *Engine) syncChangelogsPerIssue(ctx context.Context, keys []string) {
+	for _, key := range keys {
+		resp, err := e.client.GetIssueChangelog(ctx, key)
+		if err != nil {
+			continue
+		}
+		entries := ExtractChangelog(key, resp)
+		for _, entry := range entries {
+			_ = e.db.InsertChangelog(entry)
+		}
+	}
+	_ = e.db.MarkChangelogSynced(keys)
 }
 
 // cursorToJQL converts an RFC3339 timestamp to the format Jira JQL expects.

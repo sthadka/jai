@@ -3,6 +3,7 @@ package db
 import (
 	"fmt"
 	"strings"
+	"time"
 )
 
 // ChangelogEntry represents a row from the changelog table.
@@ -80,17 +81,14 @@ func (db *DB) GetIssueIDToKeyMap() (map[string]string, error) {
 }
 
 // GetChangelogSyncCandidates returns issue keys that need changelog sync.
-// An issue needs sync if it has no changelog rows, or if its updated timestamp
-// is newer than the most recent changelog entry for that issue.
+// An issue needs sync if its changelog has never been checked, or if its
+// updated timestamp is newer than the last time its changelog was checked.
 // projectFilter limits to the given projects; an empty slice means all projects.
 func (db *DB) GetChangelogSyncCandidates(projectFilter []string) ([]string, error) {
 	query := `
-		SELECT i.key FROM issues i
-		LEFT JOIN (
-			SELECT issue_key, MAX(changed_at) as max_changed
-			FROM changelog GROUP BY issue_key
-		) c ON i.key = c.issue_key
-		WHERE c.issue_key IS NULL OR i.updated > c.max_changed`
+		SELECT key FROM issues
+		WHERE changelog_synced_at IS NULL
+		   OR updated > changelog_synced_at`
 
 	var args []any
 	if len(projectFilter) > 0 {
@@ -99,9 +97,9 @@ func (db *DB) GetChangelogSyncCandidates(projectFilter []string) ([]string, erro
 			placeholders[i] = "?"
 			args = append(args, p)
 		}
-		query += fmt.Sprintf(` AND i.project IN (%s)`, strings.Join(placeholders, ", "))
+		query += fmt.Sprintf(` AND project IN (%s)`, strings.Join(placeholders, ", "))
 	}
-	query += ` ORDER BY i.key`
+	query += ` ORDER BY key`
 
 	sqlRows, err := db.Query(query, args...)
 	if err != nil {
@@ -117,4 +115,72 @@ func (db *DB) GetChangelogSyncCandidates(projectFilter []string) ([]string, erro
 		}
 	}
 	return keys, nil
+}
+
+// MarkChangelogSynced stamps changelog_synced_at for the given issue keys.
+func (db *DB) MarkChangelogSynced(keys []string) error {
+	if len(keys) == 0 {
+		return nil
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	// Batch in chunks of 500 to stay under SQLite variable limit.
+	const chunkSize = 500
+	for i := 0; i < len(keys); i += chunkSize {
+		end := i + chunkSize
+		if end > len(keys) {
+			end = len(keys)
+		}
+		chunk := keys[i:end]
+
+		placeholders := make([]string, len(chunk))
+		args := make([]any, len(chunk)+1)
+		args[0] = now
+		for j, k := range chunk {
+			placeholders[j] = "?"
+			args[j+1] = k
+		}
+
+		_, err := db.Exec(
+			fmt.Sprintf(`UPDATE issues SET changelog_synced_at = ? WHERE key IN (%s)`,
+				strings.Join(placeholders, ", ")),
+			args...,
+		)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// GetIssueIDToKeyMapForKeys returns id→key mappings for the given keys.
+// Use for small batches (≤100 keys). For large sets, use GetIssueIDToKeyMap().
+func (db *DB) GetIssueIDToKeyMapForKeys(keys []string) (map[string]string, error) {
+	if len(keys) == 0 {
+		return nil, nil
+	}
+	placeholders := make([]string, len(keys))
+	args := make([]any, len(keys))
+	for i, k := range keys {
+		placeholders[i] = "?"
+		args[i] = k
+	}
+	query := fmt.Sprintf(
+		`SELECT id, key FROM issues WHERE key IN (%s) AND id IS NOT NULL AND id != ''`,
+		strings.Join(placeholders, ", "),
+	)
+	sqlRows, err := db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer sqlRows.Close()
+
+	m := make(map[string]string)
+	for sqlRows.Next() {
+		var id, key string
+		if sqlRows.Scan(&id, &key) == nil {
+			m[id] = key
+		}
+	}
+	return m, nil
 }
