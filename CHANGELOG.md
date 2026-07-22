@@ -1,5 +1,29 @@
 # Changelog
 
+## [2.2.0](https://github.com/sthadka/jai/compare/v2.1.0...v2.2.0) (2026-07-22)
+
+
+### Features
+
+* add --add and --remove flags to jai set for array fields ([38afeef](https://github.com/sthadka/jai/commit/38afeef8e8cd74c40e1b15edabf082d3d620a6fe))
+* add bulk set with --query flag and comma-separated keys ([c46323b](https://github.com/sthadka/jai/commit/c46323b9c69134356390581f96068dd4fcaf6c40))
+* add jai db command group (reset, path, info) ([e832e32](https://github.com/sthadka/jai/commit/e832e328d12cd5da918e45b2c04f6a21458e8a0d))
+* add jai link command for issue link creation ([9005231](https://github.com/sthadka/jai/commit/90052311b857269a0637a9bd6ceece8426343125))
+* add jai transition CLI command ([8882a51](https://github.com/sthadka/jai/commit/8882a51306a9914f04923ca72d2b2462dc002e38))
+* incremental changelog sync ([894e628](https://github.com/sthadka/jai/commit/894e6281b0687a1de633d7de0f2838faaf49b90c))
+
+
+### Bug Fixes
+
+* correct set help text, link type resolution, and empty array display ([15de7cb](https://github.com/sthadka/jai/commit/15de7cb1827f8d2bfd5ae3b1d0fa849ddded0b2f))
+* resolve all golangci-lint issues ([7e7c21a](https://github.com/sthadka/jai/commit/7e7c21a56277efe1bfe6ec8bb114f0fbeca3d50e))
+* wire --config flag through init wizard and expand tilde in db path ([844e10e](https://github.com/sthadka/jai/commit/844e10e0f411009d85a2a4b598bfbfed4aa1291c))
+
+
+### Documentation
+
+* update README and add user guide for new commands ([27d9f26](https://github.com/sthadka/jai/commit/27d9f2691a3e8c6db782fa1db9303d17a7c59ef9))
+
 ## [2.1.0](https://github.com/sthadka/jai/compare/v2.0.0...v2.1.0) (2026-07-22)
 
 
