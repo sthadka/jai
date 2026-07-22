@@ -123,6 +123,49 @@ jai query "
 jai search "authentication token expired"
 ```
 
+### Template variables
+
+Queries support template variables that are replaced before execution:
+
+| Variable | Expands to |
+|----------|-----------|
+| `{{me}}` | Your email (from config `me:`) |
+| `{{team}}` | Your team (from config `team:`) |
+| `{{today}}` | Today's date |
+| `{{yesterday}}` | Yesterday's date |
+| `{{week_ago}}` | 7 days ago |
+| `{{month_ago}}` | 30 days ago |
+| `{{quarter_ago}}` | 90 days ago |
+| `{{this_week}}` | Monday of current week |
+| `{{this_month}}` | 1st of current month |
+| `{{this_quarter}}` | 1st of current quarter |
+| `{{projects}}` | Quoted project keys from all sync sources |
+| `{{days_ago:N}}` | N days ago |
+| `{{weeks_ago:N}}` | N weeks ago |
+| `{{months_ago:N}}` | N months ago |
+
+```sql
+jai query "SELECT key, summary FROM issues WHERE created >= '{{days_ago:14}}'"
+jai query "SELECT key, summary FROM issues WHERE project IN ({{projects}}) AND updated < '{{month_ago}}'"
+```
+
+### User-defined snippets
+
+Define reusable SQL fragments in your config and reference them as `{{name}}` in queries:
+
+```yaml
+snippets:
+  active: "status NOT IN ('Done', 'Closed', 'Resolved')"
+  stale: "julianday('now') - julianday(updated) > 28"
+  my_open: "assignee_email = '{{me}}' AND {{active}}"
+```
+
+```sql
+jai query "SELECT key, summary FROM issues WHERE {{my_open}} AND {{stale}}"
+```
+
+Snippets can reference other snippets and built-in variables. Circular references are detected and produce an error. Use `jai schema snippets` to list available snippets.
+
 ---
 
 ## Status transition history
@@ -255,6 +298,12 @@ Changes queue locally and sync to Jira on the next `jai push` or background sync
 jai create ROX --type Bug --summary "Login fails on SSO" --priority High --labels backend,auth
 # → ✓ Created ROX-4901: Login fails on SSO
 
+# Create from a template (defined in config YAML)
+jai create ROX --type Bug --template bug-report --summary "Login fails on SSO"
+
+# Create with description from stdin
+echo "Detailed description here" | jai create ROX --type Bug --summary "Login fails" --body -
+
 # Create with all the bells and whistles
 jai create ROX --type Story \
   --summary "Add search" \
@@ -269,6 +318,12 @@ jai create ROX --type Story \
   --field customfield_10001='{"value":"Team Alpha"}' \
   --json
 # → {"ok":true,"data":{"key":"ROX-4902","id":"12345","project":"ROX","status":"created"}}
+
+# Clone an existing issue
+jai clone ROX-4821 --summary "Similar bug in staging" --set priority=High
+# → ✓ Created ROX-4903: Similar bug in staging
+jai clone ROX-4821 --replace "production:staging"
+# → ✓ Created ROX-4904 (summary/description text replaced)
 
 # Update a field
 jai set ROX-4821 priority High
@@ -297,6 +352,19 @@ jai link ROX-4821 ROX-4756 --type "Blocks"
 # → ROX-4821 -> ROX-4756: linked (Blocks)
 jai link --list-types
 # → Available link types: Blocks, Related, Duplicate, ...
+
+# Add a remote link (URL detected automatically)
+jai link ROX-4821 https://github.com/org/repo/pull/42 "PR #42"
+# → ROX-4821: remote link added
+
+# Watch/unwatch issues
+jai watch ROX-4821                         # watch as yourself
+jai watch ROX-4821 user@example.com        # add another watcher
+jai unwatch ROX-4821                       # stop watching
+
+# Open in browser
+jai open ROX-4821                          # opens in default browser
+jai open ROX-4821 --url-only               # print URL only
 
 # Add a comment
 jai comment ROX-4821 "Fixed in PR #4892, deploying to staging"
@@ -336,6 +404,17 @@ sync_sources:
 fields:
   overrides:
     customfield_12345: team  # override auto-inferred field names
+
+snippets:                    # reusable SQL fragments for queries
+  active: "status NOT IN ('Done', 'Closed', 'Resolved')"
+  my_open: "assignee_email = '{{me}}' AND {{active}}"
+
+templates:                   # issue description templates for jai create --template
+  bug-report: |
+    ## Steps to Reproduce
+    1.
+    ## Expected Behavior
+    ## Actual Behavior
 ```
 
 `jai init` generates this file interactively.
@@ -368,17 +447,22 @@ Both paths can be overridden with `--config` and `--db` flags, or by setting `db
 | `jai fields` | List available fields and mappings |
 | `jai schema <command>` | Command schema for agents |
 | `jai status` | Sync status and pending changes |
-| `jai create <project>` | Create a new issue |
+| `jai open <key>` | Open issue in browser (`--url-only` to print URL) |
+| `jai clone <key>` | Clone an issue with optional overrides |
+| `jai create <project>` | Create a new issue (`--template`, `--body`) |
 | `jai set <key> <field> <value>` | Update an issue field |
 | `jai set <key> <field> --add <val>` | Add a value to an array field |
 | `jai set <key> <field> --remove <val>` | Remove a value from an array field |
 | `jai set K1,K2,K3 <field> <value>` | Bulk set on comma-separated keys |
 | `jai set --query <sql> <field> <value>` | Bulk set via SQL query |
 | `jai transition <key> <status>` | Transition an issue to a new status |
-| `jai link <from> <to>` | Create a link between two issues |
+| `jai link <from> <to>` | Link two issues or add a remote URL link |
+| `jai watch <key>` | Add yourself (or a user) as watcher |
+| `jai unwatch <key>` | Remove yourself as watcher |
 | `jai comment <key> <text>` | Add a comment |
 | `jai push` | Push pending changes to Jira |
 | `jai tui` | Launch full-screen TUI |
+| `jai completion <shell>` | Generate shell completions (bash/zsh/fish) |
 
 Global flags: `--json`, `--fields`, `--no-sync`, `--config`, `--db`
 
