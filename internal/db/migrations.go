@@ -192,6 +192,14 @@ var migrations = []migration{
 			return nil
 		},
 	},
+	{
+		version:     9,
+		description: "add changelog_synced_at to issues for incremental changelog sync",
+		up: func(tx *sql.Tx) error {
+			_, err := tx.Exec(`ALTER TABLE issues ADD COLUMN changelog_synced_at DATETIME`)
+			return err
+		},
+	},
 }
 
 func convertCSVToJSON(tx *sql.Tx, column string) error {
