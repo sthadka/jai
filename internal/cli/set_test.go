@@ -2,8 +2,136 @@ package cli
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 )
+
+func TestWrapScalarFieldValue(t *testing.T) {
+	tests := []struct {
+		name    string
+		jiraID  string
+		value   string
+		resolve func(string) (string, error)
+		want    interface{}
+		wantOK  bool
+		wantErr bool
+	}{
+		{
+			name:   "priority wraps as name object",
+			jiraID: "priority",
+			value:  "Major",
+			want:   map[string]string{"name": "Major"},
+			wantOK: true,
+		},
+		{
+			name:   "assignee wraps as accountId object without resolver",
+			jiraID: "assignee",
+			value:  "user123",
+			want:   map[string]string{"accountId": "user123"},
+			wantOK: true,
+		},
+		{
+			name:   "reporter resolves via callback",
+			jiraID: "reporter",
+			value:  "user@example.com",
+			resolve: func(v string) (string, error) {
+				return "resolved-id", nil
+			},
+			want:   map[string]string{"accountId": "resolved-id"},
+			wantOK: true,
+		},
+		{
+			name:   "resolver error propagates",
+			jiraID: "assignee",
+			value:  "nobody@example.com",
+			resolve: func(v string) (string, error) {
+				return "", fmt.Errorf("no user found")
+			},
+			wantOK:  true,
+			wantErr: true,
+		},
+		{
+			name:   "plain text field is not wrapped",
+			jiraID: "summary",
+			value:  "New Summary",
+			wantOK: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok, err := wrapScalarFieldValue(tt.jiraID, tt.value, tt.resolve)
+			if ok != tt.wantOK {
+				t.Fatalf("ok = %v, want %v", ok, tt.wantOK)
+			}
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !tt.wantOK {
+				return
+			}
+			gotJSON, _ := json.Marshal(got)
+			wantJSON, _ := json.Marshal(tt.want)
+			if string(gotJSON) != string(wantJSON) {
+				t.Errorf("got %s, want %s", gotJSON, wantJSON)
+			}
+		})
+	}
+}
+
+func TestWrapArrayItemValue(t *testing.T) {
+	tests := []struct {
+		name   string
+		jiraID string
+		value  string
+		want   interface{}
+		wantOK bool
+	}{
+		{
+			name:   "components wraps as name object",
+			jiraID: "components",
+			value:  "API",
+			want:   map[string]string{"name": "API"},
+			wantOK: true,
+		},
+		{
+			name:   "fixVersions wraps as name object",
+			jiraID: "fixVersions",
+			value:  "1.0",
+			want:   map[string]string{"name": "1.0"},
+			wantOK: true,
+		},
+		{
+			name:   "labels is not wrapped",
+			jiraID: "labels",
+			value:  "bug",
+			wantOK: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := wrapArrayItemValue(tt.jiraID, tt.value)
+			if ok != tt.wantOK {
+				t.Fatalf("ok = %v, want %v", ok, tt.wantOK)
+			}
+			if !ok {
+				return
+			}
+			gotJSON, _ := json.Marshal(got)
+			wantJSON, _ := json.Marshal(tt.want)
+			if string(gotJSON) != string(wantJSON) {
+				t.Errorf("got %s, want %s", gotJSON, wantJSON)
+			}
+		})
+	}
+}
 
 func TestParseArrayValue(t *testing.T) {
 	tests := []struct {

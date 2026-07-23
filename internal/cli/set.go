@@ -153,15 +153,73 @@ Bulk operations with a SQL query:
 	},
 }
 
+// wrapScalarFieldValue converts a scalar string value into the object shape
+// Jira's write API requires for reference fields (priority, assignee, reporter).
+// ok is false for fields that accept a bare string/number/date as-is, in which
+// case the caller should use the raw value. resolveAccountID resolves an
+// assignee/reporter identifier to an account ID; pass nil to use the raw value
+// unresolved (e.g. in tests).
+func wrapScalarFieldValue(jiraID, value string, resolveAccountID func(string) (string, error)) (result interface{}, ok bool, err error) {
+	switch jiraID {
+	case "priority":
+		return map[string]string{"name": value}, true, nil
+	case "assignee", "reporter":
+		accountID := value
+		if resolveAccountID != nil {
+			resolved, rerr := resolveAccountID(value)
+			if rerr != nil {
+				return nil, true, rerr
+			}
+			accountID = resolved
+		}
+		return map[string]string{"accountId": accountID}, true, nil
+	}
+	return nil, false, nil
+}
+
+// wrapArrayItemValue converts a single array-item string into the object shape
+// Jira's write API requires for reference-array fields (components, fixVersions).
+// ok is false for plain string arrays (e.g. labels), where the raw string is used.
+func wrapArrayItemValue(jiraID, value string) (result interface{}, ok bool) {
+	switch jiraID {
+	case "components", "fixVersions":
+		return map[string]string{"name": value}, true
+	}
+	return nil, false
+}
+
 func setScalarField(cmd *cobra.Command, issueKey, fieldName, jiraID, value, fieldType string) error {
 	var payloadVal interface{} = value
 	localVal := value
 
 	if fieldType == "array" {
-		arr := parseArrayValue(value)
-		payloadVal = arr
-		j, _ := json.Marshal(arr)
+		items := parseArrayValue(value)
+		wrapped := make([]interface{}, len(items))
+		for i, item := range items {
+			if w, ok := wrapArrayItemValue(jiraID, item); ok {
+				wrapped[i] = w
+			} else {
+				wrapped[i] = item
+			}
+		}
+		payloadVal = wrapped
+		j, _ := json.Marshal(items)
 		localVal = string(j)
+	} else {
+		resolveAccountID := func(v string) (string, error) {
+			return g.jira.ResolveAccountID(cmd.Context(), v)
+		}
+		if wrapped, ok, err := wrapScalarFieldValue(jiraID, value, resolveAccountID); ok {
+			if err != nil {
+				msg := fmt.Sprintf("resolving %s: %v", fieldName, err)
+				if g.jsonOut {
+					fmt.Println(string(output.Err("JiraError", msg)))
+					return nil
+				}
+				return fmt.Errorf("%s", msg)
+			}
+			payloadVal = wrapped
+		}
 	}
 
 	payload, _ := json.Marshal(map[string]interface{}{"field": jiraID, "value": payloadVal})
@@ -236,28 +294,88 @@ func setBulk(cmd *cobra.Command, keys []string, fieldName, jiraID, value, fieldT
 	hasAdd := len(setAddValues) > 0
 	hasRemove := len(setRemoveValues) > 0
 
+	var scalarPayloadVal interface{}
+	var scalarLocalVal string
+	if !hasAdd && !hasRemove {
+		scalarPayloadVal = value
+		scalarLocalVal = value
+		if fieldType == "array" {
+			items := parseArrayValue(value)
+			wrapped := make([]interface{}, len(items))
+			for i, item := range items {
+				if w, ok := wrapArrayItemValue(jiraID, item); ok {
+					wrapped[i] = w
+				} else {
+					wrapped[i] = item
+				}
+			}
+			scalarPayloadVal = wrapped
+			j, _ := json.Marshal(items)
+			scalarLocalVal = string(j)
+		} else {
+			resolveAccountID := func(v string) (string, error) {
+				return g.jira.ResolveAccountID(cmd.Context(), v)
+			}
+			if wrapped, ok, err := wrapScalarFieldValue(jiraID, value, resolveAccountID); ok {
+				if err != nil {
+					msg := fmt.Sprintf("resolving %s: %v", fieldName, err)
+					if g.jsonOut {
+						fmt.Println(string(output.Err("JiraError", msg)))
+						return nil
+					}
+					return fmt.Errorf("%s", msg)
+				}
+				scalarPayloadVal = wrapped
+			}
+		}
+	}
+
 	for _, key := range keys {
 		if hasAdd || hasRemove {
 			for _, v := range setAddValues {
-				payload, _ := json.Marshal(map[string]string{"field": jiraID, "op": "add", "value": v})
+				var val interface{} = v
+				if w, ok := wrapArrayItemValue(jiraID, v); ok {
+					val = w
+				}
+				payload, _ := json.Marshal(map[string]interface{}{"field": jiraID, "op": "add", "value": val})
 				if err := g.db.InsertPendingChange(key, "update_field", string(payload)); err != nil {
 					return err
 				}
 			}
 			for _, v := range setRemoveValues {
-				payload, _ := json.Marshal(map[string]string{"field": jiraID, "op": "remove", "value": v})
+				var val interface{} = v
+				if w, ok := wrapArrayItemValue(jiraID, v); ok {
+					val = w
+				}
+				payload, _ := json.Marshal(map[string]interface{}{"field": jiraID, "op": "remove", "value": val})
 				if err := g.db.InsertPendingChange(key, "update_field", string(payload)); err != nil {
 					return err
 				}
 			}
-		} else {
-			var payloadVal interface{} = value
-			if fieldType == "array" {
-				payloadVal = parseArrayValue(value)
+
+			current := readCurrentArray(key, fieldName)
+			updated := applyArrayOps(current, setAddValues, setRemoveValues)
+			var keyLocalVal string
+			if len(updated) > 0 {
+				b, _ := json.Marshal(updated)
+				keyLocalVal = string(b)
 			}
-			payload, _ := json.Marshal(map[string]interface{}{"field": jiraID, "value": payloadVal})
+			if _, err := g.db.Exec(
+				fmt.Sprintf("UPDATE issues SET %s = ?, synced_at = datetime('now') WHERE key = ?", fieldName),
+				keyLocalVal, key,
+			); err != nil {
+				fmt.Fprintf(cmd.ErrOrStderr(), "warning: local update failed for %s: %v\n", key, err)
+			}
+		} else {
+			payload, _ := json.Marshal(map[string]interface{}{"field": jiraID, "value": scalarPayloadVal})
 			if err := g.db.InsertPendingChange(key, "set_field", string(payload)); err != nil {
 				return err
+			}
+			if _, err := g.db.Exec(
+				fmt.Sprintf("UPDATE issues SET %s = ?, synced_at = datetime('now') WHERE key = ?", fieldName),
+				scalarLocalVal, key,
+			); err != nil {
+				fmt.Fprintf(cmd.ErrOrStderr(), "warning: local update failed for %s: %v\n", key, err)
 			}
 		}
 	}
@@ -275,13 +393,21 @@ func setBulk(cmd *cobra.Command, keys []string, fieldName, jiraID, value, fieldT
 
 func setArrayField(cmd *cobra.Command, issueKey, fieldName, jiraID string) error {
 	for _, v := range setAddValues {
-		payload, _ := json.Marshal(map[string]string{"field": jiraID, "op": "add", "value": v})
+		var val interface{} = v
+		if w, ok := wrapArrayItemValue(jiraID, v); ok {
+			val = w
+		}
+		payload, _ := json.Marshal(map[string]interface{}{"field": jiraID, "op": "add", "value": val})
 		if err := g.db.InsertPendingChange(issueKey, "update_field", string(payload)); err != nil {
 			return err
 		}
 	}
 	for _, v := range setRemoveValues {
-		payload, _ := json.Marshal(map[string]string{"field": jiraID, "op": "remove", "value": v})
+		var val interface{} = v
+		if w, ok := wrapArrayItemValue(jiraID, v); ok {
+			val = w
+		}
+		payload, _ := json.Marshal(map[string]interface{}{"field": jiraID, "op": "remove", "value": val})
 		if err := g.db.InsertPendingChange(issueKey, "update_field", string(payload)); err != nil {
 			return err
 		}

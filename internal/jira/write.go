@@ -39,10 +39,12 @@ func (c *Client) UpdateField(ctx context.Context, issueKey, fieldID string, valu
 }
 
 // UpdateFieldOp performs an add or remove operation on an array field using Jira's update API.
-func (c *Client) UpdateFieldOp(ctx context.Context, issueKey, fieldID, op, value string) error {
+// value may be a bare string (e.g. a label) or an object (e.g. {"name": "..."} for
+// components/fixVersions), depending on what the target field requires.
+func (c *Client) UpdateFieldOp(ctx context.Context, issueKey, fieldID, op string, value interface{}) error {
 	payload := map[string]interface{}{
 		"update": map[string]interface{}{
-			fieldID: []map[string]string{
+			fieldID: []map[string]interface{}{
 				{op: value},
 			},
 		},
