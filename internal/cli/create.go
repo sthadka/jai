@@ -146,7 +146,15 @@ Examples:
 		}
 
 		if createFlags.assignee != "" {
-			fields["assignee"] = map[string]string{"accountId": createFlags.assignee}
+			accountID, err := g.jira.ResolveAccountID(cmd.Context(), createFlags.assignee)
+			if err != nil {
+				if g.jsonOut {
+					fmt.Println(string(output.Err("JiraError", err.Error())))
+					return nil
+				}
+				return fmt.Errorf("resolving assignee: %w", err)
+			}
+			fields["assignee"] = map[string]string{"accountId": accountID}
 		}
 
 		if createFlags.fixVersion != "" {

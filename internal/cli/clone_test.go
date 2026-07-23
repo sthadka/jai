@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -238,7 +239,7 @@ func TestApplyFieldOverride(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			fields := make(map[string]interface{})
-			err := applyFieldOverride(fields, fieldMap, tt.fieldName, tt.value)
+			err := applyFieldOverride(fields, fieldMap, tt.fieldName, tt.value, nil)
 			if err != nil {
 				t.Fatalf("applyFieldOverride: %v", err)
 			}
@@ -257,7 +258,7 @@ func TestApplyFieldOverride(t *testing.T) {
 func TestApplyFieldOverrideUnknown(t *testing.T) {
 	fieldMap := map[string]*db.FieldMapping{}
 	fields := make(map[string]interface{})
-	err := applyFieldOverride(fields, fieldMap, "nonexistent", "value")
+	err := applyFieldOverride(fields, fieldMap, "nonexistent", "value", nil)
 	if err == nil {
 		t.Fatal("expected error for unknown field")
 	}
@@ -266,12 +267,40 @@ func TestApplyFieldOverrideUnknown(t *testing.T) {
 	}
 }
 
+func TestApplyFieldOverrideAssigneeResolvesAccountID(t *testing.T) {
+	fields := make(map[string]interface{})
+	resolveAccountID := func(v string) (string, error) {
+		if v != "user@example.com" {
+			t.Fatalf("resolveAccountID called with %q, want user@example.com", v)
+		}
+		return "resolved-account-id", nil
+	}
+	err := applyFieldOverride(fields, nil, "assignee", "user@example.com", resolveAccountID)
+	if err != nil {
+		t.Fatalf("applyFieldOverride: %v", err)
+	}
+	if got, ok := fields["assignee"].(map[string]string); !ok || got["accountId"] != "resolved-account-id" {
+		t.Errorf("assignee = %v, want {accountId: resolved-account-id}", fields["assignee"])
+	}
+}
+
+func TestApplyFieldOverrideAssigneeResolveError(t *testing.T) {
+	fields := make(map[string]interface{})
+	resolveAccountID := func(v string) (string, error) {
+		return "", fmt.Errorf("no Jira user found matching %q", v)
+	}
+	err := applyFieldOverride(fields, nil, "assignee", "nobody@example.com", resolveAccountID)
+	if err == nil {
+		t.Fatal("expected error when resolveAccountID fails")
+	}
+}
+
 func TestApplyFieldOverrideJSONValue(t *testing.T) {
 	fieldMap := map[string]*db.FieldMapping{
 		"customfield_10010": {JiraID: "customfield_10010", Name: "config", Type: "string"},
 	}
 	fields := make(map[string]interface{})
-	err := applyFieldOverride(fields, fieldMap, "config", `{"nested": true}`)
+	err := applyFieldOverride(fields, fieldMap, "config", `{"nested": true}`, nil)
 	if err != nil {
 		t.Fatalf("applyFieldOverride: %v", err)
 	}
@@ -362,7 +391,7 @@ func TestApplyFieldOverrideComponents(t *testing.T) {
 	fieldMap := map[string]*db.FieldMapping{}
 	fields := make(map[string]interface{})
 
-	err := applyFieldOverride(fields, fieldMap, "components", "API,DB")
+	err := applyFieldOverride(fields, fieldMap, "components", "API,DB", nil)
 	if err != nil {
 		t.Fatalf("applyFieldOverride: %v", err)
 	}
