@@ -129,6 +129,17 @@ var transitionCmd = &cobra.Command{
 			}
 		}
 
+		// Refresh the local DB from Jira so status (and any workflow side effects,
+		// e.g. resolution) are immediately queryable instead of stale until next sync.
+		if apiIssue, fetchErr := g.jira.GetIssue(cmd.Context(), issueKey); fetchErr == nil {
+			rawJSON, _ := json.Marshal(apiIssue)
+			if fieldMap, fmErr := g.db.FieldMapByJiraID(); fmErr == nil {
+				if dbIssue, extra, denormErr := synce.Denormalize(rawJSON, fieldMap); denormErr == nil {
+					_ = g.db.UpsertIssue(dbIssue, extra)
+				}
+			}
+		}
+
 		if g.jsonOut {
 			fmt.Println(string(output.OK(map[string]string{
 				"issue_key":     issueKey,
