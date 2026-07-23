@@ -8,6 +8,7 @@ import (
 	"math"
 	"math/rand"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -158,6 +159,31 @@ func (c *Client) MySelf(ctx context.Context) (*MySelf, error) {
 		return nil, err
 	}
 	return &m, nil
+}
+
+// resolvedUser is a single result from the Jira Cloud user search endpoint.
+type resolvedUser struct {
+	AccountID string `json:"accountId"`
+}
+
+// ResolveAccountID resolves an email address to a Jira Cloud account ID via the
+// user search API. Jira Cloud write endpoints (watchers, assignee, etc.) require
+// an account ID and reject emails/usernames directly (GDPR changes removed that
+// lookup). If identifier doesn't look like an email, it's assumed to already be
+// an account ID and is returned unchanged.
+func (c *Client) ResolveAccountID(ctx context.Context, identifier string) (string, error) {
+	if !strings.Contains(identifier, "@") {
+		return identifier, nil
+	}
+	var users []resolvedUser
+	path := "/rest/api/3/user/search?query=" + url.QueryEscape(identifier)
+	if err := c.get(ctx, path, &users); err != nil {
+		return "", fmt.Errorf("resolving user %q: %w", identifier, err)
+	}
+	if len(users) == 0 {
+		return "", fmt.Errorf("no Jira user found matching %q", identifier)
+	}
+	return users[0].AccountID, nil
 }
 
 // GetProject fetches project metadata (name, key).
