@@ -278,6 +278,42 @@ func TestResolveTemplates_Projects(t *testing.T) {
 			&config.Config{},
 			"",
 		},
+		{
+			"jql source with simple equality",
+			&config.Config{
+				SyncSources: []config.SyncSource{
+					{JQL: "PROJECT = ROX"},
+				},
+			},
+			"'ROX'",
+		},
+		{
+			"jql source with IN clause",
+			&config.Config{
+				SyncSources: []config.SyncSource{
+					{JQL: "project in (ROX, OTHER)"},
+				},
+			},
+			"'ROX','OTHER'",
+		},
+		{
+			"jql source with trailing clause",
+			&config.Config{
+				SyncSources: []config.SyncSource{
+					{JQL: "PROJECT = ROX AND status != Done"},
+				},
+			},
+			"'ROX'",
+		},
+		{
+			"explicit projects list takes precedence over jql",
+			&config.Config{
+				SyncSources: []config.SyncSource{
+					{JQL: "PROJECT = ROX", Projects: []string{"OVERRIDE"}},
+				},
+			},
+			"'OVERRIDE'",
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

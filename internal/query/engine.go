@@ -117,12 +117,19 @@ func mondayOfWeek(t time.Time) time.Time {
 }
 
 // projectKeys returns a comma-separated list of single-quoted project keys
-// from all configured sync sources (e.g., 'PROJ1','PROJ2').
+// from all configured sync sources (e.g., 'PROJ1','PROJ2'). Sources defined via
+// an explicit 'projects:' list are used directly; sources defined via 'jql:'
+// fall back to a best-effort extraction of 'project = X' / 'project in (X, Y)'
+// clauses, since arbitrary JQL isn't fully parsed.
 func projectKeys(cfg *config.Config) string {
 	seen := map[string]bool{}
 	var keys []string
 	for _, src := range cfg.SyncSources {
-		for _, p := range src.Projects {
+		projects := src.Projects
+		if len(projects) == 0 && src.JQL != "" {
+			projects = projectKeysFromJQL(src.JQL)
+		}
+		for _, p := range projects {
 			if !seen[p] {
 				seen[p] = true
 				keys = append(keys, "'"+p+"'")
@@ -130,6 +137,28 @@ func projectKeys(cfg *config.Config) string {
 		}
 	}
 	return strings.Join(keys, ",")
+}
+
+// projectClauseRe matches a 'project = KEY' or 'project in (KEY1, KEY2)' clause
+// within a JQL string, stopping at a following AND/OR or the end of the string.
+var projectClauseRe = regexp.MustCompile(`(?i)project\s*(?:=|in)\s*\(?\s*([A-Za-z0-9_,\s"']+?)\s*\)?(?:\s+and\b|\s+or\b|$)`)
+
+// projectKeysFromJQL extracts project keys referenced by a simple 'project = KEY'
+// or 'project in (KEY1, KEY2)' clause in a JQL string. Best-effort — arbitrary
+// JQL isn't fully parsed, but this covers the common sync source pattern.
+func projectKeysFromJQL(jql string) []string {
+	m := projectClauseRe.FindStringSubmatch(jql)
+	if m == nil {
+		return nil
+	}
+	var keys []string
+	for _, part := range strings.Split(m[1], ",") {
+		key := strings.Trim(strings.TrimSpace(part), `"'`)
+		if key != "" {
+			keys = append(keys, key)
+		}
+	}
+	return keys
 }
 
 // builtinVarNames is the set of built-in template variable names (without braces).
