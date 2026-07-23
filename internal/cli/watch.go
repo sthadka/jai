@@ -36,7 +36,16 @@ Examples:
 			return fmt.Errorf("%s", msg)
 		}
 
-		if err := g.jira.AddWatcher(cmd.Context(), issueKey, user); err != nil {
+		accountID, err := g.jira.ResolveAccountID(cmd.Context(), user)
+		if err != nil {
+			if g.jsonOut {
+				fmt.Println(string(output.Err("JiraError", err.Error())))
+				return nil
+			}
+			return fmt.Errorf("resolving user: %w", err)
+		}
+
+		if err := g.jira.AddWatcher(cmd.Context(), issueKey, accountID); err != nil {
 			if g.jsonOut {
 				fmt.Println(string(output.Err("JiraError", err.Error())))
 				return nil
@@ -81,7 +90,16 @@ Examples:
 			return fmt.Errorf("%s", msg)
 		}
 
-		if err := g.jira.RemoveWatcher(cmd.Context(), issueKey, user); err != nil {
+		accountID, err := g.jira.ResolveAccountID(cmd.Context(), user)
+		if err != nil {
+			if g.jsonOut {
+				fmt.Println(string(output.Err("JiraError", err.Error())))
+				return nil
+			}
+			return fmt.Errorf("resolving user: %w", err)
+		}
+
+		if err := g.jira.RemoveWatcher(cmd.Context(), issueKey, accountID); err != nil {
 			if g.jsonOut {
 				fmt.Println(string(output.Err("JiraError", err.Error())))
 				return nil
