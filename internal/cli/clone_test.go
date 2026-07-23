@@ -33,7 +33,7 @@ func TestExtractCloneFields(t *testing.T) {
 		}
 	}`
 
-	fields, project, err := extractCloneFields(rawJSON)
+	fields, project, err := extractCloneFields(rawJSON, nil)
 	if err != nil {
 		t.Fatalf("extractCloneFields: %v", err)
 	}
@@ -121,7 +121,7 @@ func TestExtractCloneFieldsMinimal(t *testing.T) {
 		}
 	}`
 
-	fields, project, err := extractCloneFields(rawJSON)
+	fields, project, err := extractCloneFields(rawJSON, nil)
 	if err != nil {
 		t.Fatalf("extractCloneFields: %v", err)
 	}
@@ -133,6 +133,35 @@ func TestExtractCloneFieldsMinimal(t *testing.T) {
 	}
 	if _, ok := fields["labels"]; ok {
 		t.Error("labels should not be set for minimal issue")
+	}
+}
+
+func TestExtractCloneFieldsSkipsRank(t *testing.T) {
+	rawJSON := `{
+		"key": "PROJ-123",
+		"fields": {
+			"project": {"key": "PROJ"},
+			"summary": "Has a rank",
+			"issuetype": {"name": "Task"},
+			"customfield_10019": "0|iq7psn:",
+			"customfield_10001": "custom value"
+		}
+	}`
+
+	fieldMap := map[string]*db.FieldMapping{
+		"customfield_10019": {JiraID: "customfield_10019", JiraName: "Rank", Type: "text"},
+	}
+
+	fields, _, err := extractCloneFields(rawJSON, fieldMap)
+	if err != nil {
+		t.Fatalf("extractCloneFields: %v", err)
+	}
+
+	if _, ok := fields["customfield_10019"]; ok {
+		t.Error("customfield_10019 (Rank) should not be copied — Jira's create API rejects its GET representation")
+	}
+	if got := fields["customfield_10001"]; got != "custom value" {
+		t.Errorf("customfield_10001 = %v, want %q", got, "custom value")
 	}
 }
 
