@@ -100,9 +100,9 @@ func (w *Writer) processSetField(ctx context.Context, c *db.PendingChange) error
 
 func (w *Writer) processUpdateField(ctx context.Context, c *db.PendingChange) error {
 	var payload struct {
-		Field string `json:"field"`
-		Op    string `json:"op"`
-		Value string `json:"value"`
+		Field string      `json:"field"`
+		Op    string      `json:"op"`
+		Value interface{} `json:"value"`
 	}
 	if err := json.Unmarshal([]byte(c.Payload), &payload); err != nil {
 		return fmt.Errorf("parsing update_field payload: %w", err)
