@@ -65,7 +65,12 @@ Examples:
 			return fmt.Errorf("%s", msg)
 		}
 
-		fields, project, err := extractCloneFields(rawJSON)
+		fieldMap, err := g.db.FieldMapByJiraID()
+		if err != nil {
+			return err
+		}
+
+		fields, project, err := extractCloneFields(rawJSON, fieldMap)
 		if err != nil {
 			if g.jsonOut {
 				fmt.Println(string(output.Err("DataError", err.Error())))
@@ -100,10 +105,6 @@ Examples:
 
 		// Apply --set field=value overrides (reuse field resolution from create).
 		if len(cloneFlags.set) > 0 {
-			fieldMap, err := g.db.FieldMapByJiraID()
-			if err != nil {
-				return err
-			}
 			for _, kv := range cloneFlags.set {
 				parts := strings.SplitN(kv, "=", 2)
 				if len(parts) != 2 {
@@ -165,9 +166,16 @@ Examples:
 	},
 }
 
+// nonClonableFields lists Jira field names that are computed/managed by Jira
+// and cannot be round-tripped through issue creation. Their GET representation
+// (e.g. Rank's lexoRank string) doesn't match what the create API accepts.
+var nonClonableFields = map[string]bool{
+	"Rank": true,
+}
+
 // extractCloneFields parses raw_json and extracts fields suitable for creating
 // a new issue. Returns the fields map and the project key.
-func extractCloneFields(rawJSON string) (map[string]interface{}, string, error) {
+func extractCloneFields(rawJSON string, fieldMap map[string]*db.FieldMapping) (map[string]interface{}, string, error) {
 	var apiIssue struct {
 		Fields json.RawMessage `json:"fields"`
 	}
@@ -277,9 +285,13 @@ func extractCloneFields(rawJSON string) (map[string]interface{}, string, error) 
 	// Story points (commonly customfield_10016 but handled via custom fields below).
 	// Epic link is typically a custom field as well.
 
-	// Custom fields: copy any customfield_* values as-is.
+	// Custom fields: copy any customfield_* values as-is, skipping fields
+	// that Jira manages internally and can't accept back on create (e.g. Rank).
 	for key, v := range raw {
 		if strings.HasPrefix(key, "customfield_") {
+			if fm, ok := fieldMap[key]; ok && nonClonableFields[fm.JiraName] {
+				continue
+			}
 			var val interface{}
 			if json.Unmarshal(v, &val) == nil && val != nil {
 				fields[key] = val
