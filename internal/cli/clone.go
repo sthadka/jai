@@ -116,7 +116,10 @@ Examples:
 					return fmt.Errorf("%s", msg)
 				}
 				name, value := parts[0], parts[1]
-				if err := applyFieldOverride(fields, fieldMap, name, value); err != nil {
+				resolveAccountID := func(v string) (string, error) {
+					return g.jira.ResolveAccountID(cmd.Context(), v)
+				}
+				if err := applyFieldOverride(fields, fieldMap, name, value, resolveAccountID); err != nil {
 					if g.jsonOut {
 						fmt.Println(string(output.Err("ValidationError", err.Error())))
 						return nil
@@ -304,7 +307,10 @@ func extractCloneFields(rawJSON string, fieldMap map[string]*db.FieldMapping) (m
 
 // applyFieldOverride applies a single key=value override to the fields map,
 // resolving the field name through the field map (same as jai create).
-func applyFieldOverride(fields map[string]interface{}, fieldMap map[string]*db.FieldMapping, name, value string) error {
+// resolveAccountID resolves an assignee identifier (email or account ID) to a
+// Jira account ID; pass nil to skip resolution (e.g. in tests) and use the
+// value as-is.
+func applyFieldOverride(fields map[string]interface{}, fieldMap map[string]*db.FieldMapping, name, value string, resolveAccountID func(string) (string, error)) error {
 	// Handle well-known fields by their common names.
 	switch strings.ToLower(name) {
 	case "summary":
@@ -314,7 +320,15 @@ func applyFieldOverride(fields map[string]interface{}, fieldMap map[string]*db.F
 		fields["priority"] = map[string]string{"name": value}
 		return nil
 	case "assignee":
-		fields["assignee"] = map[string]string{"accountId": value}
+		accountID := value
+		if resolveAccountID != nil {
+			resolved, err := resolveAccountID(value)
+			if err != nil {
+				return fmt.Errorf("resolving assignee: %w", err)
+			}
+			accountID = resolved
+		}
+		fields["assignee"] = map[string]string{"accountId": accountID}
 		return nil
 	case "labels":
 		fields["labels"] = expandCSV([]string{value})
