@@ -1,5 +1,35 @@
 # Changelog
 
+## [2.3.0](https://github.com/sthadka/jai/compare/v2.2.0...v2.3.0) (2026-07-23)
+
+
+### Features
+
+* add built-in and parameterized template variables ([e842b69](https://github.com/sthadka/jai/commit/e842b6968cea791ed0e4cba61785e37186cc4ff4))
+* add jai clone command for issue cloning with overrides ([3bc0efe](https://github.com/sthadka/jai/commit/3bc0efee9bf9831669318796bb4a18bda979adfd))
+* add open command to open issues in browser or print URL ([c6a3e23](https://github.com/sthadka/jai/commit/c6a3e239aa50943fce1c84dbf23c5becd24f00e9))
+* add shell completions command for bash, zsh, fish, and powershell ([55f4035](https://github.com/sthadka/jai/commit/55f4035e92e0f31e06cb60e11fdc1e30f6b0d322))
+* add user-defined SQL snippets with recursive expansion ([bc334d4](https://github.com/sthadka/jai/commit/bc334d4e4ae153fbd39d65ac8a53aa883ac8b1c6))
+* add watch/unwatch commands and remote link support in jira client ([f058468](https://github.com/sthadka/jai/commit/f0584685ad9a4faefdb9148b93c00f84ebe5515a))
+* extend link command to support remote URL links ([a7709c1](https://github.com/sthadka/jai/commit/a7709c16cafbe6b85aca0da81af55233d61ec334))
+
+
+### Bug Fixes
+
+* correct jai set value serialization and bulk local-update gaps ([f3ba1bd](https://github.com/sthadka/jai/commit/f3ba1bd1e7388209ff40eaa91897f485fa5e9552))
+* derive {{projects}} template variable from jql-based sync sources ([31ba89d](https://github.com/sthadka/jai/commit/31ba89d8b581167f62cfdcb9f7d20e1e505e4de0))
+* refresh local DB after jai transition ([fc84f2f](https://github.com/sthadka/jai/commit/fc84f2f21bc031b3b2ac4e35a7147a526ec9cf2b))
+* resolve assignee email to account ID in create and clone ([20d9b72](https://github.com/sthadka/jai/commit/20d9b72c6f41bdcf9bd957d83ed9bbec0c6621c1))
+* resolve email to account ID before adding/removing watchers ([9137f6f](https://github.com/sthadka/jai/commit/9137f6fb1099fda8f0e8518756ef847486eea637))
+* resolve staticcheck SA5011 lint warnings in test files ([ed49a7d](https://github.com/sthadka/jai/commit/ed49a7d3d46ef323b1dff959248b8e8b912ec0cb))
+* skip Jira Rank field when cloning issues ([8eb7a7d](https://github.com/sthadka/jai/commit/8eb7a7dc35216a8c3688fcbbb25fb7b0c049f222))
+
+
+### Documentation
+
+* add jira-cli assessment and feature adoption recommendations ([0df3abd](https://github.com/sthadka/jai/commit/0df3abdda68815be277b8a3c40fd08eec347fb1b))
+* update README and user guide with new commands and features ([62566b0](https://github.com/sthadka/jai/commit/62566b02c0c27ba8c83d4718b910a2188f7d9a29))
+
 ## [2.2.0](https://github.com/sthadka/jai/compare/v2.1.0...v2.2.0) (2026-07-22)
 
 
