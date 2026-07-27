@@ -156,4 +156,13 @@ bd close <id>         # Complete work
 - NEVER stop before pushing - that leaves work stranded locally
 - NEVER say "ready to push when you are" - YOU must push
 - If push fails, resolve and retry until it succeeds
+- **SSH fallback**: If `git push` fails with SSH key errors, switch to HTTPS via `gh`:
+  ```bash
+  gh config set git_protocol https
+  git remote set-url origin https://github.com/sthadka/jai.git
+  git push
+  # Restore SSH after:
+  gh config set git_protocol ssh
+  git remote set-url origin git@github.com:sthadka/jai.git
+  ```
 <!-- END BEADS INTEGRATION -->
