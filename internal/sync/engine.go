@@ -89,7 +89,19 @@ func (e *Engine) DiscoverFields(ctx context.Context, overrides map[string]string
 		if f.Schema == nil {
 			continue
 		}
-		name := inferColumnName(f, overrides)
+
+		// If this field already has a stored name, reuse it to avoid
+		// re-triggering collision warnings on every sync.
+		name := ""
+		if em, ok := existing[f.ID]; ok {
+			name = em.Name
+		}
+		if overrideName, ok := overrides[f.ID]; ok {
+			name = overrideName
+		}
+		if name == "" {
+			name = inferColumnName(f, overrides)
+		}
 		fieldType := jiraSchemaToType(f.Schema)
 
 		// If this name is already owned by a different field, append a suffix
