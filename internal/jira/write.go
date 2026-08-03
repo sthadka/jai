@@ -52,8 +52,8 @@ func (c *Client) UpdateFieldOp(ctx context.Context, issueKey, fieldID, op string
 	return c.put(ctx, fmt.Sprintf("/rest/api/3/issue/%s", issueKey), payload)
 }
 
-// AddComment adds a comment to a Jira issue.
-func (c *Client) AddComment(ctx context.Context, issueKey, body string) error {
+// AddComment adds a comment to a Jira issue and returns the comment ID.
+func (c *Client) AddComment(ctx context.Context, issueKey, body string) (string, error) {
 	payload := map[string]interface{}{
 		"body": map[string]interface{}{
 			"type":    "doc",
@@ -68,7 +68,13 @@ func (c *Client) AddComment(ctx context.Context, issueKey, body string) error {
 			},
 		},
 	}
-	return c.post(ctx, fmt.Sprintf("/rest/api/3/issue/%s/comment", issueKey), payload)
+	var resp struct {
+		ID string `json:"id"`
+	}
+	if err := c.postDecode(ctx, fmt.Sprintf("/rest/api/3/issue/%s/comment", issueKey), payload, &resp); err != nil {
+		return "", err
+	}
+	return resp.ID, nil
 }
 
 // GetTransitions returns available transitions for an issue.

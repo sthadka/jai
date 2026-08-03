@@ -14,12 +14,16 @@ var (
 	setAddValues    []string
 	setRemoveValues []string
 	setQuery        string
+	setQueue        bool
 )
 
 var setCmd = &cobra.Command{
 	Use:   "set [key] <field> [value]",
-	Short: "Set a field value on one or more Jira issues (queued locally until 'jai push')",
-	Long: `Set a field value on one or more Jira issues (queued locally until 'jai push').
+	Short: "Set a field value on one or more Jira issues",
+	Long: `Set a field value on one or more Jira issues.
+
+By default, changes are pushed to Jira immediately. Use --queue to
+defer the push until 'jai push'.
 
 For scalar fields:
   jai set ROX-123 priority High
@@ -105,8 +109,10 @@ Bulk operations with a SQL query:
 			return fmt.Errorf("%s", msg)
 		}
 
-		if err := g.db.EnsurePendingChangesTable(); err != nil {
-			return err
+		if setQueue {
+			if err := g.db.EnsurePendingChangesTable(); err != nil {
+				return err
+			}
 		}
 
 		fieldMap, err := g.db.FieldMapByJiraID()
@@ -222,9 +228,22 @@ func setScalarField(cmd *cobra.Command, issueKey, fieldName, jiraID, value, fiel
 		}
 	}
 
-	payload, _ := json.Marshal(map[string]interface{}{"field": jiraID, "value": payloadVal})
-	if err := g.db.InsertPendingChange(issueKey, "set_field", string(payload)); err != nil {
-		return err
+	status := "synced"
+	if setQueue {
+		payload, _ := json.Marshal(map[string]interface{}{"field": jiraID, "value": payloadVal})
+		if err := g.db.InsertPendingChange(issueKey, "set_field", string(payload)); err != nil {
+			return err
+		}
+		status = "queued"
+	} else {
+		if err := g.jira.UpdateField(cmd.Context(), issueKey, jiraID, payloadVal); err != nil {
+			msg := fmt.Sprintf("setting %s on %s: %v", fieldName, issueKey, err)
+			if g.jsonOut {
+				fmt.Println(string(output.Err("JiraError", msg)))
+				return nil
+			}
+			return fmt.Errorf("%s", msg)
+		}
 	}
 
 	_, err := g.db.Exec(
@@ -240,11 +259,15 @@ func setScalarField(cmd *cobra.Command, issueKey, fieldName, jiraID, value, fiel
 			"issue_key": issueKey,
 			"field":     fieldName,
 			"value":     payloadVal,
-			"status":    "pending",
+			"status":    status,
 		})))
 		return nil
 	}
-	fmt.Printf("%s: %s → %q (pending sync)\n", issueKey, fieldName, localVal)
+	if status == "queued" {
+		fmt.Printf("%s: %s → %q (queued)\n", issueKey, fieldName, localVal)
+	} else {
+		fmt.Printf("%s: %s → %q ✓\n", issueKey, fieldName, localVal)
+	}
 	return nil
 }
 
@@ -330,16 +353,25 @@ func setBulk(cmd *cobra.Command, keys []string, fieldName, jiraID, value, fieldT
 		}
 	}
 
+	var succeeded, failed int
 	for _, key := range keys {
 		if hasAdd || hasRemove {
+			var keyErr error
 			for _, v := range setAddValues {
 				var val interface{} = v
 				if w, ok := wrapArrayItemValue(jiraID, v); ok {
 					val = w
 				}
-				payload, _ := json.Marshal(map[string]interface{}{"field": jiraID, "op": "add", "value": val})
-				if err := g.db.InsertPendingChange(key, "update_field", string(payload)); err != nil {
-					return err
+				if setQueue {
+					payload, _ := json.Marshal(map[string]interface{}{"field": jiraID, "op": "add", "value": val})
+					if err := g.db.InsertPendingChange(key, "update_field", string(payload)); err != nil {
+						return err
+					}
+				} else {
+					if err := g.jira.UpdateFieldOp(cmd.Context(), key, jiraID, "add", val); err != nil {
+						keyErr = err
+						fmt.Fprintf(cmd.ErrOrStderr(), "  ✗ %s: add %v (%v)\n", key, v, err)
+					}
 				}
 			}
 			for _, v := range setRemoveValues {
@@ -347,9 +379,16 @@ func setBulk(cmd *cobra.Command, keys []string, fieldName, jiraID, value, fieldT
 				if w, ok := wrapArrayItemValue(jiraID, v); ok {
 					val = w
 				}
-				payload, _ := json.Marshal(map[string]interface{}{"field": jiraID, "op": "remove", "value": val})
-				if err := g.db.InsertPendingChange(key, "update_field", string(payload)); err != nil {
-					return err
+				if setQueue {
+					payload, _ := json.Marshal(map[string]interface{}{"field": jiraID, "op": "remove", "value": val})
+					if err := g.db.InsertPendingChange(key, "update_field", string(payload)); err != nil {
+						return err
+					}
+				} else {
+					if err := g.jira.UpdateFieldOp(cmd.Context(), key, jiraID, "remove", val); err != nil {
+						keyErr = err
+						fmt.Fprintf(cmd.ErrOrStderr(), "  ✗ %s: remove %v (%v)\n", key, v, err)
+					}
 				}
 			}
 
@@ -366,10 +405,24 @@ func setBulk(cmd *cobra.Command, keys []string, fieldName, jiraID, value, fieldT
 			); err != nil {
 				fmt.Fprintf(cmd.ErrOrStderr(), "warning: local update failed for %s: %v\n", key, err)
 			}
+
+			if keyErr != nil {
+				failed++
+			} else {
+				succeeded++
+			}
 		} else {
-			payload, _ := json.Marshal(map[string]interface{}{"field": jiraID, "value": scalarPayloadVal})
-			if err := g.db.InsertPendingChange(key, "set_field", string(payload)); err != nil {
-				return err
+			if setQueue {
+				payload, _ := json.Marshal(map[string]interface{}{"field": jiraID, "value": scalarPayloadVal})
+				if err := g.db.InsertPendingChange(key, "set_field", string(payload)); err != nil {
+					return err
+				}
+			} else {
+				if err := g.jira.UpdateField(cmd.Context(), key, jiraID, scalarPayloadVal); err != nil {
+					failed++
+					fmt.Fprintf(cmd.ErrOrStderr(), "  ✗ %s: %v\n", key, err)
+					continue
+				}
 			}
 			if _, err := g.db.Exec(
 				fmt.Sprintf("UPDATE issues SET %s = ?, synced_at = datetime('now') WHERE key = ?", fieldName),
@@ -377,17 +430,29 @@ func setBulk(cmd *cobra.Command, keys []string, fieldName, jiraID, value, fieldT
 			); err != nil {
 				fmt.Fprintf(cmd.ErrOrStderr(), "warning: local update failed for %s: %v\n", key, err)
 			}
+			succeeded++
 		}
 	}
 
 	if g.jsonOut {
+		status := "synced"
+		if setQueue {
+			status = "queued"
+		}
 		fmt.Println(string(output.OK(map[string]interface{}{
-			"count": len(keys),
-			"keys":  keys,
+			"count":     len(keys),
+			"keys":      keys,
+			"succeeded": succeeded,
+			"failed":    failed,
+			"status":    status,
 		})))
 		return nil
 	}
-	fmt.Printf("queued %d changes (pending sync)\n", len(keys))
+	if setQueue {
+		fmt.Printf("queued %d changes\n", len(keys))
+	} else {
+		fmt.Printf("%d succeeded, %d failed\n", succeeded, failed)
+	}
 	return nil
 }
 
@@ -397,9 +462,20 @@ func setArrayField(cmd *cobra.Command, issueKey, fieldName, jiraID string) error
 		if w, ok := wrapArrayItemValue(jiraID, v); ok {
 			val = w
 		}
-		payload, _ := json.Marshal(map[string]interface{}{"field": jiraID, "op": "add", "value": val})
-		if err := g.db.InsertPendingChange(issueKey, "update_field", string(payload)); err != nil {
-			return err
+		if setQueue {
+			payload, _ := json.Marshal(map[string]interface{}{"field": jiraID, "op": "add", "value": val})
+			if err := g.db.InsertPendingChange(issueKey, "update_field", string(payload)); err != nil {
+				return err
+			}
+		} else {
+			if err := g.jira.UpdateFieldOp(cmd.Context(), issueKey, jiraID, "add", val); err != nil {
+				msg := fmt.Sprintf("adding %v to %s on %s: %v", v, fieldName, issueKey, err)
+				if g.jsonOut {
+					fmt.Println(string(output.Err("JiraError", msg)))
+					return nil
+				}
+				return fmt.Errorf("%s", msg)
+			}
 		}
 	}
 	for _, v := range setRemoveValues {
@@ -407,9 +483,20 @@ func setArrayField(cmd *cobra.Command, issueKey, fieldName, jiraID string) error
 		if w, ok := wrapArrayItemValue(jiraID, v); ok {
 			val = w
 		}
-		payload, _ := json.Marshal(map[string]interface{}{"field": jiraID, "op": "remove", "value": val})
-		if err := g.db.InsertPendingChange(issueKey, "update_field", string(payload)); err != nil {
-			return err
+		if setQueue {
+			payload, _ := json.Marshal(map[string]interface{}{"field": jiraID, "op": "remove", "value": val})
+			if err := g.db.InsertPendingChange(issueKey, "update_field", string(payload)); err != nil {
+				return err
+			}
+		} else {
+			if err := g.jira.UpdateFieldOp(cmd.Context(), issueKey, jiraID, "remove", val); err != nil {
+				msg := fmt.Sprintf("removing %v from %s on %s: %v", v, fieldName, issueKey, err)
+				if g.jsonOut {
+					fmt.Println(string(output.Err("JiraError", msg)))
+					return nil
+				}
+				return fmt.Errorf("%s", msg)
+			}
 		}
 	}
 
@@ -428,21 +515,33 @@ func setArrayField(cmd *cobra.Command, issueKey, fieldName, jiraID string) error
 		fmt.Fprintf(cmd.ErrOrStderr(), "warning: local update failed: %v\n", err)
 	}
 
+	status := "synced"
+	if setQueue {
+		status = "queued"
+	}
 	if g.jsonOut {
 		fmt.Println(string(output.OK(map[string]interface{}{
 			"issue_key": issueKey,
 			"field":     fieldName,
 			"added":     setAddValues,
 			"removed":   setRemoveValues,
-			"status":    "pending",
+			"status":    status,
 		})))
 		return nil
 	}
 	if len(setAddValues) > 0 {
-		fmt.Printf("%s: %s += %v (pending sync)\n", issueKey, fieldName, setAddValues)
+		if status == "queued" {
+			fmt.Printf("%s: %s += %v (queued)\n", issueKey, fieldName, setAddValues)
+		} else {
+			fmt.Printf("%s: %s += %v ✓\n", issueKey, fieldName, setAddValues)
+		}
 	}
 	if len(setRemoveValues) > 0 {
-		fmt.Printf("%s: %s -= %v (pending sync)\n", issueKey, fieldName, setRemoveValues)
+		if status == "queued" {
+			fmt.Printf("%s: %s -= %v (queued)\n", issueKey, fieldName, setRemoveValues)
+		} else {
+			fmt.Printf("%s: %s -= %v ✓\n", issueKey, fieldName, setRemoveValues)
+		}
 	}
 	return nil
 }
@@ -491,5 +590,6 @@ func init() {
 	setCmd.Flags().StringArrayVar(&setAddValues, "add", nil, "Add a value to an array field (repeatable)")
 	setCmd.Flags().StringArrayVar(&setRemoveValues, "remove", nil, "Remove a value from an array field (repeatable)")
 	setCmd.Flags().StringVar(&setQuery, "query", "", "SQL query returning a 'key' column to bulk-set")
+	setCmd.Flags().BoolVarP(&setQueue, "queue", "q", false, "Queue change locally instead of pushing to Jira immediately")
 	rootCmd.AddCommand(setCmd)
 }

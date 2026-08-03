@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -11,6 +10,8 @@ import (
 	"github.com/sthadka/jai/internal/output"
 	synce "github.com/sthadka/jai/internal/sync"
 )
+
+var transitionQueue bool
 
 func resolveTransition(name string, transitions []*jira.Transition) (match *jira.Transition, ambiguous []*jira.Transition) {
 	lower := strings.ToLower(name)
@@ -39,9 +40,12 @@ func formatTransitionNames(transitions []*jira.Transition) string {
 
 var transitionCmd = &cobra.Command{
 	Use:   "transition <key> [status]",
-	Short: "Transition a Jira issue to a new status (pushed immediately)",
-	Long:  "Move a Jira issue through its workflow. Transitions are pushed immediately, unlike field edits.",
-	Args:  cobra.RangeArgs(1, 2),
+	Short: "Transition a Jira issue to a new status",
+	Long: `Move a Jira issue through its workflow.
+
+By default, the transition is pushed to Jira immediately. Use --queue to
+defer the push until 'jai push'.`,
+	Args: cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		issueKey := args[0]
 		listFlag, _ := cmd.Flags().GetBool("list")
@@ -103,39 +107,33 @@ var transitionCmd = &cobra.Command{
 			return fmt.Errorf("%s", msg)
 		}
 
-		if err := g.db.EnsurePendingChangesTable(); err != nil {
-			return err
-		}
-
-		payload, _ := json.Marshal(map[string]string{"transition_id": match.ID})
-		if err := g.db.InsertPendingChange(issueKey, "transition", string(payload)); err != nil {
-			return err
-		}
-
-		writer := synce.NewWriter(g.db, g.jira)
-		results, err := writer.ProcessQueue(context.Background())
-		if err != nil {
-			return fmt.Errorf("pushing transition: %w", err)
-		}
-
-		for _, r := range results {
-			if r.IssueKey == issueKey && r.Operation == "transition" && !r.Success {
-				msg := fmt.Sprintf("transition failed: %v", r.Error)
+		status := "synced"
+		if transitionQueue {
+			if err := g.db.EnsurePendingChangesTable(); err != nil {
+				return err
+			}
+			payload, _ := json.Marshal(map[string]string{"transition_id": match.ID})
+			if err := g.db.InsertPendingChange(issueKey, "transition", string(payload)); err != nil {
+				return err
+			}
+			status = "queued"
+		} else {
+			if err := g.jira.ExecuteTransition(cmd.Context(), issueKey, match.ID); err != nil {
+				msg := fmt.Sprintf("transition failed: %v", err)
 				if g.jsonOut {
 					fmt.Println(string(output.Err("JiraError", msg)))
 					return nil
 				}
 				return fmt.Errorf("%s", msg)
 			}
-		}
 
-		// Refresh the local DB from Jira so status (and any workflow side effects,
-		// e.g. resolution) are immediately queryable instead of stale until next sync.
-		if apiIssue, fetchErr := g.jira.GetIssue(cmd.Context(), issueKey); fetchErr == nil {
-			rawJSON, _ := json.Marshal(apiIssue)
-			if fieldMap, fmErr := g.db.FieldMapByJiraID(); fmErr == nil {
-				if dbIssue, extra, denormErr := synce.Denormalize(rawJSON, fieldMap); denormErr == nil {
-					_ = g.db.UpsertIssue(dbIssue, extra)
+			// Refresh the local DB so status is immediately queryable.
+			if apiIssue, fetchErr := g.jira.GetIssue(cmd.Context(), issueKey); fetchErr == nil {
+				rawJSON, _ := json.Marshal(apiIssue)
+				if fieldMap, fmErr := g.db.FieldMapByJiraID(); fmErr == nil {
+					if dbIssue, extra, denormErr := synce.Denormalize(rawJSON, fieldMap); denormErr == nil {
+						_ = g.db.UpsertIssue(dbIssue, extra)
+					}
 				}
 			}
 		}
@@ -145,17 +143,22 @@ var transitionCmd = &cobra.Command{
 				"issue_key":     issueKey,
 				"transition":    match.Name,
 				"transition_id": match.ID,
-				"status":        "pushed",
+				"status":        status,
 			})))
 			return nil
 		}
 
-		fmt.Printf("%s: transitioned to %q\n", issueKey, match.Name)
+		if status == "queued" {
+			fmt.Printf("%s: transition to %q (queued)\n", issueKey, match.Name)
+		} else {
+			fmt.Printf("%s: transitioned to %q \u2713\n", issueKey, match.Name)
+		}
 		return nil
 	},
 }
 
 func init() {
 	transitionCmd.Flags().Bool("list", false, "list available transitions")
+	transitionCmd.Flags().BoolVarP(&transitionQueue, "queue", "q", false, "Queue change locally instead of pushing to Jira immediately")
 	rootCmd.AddCommand(transitionCmd)
 }

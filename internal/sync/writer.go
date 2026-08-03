@@ -117,7 +117,8 @@ func (w *Writer) processAddComment(ctx context.Context, c *db.PendingChange) err
 	if err := json.Unmarshal([]byte(c.Payload), &payload); err != nil {
 		return fmt.Errorf("parsing add_comment payload: %w", err)
 	}
-	return w.client.AddComment(ctx, c.IssueKey, payload.Body)
+	_, err := w.client.AddComment(ctx, c.IssueKey, payload.Body)
+	return err
 }
 
 func (w *Writer) processTransition(ctx context.Context, c *db.PendingChange) error {

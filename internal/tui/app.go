@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/sthadka/jai/internal/config"
 	"github.com/sthadka/jai/internal/db"
+	"github.com/sthadka/jai/internal/jira"
 	"github.com/sthadka/jai/internal/query"
 	synce "github.com/sthadka/jai/internal/sync"
 )
@@ -34,7 +36,7 @@ type App struct {
 	queryEng   *query.Engine
 	syncEngine *synce.Engine
 	database   *db.DB
-
+	jiraClient *jira.Client
 	views      []config.ViewConfig
 	activeView int
 	tables     []*TableModel
@@ -67,7 +69,7 @@ type App struct {
 }
 
 // New creates a new App model.
-func New(cfg *config.Config, queryEng *query.Engine, syncEng *synce.Engine, database *db.DB) *App {
+func New(cfg *config.Config, queryEng *query.Engine, syncEng *synce.Engine, database *db.DB, jiraClient *jira.Client) *App {
 	ti := textinput.New()
 	ti.Placeholder = "filter..."
 	ti.CharLimit = 100
@@ -85,6 +87,7 @@ func New(cfg *config.Config, queryEng *query.Engine, syncEng *synce.Engine, data
 		queryEng:         queryEng,
 		syncEngine:       syncEng,
 		database:         database,
+		jiraClient:       jiraClient,
 		keys:             DefaultKeys(),
 		filterInput:      ti,
 		fieldPickerInput: fpi,
@@ -248,6 +251,10 @@ type fieldValuesLoadedMsg struct {
 	values []string
 }
 
+type fieldSavedMsg struct {
+	err error
+}
+
 // loadFieldValuesCmd queries distinct existing values for a field column,
 // filtered live by the user's current input text. Each keystroke fires a
 // fresh DB query so there is no cap on the total number of distinct values.
@@ -332,6 +339,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.fieldValueSugFiltered = msg.values
 		return a, nil
 
+	case fieldSavedMsg:
+		if msg.err != nil {
+			a.err = fmt.Sprintf("save failed: %v (queued for push)", msg.err)
+		} else {
+			a.err = ""
+		}
+		return a, nil
 	case SyncTickMsg:
 		a.syncing = true
 		a.syncStatus = "syncing..."
@@ -515,9 +529,8 @@ func (a *App) handleKey(msg tea.KeyMsg, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 					newVal = a.fieldValueSugFiltered[a.fieldValueSugCursor]
 				}
 				issueKey := a.detail.IssueKey()
-				fieldName := a.fieldPickerChosen.JiraID
-				payload := marshalSetPayload(fieldName, newVal)
-				_ = a.database.InsertPendingChange(issueKey, "set_field", payload)
+				fieldID := a.fieldPickerChosen.JiraID
+				cmds = append(cmds, a.saveFieldCmd(issueKey, fieldID, newVal))
 			}
 			a.fieldValueInput.Blur()
 			a.mode = ModeDetail
@@ -944,4 +957,16 @@ func marshalSetPayload(fieldID, value string) string {
 	payload := map[string]string{"field": fieldID, "value": value}
 	b, _ := json.Marshal(payload)
 	return string(b)
+}
+
+func (a *App) saveFieldCmd(issueKey, fieldID, value string) tea.Cmd {
+	return func() tea.Msg {
+		ctx := context.Background()
+		if err := a.jiraClient.UpdateField(ctx, issueKey, fieldID, value); err != nil {
+			payload := marshalSetPayload(fieldID, value)
+			_ = a.database.InsertPendingChange(issueKey, "set_field", payload)
+			return fieldSavedMsg{err: err}
+		}
+		return fieldSavedMsg{}
+	}
 }
