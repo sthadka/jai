@@ -1,5 +1,27 @@
 # Changelog
 
+## [3.0.0](https://github.com/sthadka/jai/compare/v2.3.0...v3.0.0) (2026-08-03)
+
+
+### ⚠ BREAKING CHANGES
+
+* `jai set` and `jai comment` now push changes to Jira immediately instead of queuing them locally. `jai transition` no longer side-pushes all queued changes. Use `--queue` / `-q` to restore the old queue-first behavior.
+
+### Features
+
+* write-through to Jira by default for set, comment, transition ([6e871b8](https://github.com/sthadka/jai/commit/6e871b83a29560357f3a66fcdd8a7c212808e4c5))
+
+
+### Bug Fixes
+
+* suppress repeated field collision warnings on subsequent syncs ([e616051](https://github.com/sthadka/jai/commit/e6160519d1c091528dfba1d8884eb8c55ba3028a))
+
+
+### Documentation
+
+* add SSH-to-HTTPS fallback for git push in CLAUDE.md ([707cb10](https://github.com/sthadka/jai/commit/707cb10ed1342483e40b4fc07dd558b2f6057d9d))
+* update write path documentation for write-through default ([f6e2b76](https://github.com/sthadka/jai/commit/f6e2b767393ea9ff52b9ae417dfe8671803e7cb6))
+
 ## [2.3.0](https://github.com/sthadka/jai/compare/v2.2.0...v2.3.0) (2026-07-23)
 
 
