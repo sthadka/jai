@@ -70,7 +70,7 @@ When working in any codebase with LSP support (Go, Python, Rust, TypeScript, etc
 **Key architectural decisions**:
 - DB-first: SQLite is the single source of truth; no command hits Jira API directly for reads
 - All fields downloaded as raw JSON and denormalized into queryable columns — no resync needed for new fields
-- Write operations queue locally in `pending_changes` table, synced to Jira via `jai push` or background goroutine
+- Write operations push to Jira immediately by default; use `--queue` to defer to `pending_changes` table and `jai push`
 - Custom field names auto-discovered from Jira's field metadata API and stored in `field_map` table
 - FTS5 virtual table (`issues_fts`) with porter unicode61 tokenizer for full-text search
 - WAL mode + pragmas for concurrent read/write performance
@@ -93,7 +93,7 @@ internal/
 - Phase 1: Foundation — sync, query, get (core data loop)
 - Phase 2: Agent Mode — --json, --fields, jai schema, jai fields, auto-sync
 - Phase 3: TUI — full-screen views, sorting, filtering, grouping, background sync
-- Phase 4: Write Path — jai set, jai comment, jai push, pending_changes
+- Phase 4: Write Path — jai set, jai comment, jai push, write-through default with --queue opt-in
 - Phase 5: Polish — jai init wizard, FTS5 search, color rules, default views, error UX
 - Phase 6: Release — README, Homebrew, CI/CD, vhs demo
 

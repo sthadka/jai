@@ -111,7 +111,7 @@ jai schema get          # command schema for agents
 
 ## Write operations
 
-All write commands (except `transition` and `link`) queue changes locally. Run `jai push` to sync them to Jira.
+Write commands push changes to Jira immediately by default. Use `--queue` / `-q` to defer changes locally until you run `jai push`.
 
 ### Set a field
 
@@ -157,7 +157,7 @@ jai set --query "SELECT key FROM issues WHERE type = 'Bug' AND status = 'To Do'"
 
 ### Transitions
 
-Transition an issue to a new workflow status. Transitions push to Jira immediately (no `jai push` needed).
+Transition an issue to a new workflow status. Like all write commands, transitions push to Jira immediately. Use `--queue` to defer.
 
 ```sh
 # List available transitions
@@ -211,6 +211,8 @@ jai unwatch ROX-123                      # remove yourself
 jai comment ROX-123 "Fixed in PR #4892"
 ```
 
+Comments push to Jira immediately. Use `--queue` / `-q` to defer until `jai push`.
+
 ### Create issues
 
 ```sh
@@ -245,6 +247,8 @@ jai open ROX-123 --url-only       # print URL to stdout
 ```
 
 ### Push
+
+Push is only needed for changes that were deferred with `--queue`. It syncs all queued changes to Jira.
 
 ```sh
 jai push

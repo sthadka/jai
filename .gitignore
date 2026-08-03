@@ -9,3 +9,6 @@ jai
 # Beads / Dolt files (added by bd init)
 .beads-credential-key
 .beads/proxieddb/
+
+# TreeFlow context (auto-added)
+.beads/

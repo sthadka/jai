@@ -29,7 +29,7 @@ jai takes a different approach: sync once to a local SQLite database, then query
 - **10–50× fewer tokens** for AI agents. Select exactly the fields you need.
 - **Instant queries** from local SQLite. No waiting for the API.
 - **Full SQL power** — JOINs, aggregations, CTEs, window functions, FTS5. Things JQL will never do.
-- **Works offline.** Writes queue locally and sync to Jira when you're back online.
+- **Write-through by default.** Changes push to Jira immediately. Use `--queue` / `-q` to defer writes for offline use.
 - **Full-screen TUI** that replaces the Jira web UI for daily workflows.
 
 ---
@@ -291,7 +291,7 @@ views:
 
 ## Write operations
 
-Changes queue locally and sync to Jira on the next `jai push` or background sync cycle.
+Changes push to Jira immediately by default. Use `--queue` / `-q` to defer changes for the next `jai push` or background sync cycle.
 
 ```sh
 # Create a new issue (hits Jira API directly, returns key immediately)
@@ -327,21 +327,25 @@ jai clone ROX-4821 --replace "production:staging"
 
 # Update a field
 jai set ROX-4821 priority High
-# → ROX-4821: priority → "High" (pending sync)
+# → ROX-4821: priority → "High" ✓
 
 # Array fields — add/remove individual values
 jai set ROX-4821 labels --add backend --add auth
-# → ROX-4821: labels += [backend auth] (pending sync)
+# → ROX-4821: labels += [backend auth] ✓
 jai set ROX-4821 labels --remove backend
-# → ROX-4821: labels -= [backend] (pending sync)
+# → ROX-4821: labels -= [backend] ✓
 
 # Bulk set — comma-separated keys or SQL query
 jai set ROX-1,ROX-2,ROX-3 priority Major
-# → queued 3 changes (pending sync)
+# → 3 changes pushed ✓
 jai set --query "SELECT key FROM issues WHERE type = 'Bug' LIMIT 5" priority Major
-# → queued 5 changes (pending sync)
+# → 5 changes pushed ✓
 
-# Transition an issue (pushes immediately)
+# Use --queue to defer changes instead of pushing immediately
+jai set ROX-4821 priority High --queue
+# → ROX-4821: priority → "High" (queued)
+
+# Transition an issue
 jai transition ROX-4821 "In Progress"
 # → ROX-4821: transitioned to "In Progress"
 jai transition ROX-4821 --list
@@ -368,9 +372,13 @@ jai open ROX-4821 --url-only               # print URL only
 
 # Add a comment
 jai comment ROX-4821 "Fixed in PR #4892, deploying to staging"
-# → ROX-4821: comment added (pending sync)
+# → ROX-4821: comment added ✓
 
-# Push all pending changes
+# Use --queue to defer
+jai comment ROX-4821 "Will investigate tomorrow" --queue
+# → ROX-4821: comment added (queued)
+
+# Push queued changes (only needed after --queue)
 jai push
 # → ✓ ROX-4821: priority → "High"
 # → ✓ ROX-4821: labels updated
@@ -450,7 +458,7 @@ Both paths can be overridden with `--config` and `--db` flags, or by setting `db
 | `jai open <key>` | Open issue in browser (`--url-only` to print URL) |
 | `jai clone <key>` | Clone an issue with optional overrides |
 | `jai create <project>` | Create a new issue (`--template`, `--body`) |
-| `jai set <key> <field> <value>` | Update an issue field |
+| `jai set <key> <field> <value>` | Update an issue field (pushes immediately; `--queue` to defer) |
 | `jai set <key> <field> --add <val>` | Add a value to an array field |
 | `jai set <key> <field> --remove <val>` | Remove a value from an array field |
 | `jai set K1,K2,K3 <field> <value>` | Bulk set on comma-separated keys |
@@ -459,8 +467,8 @@ Both paths can be overridden with `--config` and `--db` flags, or by setting `db
 | `jai link <from> <to>` | Link two issues or add a remote URL link |
 | `jai watch <key>` | Add yourself (or a user) as watcher |
 | `jai unwatch <key>` | Remove yourself as watcher |
-| `jai comment <key> <text>` | Add a comment |
-| `jai push` | Push pending changes to Jira |
+| `jai comment <key> <text>` | Add a comment (pushes immediately; `--queue` to defer) |
+| `jai push` | Push queued changes to Jira (only needed after `--queue`) |
 | `jai tui` | Launch full-screen TUI |
 | `jai completion <shell>` | Generate shell completions (bash/zsh/fish) |
 

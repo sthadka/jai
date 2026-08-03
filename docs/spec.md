@@ -483,6 +483,10 @@ This runs during `jai sync --full` and optionally on a configurable schedule.
 
 ### Write Queue Processing
 
+By default, `jai set`, `jai comment`, and `jai transition` call the Jira API immediately (write-through). Pass `--queue` / `-q` to defer the change to the `pending_changes` table instead.
+
+When `--queue` is used, changes accumulate in `pending_changes` and are pushed to Jira via `jai push`.
+
 ```go
 func (w *Writer) ProcessQueue(ctx context.Context) error {
     // 1. SELECT from pending_changes WHERE synced_at IS NULL ORDER BY created_at
@@ -692,26 +696,38 @@ Output: Sync progress and summary
 
 ```
 Input:  issue key, field name, new value (positional)
-Output: Confirmation + pending status
+Flags:  --queue / -q  Queue the change instead of writing immediately
+Output: Confirmation + status
 
-  ROX-123: status → "In Progress" (pending sync)
+  ROX-123: status → "In Progress" ✓          # default (write-through)
+  ROX-123: status → "In Progress" (queued)    # with --queue
 
-Writes to pending_changes table. If auto_sync is on, immediately attempts to push.
+Default behavior calls the Jira API immediately. With --queue, writes to
+pending_changes table instead; use `jai push` to sync queued changes.
 ```
 
 #### `jai comment <key> <text>`
 
 ```
 Input:  issue key, comment text (positional)
-Output: Confirmation + pending status
+Flags:  --queue / -q  Queue the comment instead of posting immediately
+Output: Confirmation + status
 
-  ROX-123: comment added (pending sync)
+  ROX-123: comment added ✓                    # default (write-through)
+  ROX-123: comment added (queued)             # with --queue
+
+Default behavior calls the Jira API immediately. AddComment returns
+(string, error) so write-through comments receive real Jira IDs.
+With --queue, writes to pending_changes table instead.
 ```
 
 #### `jai push`
 
 ```
 Output: Push queue processing summary
+
+Only needed for changes created with --queue. Write-through changes
+(the default) are already synced and do not appear in the push queue.
 
   Pushing 3 pending changes...
   ✓ ROX-123: status → "In Progress"
@@ -829,6 +845,8 @@ type SyncMsg struct {
 
 ### Pending Change Highlighting
 
+The TUI inline field editor writes through to Jira by default via a background `tea.Cmd`. If the API call fails, the change falls back to the `pending_changes` queue automatically.
+
 Issues with pending (unsynced) changes display a visual indicator:
 
 ```
@@ -837,8 +855,7 @@ Issues with pending (unsynced) changes display a visual indicator:
   ROX-456   | Update docs              | To Do
 ```
 
-The `⟳` marker (or color highlight) shows that ROX-123 has a pending status change that hasn't been confirmed by sync yet. Cleared once incremental sync returns the confirmed state.
-
+The `⟳` marker (or color highlight) shows that ROX-123 has a pending status change that hasn't been confirmed by sync yet. This appears when a write-through call fails and the change is queued, or when `--queue` was used explicitly. Cleared once incremental sync returns the confirmed state.
 ### Color Rules Evaluation
 
 ```go
