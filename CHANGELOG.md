@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Bug Fixes
+
+* convert sync cursors to the authenticated Jira user's timezone before evaluating incremental JQL
+
 ## [4.0.0](https://github.com/sthadka/jai/compare/v3.1.0...v4.0.0) (2026-08-26)
 
 

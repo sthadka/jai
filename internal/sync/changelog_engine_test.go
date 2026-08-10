@@ -70,8 +70,15 @@ func TestSyncChangelogsForKeys(t *testing.T) {
 }
 
 func TestSyncSource_IncludesChangelogs(t *testing.T) {
+	myselfCalls := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
+		case r.URL.Path == "/rest/api/3/myself":
+			myselfCalls++
+			json.NewEncoder(w).Encode(jira.MySelf{
+				DisplayName: "Test User",
+				TimeZone:    "America/New_York",
+			})
 		case strings.HasPrefix(r.URL.Path, "/rest/api/3/search/jql"):
 			resp := jira.SearchResponse{
 				Issues: []*jira.Issue{
@@ -118,11 +125,17 @@ func TestSyncSource_IncludesChangelogs(t *testing.T) {
 	}
 	e := New(database, client, cfg)
 
+	if err := e.VerifyAuth(context.Background()); err != nil {
+		t.Fatalf("VerifyAuth: %v", err)
+	}
 	ch, err := e.Sync(context.Background(), false, false, "")
 	if err != nil {
 		t.Fatalf("Sync: %v", err)
 	}
 	for range ch {
+	}
+	if myselfCalls != 1 {
+		t.Errorf("expected one /myself request, got %d", myselfCalls)
 	}
 
 	var count int

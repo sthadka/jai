@@ -7,7 +7,9 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
+	_ "time/tzdata"
 
 	"github.com/sthadka/jai/internal/config"
 	"github.com/sthadka/jai/internal/db"
@@ -32,9 +34,11 @@ type Progress struct {
 
 // Engine orchestrates Jira sync operations.
 type Engine struct {
-	db     *db.DB
-	client *jira.Client
-	cfg    *config.Config
+	db       *db.DB
+	client   *jira.Client
+	cfg      *config.Config
+	jiraTZMu sync.RWMutex
+	jiraTZ   *time.Location
 }
 
 // New creates a new sync Engine.
@@ -43,18 +47,41 @@ func New(database *db.DB, client *jira.Client, cfg *config.Config) *Engine {
 }
 
 // VerifyAuth confirms the configured credentials actually authenticate against
-// Jira before any sync writes data. This is a deliberate probe of an endpoint
-// that requires authentication (/myself): Jira Cloud can return HTTP 200 with
+// Jira and caches the user's timezone for the next sync. The /myself endpoint
+// requires authentication; Jira Cloud can return HTTP 200 with
 // anonymous — and completely different or empty — results for search and field
 // endpoints when credentials are missing or invalid, so an empty/odd sync could
 // otherwise silently overwrite the local database with the wrong data. On
 // failure the returned error wraps *jira.AuthError, which callers detect with
 // errors.As to fail fast instead of proceeding.
 func (e *Engine) VerifyAuth(ctx context.Context) error {
-	if _, err := e.client.MySelf(ctx); err != nil {
+	me, err := e.client.MySelf(ctx)
+	if err != nil {
 		return fmt.Errorf("jira authentication check failed: %w", err)
 	}
+
+	loc := time.UTC
+	if me.TimeZone == "" {
+		fmt.Fprintln(os.Stderr, "warning: Jira user timezone is unavailable; falling back to UTC")
+	} else {
+		resolved, err := time.LoadLocation(me.TimeZone)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not resolve Jira timezone %q; falling back to UTC: %v\n", me.TimeZone, err)
+		} else {
+			loc = resolved
+		}
+	}
+
+	e.jiraTZMu.Lock()
+	e.jiraTZ = loc
+	e.jiraTZMu.Unlock()
 	return nil
+}
+
+func (e *Engine) jiraTimezone() *time.Location {
+	e.jiraTZMu.RLock()
+	defer e.jiraTZMu.RUnlock()
+	return e.jiraTZ
 }
 
 // SyncProjects fetches the display name for every distinct project key in the issues
@@ -185,6 +212,7 @@ func sourceJQL(s config.SyncSource) string {
 // The channel is closed when all sources are done.
 // resume is only meaningful when full=true: if true, the sync continues from
 // the last saved cursor instead of starting over.
+// VerifyAuth must succeed before Sync is called.
 func (e *Engine) Sync(ctx context.Context, full, resume bool, sourceFilter string) (<-chan Progress, error) {
 	if resume && !full {
 		return nil, fmt.Errorf("--resume requires --full")
@@ -195,17 +223,22 @@ func (e *Engine) Sync(ctx context.Context, full, resume bool, sourceFilter strin
 		return nil, err
 	}
 
+	jiraTZ := e.jiraTimezone()
+	if jiraTZ == nil {
+		return nil, fmt.Errorf("Jira timezone is not initialized; call VerifyAuth before Sync")
+	}
+
 	ch := make(chan Progress, 64)
 	go func() {
 		defer close(ch)
 		for _, src := range sources {
-			e.syncSource(ctx, src, full, resume, ch)
+			e.syncSource(ctx, src, full, resume, jiraTZ, ch)
 		}
 	}()
 	return ch, nil
 }
 
-func (e *Engine) syncSource(ctx context.Context, src config.SyncSource, full, resume bool, ch chan<- Progress) {
+func (e *Engine) syncSource(ctx context.Context, src config.SyncSource, full, resume bool, jiraTZ *time.Location, ch chan<- Progress) {
 	start := time.Now()
 
 	fieldMap, err := e.db.FieldMapByJiraID()
@@ -229,7 +262,7 @@ func (e *Engine) syncSource(ctx context.Context, src config.SyncSource, full, re
 			cursor, err := e.db.GetResumeCursor(src.Name)
 			if err == nil && cursor != "" {
 				resumedFrom = cursor
-				jqlTime := cursorToJQL(cursor)
+				jqlTime := cursorToJQL(cursor, jiraTZ)
 				jql = fmt.Sprintf(`(%s) AND updated >= "%s" ORDER BY updated ASC`, base, jqlTime)
 			} else {
 				jql = base + ` ORDER BY updated ASC`
@@ -252,7 +285,7 @@ func (e *Engine) syncSource(ctx context.Context, src config.SyncSource, full, re
 			hwm = meta.LastSyncTime.String
 		}
 		if hwm != "" {
-			jqlTime := cursorToJQL(hwm)
+			jqlTime := cursorToJQL(hwm, jiraTZ)
 			jql = fmt.Sprintf(`(%s) AND updated >= "%s" ORDER BY updated ASC`, base, jqlTime)
 		} else {
 			jql = base + ` ORDER BY updated ASC`
@@ -581,16 +614,23 @@ func (e *Engine) syncChangelogsPerIssue(ctx context.Context, keys []string) {
 	}
 }
 
-// cursorToJQL converts an RFC3339 timestamp to the format Jira JQL expects.
-// Jira JQL does not support seconds in datetime strings — they cause a silent
-// 0-result response. We truncate to minute granularity, which may re-fetch
-// up to 60 seconds of already-synced issues (harmless upserts).
-func cursorToJQL(cursor string) string {
+// cursorToJQL converts an RFC3339 timestamp to the format Jira JQL expects,
+// expressed in the given timezone. Jira Cloud interprets JQL datetime literals
+// in the authenticated user's timezone, so we must convert the UTC cursor to
+// that timezone — otherwise the query threshold silently shifts by the UTC
+// offset, creating a blind window where updated issues are missed.
+// Jira JQL does not support seconds — they cause a silent 0-result response.
+// We truncate to minute granularity, which may re-fetch up to 60 seconds of
+// already-synced issues (harmless upserts).
+func cursorToJQL(cursor string, loc *time.Location) string {
 	t, err := time.Parse(time.RFC3339, cursor)
 	if err != nil {
 		return cursor
 	}
-	return t.UTC().Format("2006-01-02 15:04")
+	if loc == nil {
+		loc = time.UTC
+	}
+	return t.In(loc).Format("2006-01-02 15:04")
 }
 
 // ensureCustomColumns creates columns in the issues table for custom fields that don't have one yet.

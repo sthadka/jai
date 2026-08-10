@@ -90,6 +90,10 @@ func handleJaiSync(s *Server, ctx context.Context, req mcp.CallToolRequest) (*mc
 	full := req.GetBool("full", false)
 	source := req.GetString("source", "")
 
+	if err := s.sync.VerifyAuth(ctx); err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("authentication failed: %v", err)), nil
+	}
+
 	// Discover fields first
 	var overrides map[string]string
 	if s.cfg.Fields.Overrides != nil {

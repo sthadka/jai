@@ -74,7 +74,11 @@ func (w *BackgroundWorker) runSync(ctx context.Context) {
 	w.syncing = true
 	w.mu.Unlock()
 
-	ch, err := w.engine.Sync(ctx, false, false, "")
+	err := w.engine.VerifyAuth(ctx)
+	var ch <-chan Progress
+	if err == nil {
+		ch, err = w.engine.Sync(ctx, false, false, "")
+	}
 	if err == nil {
 		for range ch {
 		} // drain

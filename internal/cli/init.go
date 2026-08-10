@@ -271,6 +271,10 @@ func runInit(cmd *cobra.Command, args []string) error {
 	stepInfo(fmt.Sprintf("Syncing %d source(s) — this may take a few minutes...", len(sources)))
 	fmt.Println()
 
+	if err := engine.VerifyAuth(ctx); err != nil {
+		stepFail("Authentication failed: " + err.Error())
+		return err
+	}
 	ch, err := engine.Sync(ctx, true, false, "")
 	if err != nil {
 		stepFail("Sync failed: " + err.Error())

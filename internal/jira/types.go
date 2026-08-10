@@ -179,6 +179,7 @@ type ProjectInfo struct {
 type MySelf struct {
 	DisplayName  string `json:"displayName"`
 	EmailAddress string `json:"emailAddress"`
+	TimeZone     string `json:"timeZone"`
 }
 
 // TransitionsResponse is the Jira transitions response.
