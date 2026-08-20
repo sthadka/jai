@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -33,6 +34,16 @@ var getCmd = &cobra.Command{
 		if len(results.Rows) == 0 {
 			issue, apiErr := g.jira.GetIssue(cmd.Context(), key)
 			if apiErr != nil {
+				// Don't mask an auth failure as "not found" — the issue may well
+				// exist, we just can't see it unauthenticated.
+				var authErr *jira.AuthError
+				if errors.As(apiErr, &authErr) {
+					if g.jsonOut {
+						fmt.Println(string(output.Err("AuthError", authErr.Error())))
+						return nil
+					}
+					return authErr
+				}
 				msg := fmt.Sprintf("issue %s not found in local database (try: jai sync)", key)
 				if g.jsonOut {
 					fmt.Println(string(output.Err("NotFoundError", msg)))

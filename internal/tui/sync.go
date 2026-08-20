@@ -30,6 +30,12 @@ func doSync(engine *synce.Engine) tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 
+		// Verify auth first so an unauthenticated background sync surfaces the
+		// error instead of silently pulling anonymous/empty Jira results.
+		if err := engine.VerifyAuth(ctx); err != nil {
+			return SyncMsg{Err: err}
+		}
+
 		ch, err := engine.Sync(ctx, false, false, "")
 		if err != nil {
 			return SyncMsg{Err: err}

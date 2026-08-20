@@ -155,6 +155,9 @@ func (c *Client) del(ctx context.Context, path string) error {
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		b, _ := io.ReadAll(resp.Body)
+		if authErr := authError(resp.StatusCode, b); authErr != nil {
+			return authErr
+		}
 		return fmt.Errorf("jira DELETE %s: %d %s", path, resp.StatusCode, string(b))
 	}
 	return nil
@@ -172,6 +175,9 @@ func (c *Client) put(ctx context.Context, path string, body interface{}) error {
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		b, _ := io.ReadAll(resp.Body)
+		if authErr := authError(resp.StatusCode, b); authErr != nil {
+			return authErr
+		}
 		return fmt.Errorf("jira PUT %s: %d %s", path, resp.StatusCode, string(b))
 	}
 	return nil
@@ -189,6 +195,9 @@ func (c *Client) post(ctx context.Context, path string, body interface{}) error 
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		b, _ := io.ReadAll(resp.Body)
+		if authErr := authError(resp.StatusCode, b); authErr != nil {
+			return authErr
+		}
 		return fmt.Errorf("jira POST %s: %d %s", path, resp.StatusCode, string(b))
 	}
 	return nil

@@ -42,6 +42,21 @@ func New(database *db.DB, client *jira.Client, cfg *config.Config) *Engine {
 	return &Engine{db: database, client: client, cfg: cfg}
 }
 
+// VerifyAuth confirms the configured credentials actually authenticate against
+// Jira before any sync writes data. This is a deliberate probe of an endpoint
+// that requires authentication (/myself): Jira Cloud can return HTTP 200 with
+// anonymous — and completely different or empty — results for search and field
+// endpoints when credentials are missing or invalid, so an empty/odd sync could
+// otherwise silently overwrite the local database with the wrong data. On
+// failure the returned error wraps *jira.AuthError, which callers detect with
+// errors.As to fail fast instead of proceeding.
+func (e *Engine) VerifyAuth(ctx context.Context) error {
+	if _, err := e.client.MySelf(ctx); err != nil {
+		return fmt.Errorf("jira authentication check failed: %w", err)
+	}
+	return nil
+}
+
 // SyncProjects fetches the display name for every distinct project key in the issues
 // table and stores it in the projects table. Non-fatal: failures are logged to stderr.
 func (e *Engine) SyncProjects(ctx context.Context) {

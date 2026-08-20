@@ -3,6 +3,7 @@ package jira
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -32,6 +33,52 @@ func TestMySelf(t *testing.T) {
 	}
 	if me.DisplayName != "Test User" {
 		t.Errorf("expected 'Test User', got %q", me.DisplayName)
+	}
+}
+
+func TestMySelf_Unauthorized(t *testing.T) {
+	for _, code := range []int{http.StatusUnauthorized, http.StatusForbidden} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Error(w, `{"errorMessages":["Unauthorized"]}`, code)
+		}))
+
+		client := newTestClient(srv)
+		_, err := client.MySelf(context.Background())
+		srv.Close()
+
+		if err == nil {
+			t.Fatalf("status %d: expected error, got nil", code)
+		}
+		var authErr *AuthError
+		if !errors.As(err, &authErr) {
+			t.Fatalf("status %d: expected *AuthError, got %T: %v", code, err, err)
+		}
+		if authErr.StatusCode != code {
+			t.Errorf("status %d: AuthError.StatusCode = %d", code, authErr.StatusCode)
+		}
+	}
+}
+
+// TestSearchAll_Unauthorized confirms an auth failure mid-search surfaces an
+// *AuthError rather than a swallowed empty result set.
+func TestSearchAll_Unauthorized(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"errorMessages":["Unauthorized"]}`, http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+
+	client := newTestClient(srv)
+
+	var gotErr error
+	for _, err := range client.SearchAll(context.Background(), "project = TEST", []string{"summary"}) {
+		if err != nil {
+			gotErr = err
+			break
+		}
+	}
+	var authErr *AuthError
+	if !errors.As(gotErr, &authErr) {
+		t.Fatalf("expected *AuthError from SearchAll, got %T: %v", gotErr, gotErr)
 	}
 }
 

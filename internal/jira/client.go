@@ -15,6 +15,32 @@ import (
 	"golang.org/x/time/rate"
 )
 
+// AuthError indicates Jira rejected the request's credentials, or the
+// authenticated user lacks permission for the resource (HTTP 401/403). It is
+// returned instead of a generic API error so callers can detect an
+// unauthenticated state via errors.As and fail fast. This matters because Jira
+// Cloud otherwise returns wildly different — often empty — results depending on
+// whether the request is authenticated, which is easy to mistake for "no data"
+// and silently sync/serve the wrong thing.
+type AuthError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e *AuthError) Error() string {
+	return fmt.Sprintf("jira authentication failed (HTTP %d): check jira.email and jira.token", e.StatusCode)
+}
+
+// authError returns an *AuthError for 401/403 responses so callers can detect
+// an unauthenticated state; it returns nil for every other status, leaving the
+// caller to format its own error for other non-2xx codes.
+func authError(statusCode int, body []byte) error {
+	if statusCode == http.StatusUnauthorized || statusCode == http.StatusForbidden {
+		return &AuthError{StatusCode: statusCode, Body: string(body)}
+	}
+	return nil
+}
+
 // Client is a Jira Cloud HTTP client.
 type Client struct {
 	baseURL    string
@@ -126,6 +152,9 @@ func (c *Client) get(ctx context.Context, path string, out interface{}) error {
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(resp.Body)
+		if authErr := authError(resp.StatusCode, body); authErr != nil {
+			return authErr
+		}
 		return fmt.Errorf("jira API error %d: %s", resp.StatusCode, string(body))
 	}
 
@@ -146,6 +175,9 @@ func (c *Client) postDecode(ctx context.Context, path string, in, out interface{
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(resp.Body)
+		if authErr := authError(resp.StatusCode, body); authErr != nil {
+			return authErr
+		}
 		return fmt.Errorf("jira API error %d: %s", resp.StatusCode, string(body))
 	}
 

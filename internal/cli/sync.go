@@ -23,6 +23,12 @@ var syncCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 
+		// Verify authentication before touching Jira: an unauthenticated sync
+		// can silently pull anonymous (or empty) data and overwrite the local DB.
+		if err := g.sync.VerifyAuth(ctx); err != nil {
+			return err
+		}
+
 		// Discover fields first.
 		var overrides map[string]string
 		if g.cfg.Fields.Overrides != nil {

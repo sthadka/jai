@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -136,6 +137,23 @@ func runAutoSync(ctx context.Context) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+
+	// Verify authentication before auto-syncing. If credentials are invalid,
+	// exit rather than silently serving stale local data or letting an
+	// anonymous sync pull the wrong results — Jira returns very different data
+	// depending on auth. Transient (non-auth) failures fall through so cached
+	// reads still work offline; run with --no-sync to skip this entirely.
+	if err := g.sync.VerifyAuth(ctx); err != nil {
+		var authErr *jira.AuthError
+		if errors.As(err, &authErr) {
+			fmt.Fprintf(os.Stderr, "✗ Jira authentication failed: %v\n", authErr)
+			fmt.Fprintln(os.Stderr, "  Check jira.email and jira.token (run 'jai status'), or use --no-sync to work offline.")
+			os.Exit(1)
+		}
+		fmt.Fprintf(os.Stderr, "sync: %v\n", err)
+		return
+	}
+
 	ch, err := g.sync.Sync(ctx, false, false, "")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "sync: %v\n", err)
