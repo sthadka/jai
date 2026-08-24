@@ -200,6 +200,84 @@ var migrations = []migration{
 			return err
 		},
 	},
+	{
+		version:     10,
+		description: "add sprint, attachment, dev_links tables and issue columns for agent integration",
+		up: func(tx *sql.Tx) error {
+			stmts := []string{
+				// boards table
+				`CREATE TABLE IF NOT EXISTS boards (
+					id          INTEGER PRIMARY KEY,
+					name        TEXT NOT NULL,
+					type        TEXT,
+					project_key TEXT,
+					synced_at   DATETIME NOT NULL DEFAULT (datetime('now'))
+				)`,
+				// sprints table
+				`CREATE TABLE IF NOT EXISTS sprints (
+					id          INTEGER PRIMARY KEY,
+					board_id    INTEGER NOT NULL REFERENCES boards(id),
+					name        TEXT NOT NULL,
+					state       TEXT,
+					start_date  DATETIME,
+					end_date    DATETIME,
+					complete_date DATETIME,
+					goal        TEXT,
+					synced_at   DATETIME NOT NULL DEFAULT (datetime('now'))
+				)`,
+				// dev_links table
+				`CREATE TABLE IF NOT EXISTS dev_links (
+					id          INTEGER PRIMARY KEY AUTOINCREMENT,
+					issue_key   TEXT NOT NULL,
+					type        TEXT NOT NULL,
+					url         TEXT,
+					title       TEXT,
+					status      TEXT,
+					repo        TEXT,
+					author      TEXT,
+					created     DATETIME,
+					synced_at   DATETIME NOT NULL DEFAULT (datetime('now'))
+				)`,
+				// attachments table
+				`CREATE TABLE IF NOT EXISTS attachments (
+					id          INTEGER PRIMARY KEY,
+					issue_key   TEXT NOT NULL,
+					filename    TEXT NOT NULL,
+					size        INTEGER,
+					mime_type   TEXT,
+					author      TEXT,
+					created     DATETIME,
+					url         TEXT,
+					synced_at   DATETIME NOT NULL DEFAULT (datetime('now'))
+				)`,
+				// issue_links enhancements
+				`ALTER TABLE issue_links ADD COLUMN linked_summary TEXT`,
+				`ALTER TABLE issue_links ADD COLUMN linked_status  TEXT`,
+				`ALTER TABLE issue_links ADD COLUMN linked_project TEXT`,
+				// issues new columns
+				`ALTER TABLE issues ADD COLUMN sprint_id        INTEGER`,
+				`ALTER TABLE issues ADD COLUMN sprint_name      TEXT`,
+				`ALTER TABLE issues ADD COLUMN attachment_count  INTEGER DEFAULT 0`,
+				`ALTER TABLE issues ADD COLUMN pr_count          INTEGER DEFAULT 0`,
+				`ALTER TABLE issues ADD COLUMN has_open_pr       INTEGER DEFAULT 0`,
+				`ALTER TABLE issues ADD COLUMN branch_name       TEXT`,
+				// indexes
+				`CREATE INDEX IF NOT EXISTS idx_issues_sprint ON issues(sprint_id)`,
+				`CREATE INDEX IF NOT EXISTS idx_boards_project ON boards(project_key)`,
+				`CREATE INDEX IF NOT EXISTS idx_sprints_board ON sprints(board_id)`,
+				`CREATE INDEX IF NOT EXISTS idx_sprints_state ON sprints(state)`,
+				`CREATE INDEX IF NOT EXISTS idx_dev_links_issue ON dev_links(issue_key)`,
+				`CREATE INDEX IF NOT EXISTS idx_dev_links_type ON dev_links(type)`,
+				`CREATE INDEX IF NOT EXISTS idx_attachments_issue ON attachments(issue_key)`,
+			}
+			for _, s := range stmts {
+				if _, err := tx.Exec(s); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	},
 }
 
 func convertCSVToJSON(tx *sql.Tx, column string) error {
