@@ -66,13 +66,19 @@ func (s *Server) ServeStdio(ctx context.Context) error {
 }
 
 // ServeHTTP starts the MCP server using streamable HTTP transport.
+// The server runs until an error occurs or the process is terminated.
 func (s *Server) ServeHTTP(ctx context.Context, addr string) error {
 	httpSrv := server.NewStreamableHTTPServer(s.mcpSrv)
+	// Note: mcp-go's NewStreamableHTTPServer.Start() blocks until server stops.
+	// Context is currently unused by the mcp-go API but kept for future compatibility.
 	return httpSrv.Start(addr)
 }
 
-// ServeSSE starts the MCP server using SSE transport.
+// ServeSSE starts the MCP server using SSE (Server-Sent Events) transport.
+// The server runs until an error occurs or the process is terminated.
 func (s *Server) ServeSSE(ctx context.Context, addr string) error {
 	sseSrv := server.NewSSEServer(s.mcpSrv)
+	// Note: mcp-go's NewSSEServer.Start() blocks until server stops.
+	// Context is currently unused by the mcp-go API but kept for future compatibility.
 	return sseSrv.Start(addr)
 }
