@@ -50,6 +50,7 @@ var noAutoSync = map[string]bool{
 	"completion": true,
 	"open":       true,
 	"help":       true,
+	"serve":      true, // MCP server with background sync
 }
 
 // noDBRequired lists `db` sub-commands that only need config loaded, not an

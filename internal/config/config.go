@@ -36,6 +36,7 @@ type Config struct {
 	Detail      DetailConfig      `yaml:"detail"`
 	Templates   map[string]string `yaml:"templates"`
 	Snippets    map[string]string `yaml:"snippets"`
+	MCP         MCPConfig         `yaml:"mcp"`
 }
 
 // HierarchyLevel defines one level in the issue hierarchy.
@@ -114,6 +115,12 @@ type ColorRule struct {
 	Condition string `yaml:"condition"` // older_than, equals, not_equals, contains, in
 	Value     string `yaml:"value"`
 	Color     string `yaml:"color"` // lipgloss color string
+}
+
+// MCPConfig holds MCP server settings.
+type MCPConfig struct {
+	ReadOnly bool     `yaml:"read_only"` // block write operations
+	Toolsets []string `yaml:"toolsets"`  // enabled toolsets: read,schema,write,sync,browser,config
 }
 
 var envVarRe = regexp.MustCompile(`\$\{([^}]+)\}`)
