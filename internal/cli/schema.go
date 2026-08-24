@@ -297,10 +297,10 @@ var schemaDBCmd = &cobra.Command{
 // safeColumnRe matches valid SQLite column names.
 var safeColumnRe = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 
-// schemaValuesCmd returns distinct values for a column in the issues table.
+// schemaValuesCmd returns distinct values for a column in the issues table with frequency counts.
 var schemaValuesCmd = &cobra.Command{
 	Use:   "values <column>",
-	Short: "List distinct values for a column (for AI agents)",
+	Short: "List distinct values for a column with frequency counts (for AI agents)",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		col := args[0]
@@ -309,7 +309,7 @@ var schemaValuesCmd = &cobra.Command{
 			return nil
 		}
 
-		sql := fmt.Sprintf(`SELECT DISTINCT "%s" FROM issues WHERE "%s" IS NOT NULL AND "%s" != '' ORDER BY "%s" LIMIT 200`, col, col, col, col)
+		sql := fmt.Sprintf(`SELECT "%s", COUNT(*) as count FROM issues WHERE "%s" IS NOT NULL AND "%s" != '' GROUP BY "%s" ORDER BY count DESC LIMIT 200`, col, col, col, col)
 		rows, err := g.db.Query(sql)
 		if err != nil {
 			fmt.Println(string(output.Err("QueryError", err.Error())))
@@ -317,18 +317,21 @@ var schemaValuesCmd = &cobra.Command{
 		}
 		defer rows.Close()
 
-		var values []interface{}
+		var values []map[string]interface{}
 		for rows.Next() {
 			var v interface{}
-			if err := rows.Scan(&v); err == nil {
-				values = append(values, v)
+			var count int
+			if err := rows.Scan(&v, &count); err == nil {
+				values = append(values, map[string]interface{}{
+					"value": v,
+					"count": count,
+				})
 			}
 		}
 
 		fmt.Println(string(output.OK(map[string]interface{}{
 			"column": col,
 			"values": values,
-			"count":  len(values),
 		})))
 		return nil
 	},
