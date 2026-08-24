@@ -414,3 +414,64 @@ func extractSprintFromRawFields(rawFields map[string]json.RawMessage) (int, stri
 
 	return 0, "", false
 }
+
+// ExtractAttachments extracts attachment metadata from a raw issue JSON.
+func ExtractAttachments(issueKey string, raw []byte) ([]*db.Attachment, error) {
+	var apiIssue jira.Issue
+	if err := json.Unmarshal(raw, &apiIssue); err != nil {
+		return nil, err
+	}
+
+	var fields jira.IssueFields
+	if err := json.Unmarshal(apiIssue.Fields, &fields); err != nil {
+		return nil, err
+	}
+
+	// Extract attachments from fields.attachment
+	var rawFields map[string]json.RawMessage
+	if err := json.Unmarshal(apiIssue.Fields, &rawFields); err != nil {
+		return nil, err
+	}
+
+	attachmentData, ok := rawFields["attachment"]
+	if !ok || string(attachmentData) == "null" {
+		return nil, nil
+	}
+
+	// Parse the attachment array
+	var attachments []struct {
+		ID       int    `json:"id"`
+		Filename string `json:"filename"`
+		Size     int    `json:"size"`
+		MimeType string `json:"mimeType"`
+		Author   struct {
+			DisplayName string `json:"displayName"`
+		} `json:"author"`
+		Created string `json:"created"`
+		Content string `json:"content"` // download URL
+	}
+
+	if err := json.Unmarshal(attachmentData, &attachments); err != nil {
+		return nil, err
+	}
+
+	result := make([]*db.Attachment, 0, len(attachments))
+	for _, a := range attachments {
+		author := ""
+		if a.Author.DisplayName != "" {
+			author = a.Author.DisplayName
+		}
+		result = append(result, &db.Attachment{
+			ID:       a.ID,
+			IssueKey: issueKey,
+			Filename: a.Filename,
+			Size:     a.Size,
+			MimeType: a.MimeType,
+			Author:   author,
+			Created:  normalizeDate(a.Created),
+			URL:      a.Content,
+		})
+	}
+
+	return result, nil
+}

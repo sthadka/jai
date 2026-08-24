@@ -323,6 +323,11 @@ func (e *Engine) syncSource(ctx context.Context, src config.SyncSource, full, re
 
 			links := ExtractIssueLinks(apiIssue.Key, rawBytes)
 			_ = e.db.UpsertIssueLinks(apiIssue.Key, links)
+
+			attachments, err := ExtractAttachments(apiIssue.Key, rawBytes)
+			if err == nil && attachments != nil {
+				_ = e.db.UpsertAttachments(apiIssue.Key, attachments)
+			}
 		}
 
 		// Sync changelogs for the issues we just upserted in this page.
@@ -593,14 +598,14 @@ func (e *Engine) ensureCustomColumns(fieldMap map[string]*db.FieldMapping) error
 }
 
 func (e *Engine) expandFields(fieldMap map[string]*db.FieldMapping) []string {
-	// Always include standard fields + comment.
+	// Always include standard fields + comment + attachment.
 	fields := []string{
 		"summary", "description", "status", "priority", "assignee", "reporter",
 		"created", "updated", "resolutiondate", "labels", "components", "fixVersions",
 		"parent", "issuetype", "project", "comment",
 		"issuelinks", "resolution", "duedate",
 		"timeoriginalestimate", "timespent", "timeestimate",
-		"subtasks",
+		"subtasks", "attachment",
 	}
 	// Add custom fields.
 	for jiraID, f := range fieldMap {
