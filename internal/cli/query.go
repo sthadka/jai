@@ -53,7 +53,8 @@ func runSQLQuery(sql string) error {
 	}
 
 	if g.jsonOut {
-		fmt.Println(string(output.OKQuery(cols, rows, len(rows))))
+		syncAge := GetSyncAge()
+		fmt.Println(string(output.OKQueryWithMeta(cols, rows, len(rows), syncAge)))
 		return nil
 	}
 
@@ -92,7 +93,8 @@ func runJQLQuery(jql string) error {
 	}
 
 	if g.jsonOut {
-		fmt.Println(string(output.OKQuery(cols, rows, len(rows))))
+		syncAge := GetSyncAge()
+		fmt.Println(string(output.OKQueryWithMeta(cols, rows, len(rows), syncAge)))
 		return nil
 	}
 	fmt.Print(output.Table(cols, rows))

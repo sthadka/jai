@@ -18,18 +18,20 @@ import (
 
 // globals holds shared state passed to sub-commands.
 type globals struct {
-	cfgPath string
-	dbPath  string
-	jsonOut bool
-	rawOut  bool
-	noSync  bool
-	fields  string
+	cfgPath  string
+	dbPath   string
+	jsonOut  bool
+	rawOut   bool
+	noSync   bool
+	waitSync bool
+	fields   string
 
-	cfg    *config.Config
-	db     *db.DB
-	jira   *jira.Client
-	query  *query.Engine
-	sync   *synce.Engine
+	cfg       *config.Config
+	db        *db.DB
+	jira      *jira.Client
+	query     *query.Engine
+	sync      *synce.Engine
+	bgWorker  *synce.BackgroundWorker
 }
 
 var g globals
@@ -155,6 +157,26 @@ func runAutoSync(ctx context.Context) {
 		return
 	}
 
+	// If --wait-sync is set, use synchronous behavior
+	if g.waitSync {
+		runSyncSynchronous(ctx)
+		return
+	}
+
+	// Non-blocking: start background worker and return immediately
+	if g.bgWorker == nil {
+		interval, err := time.ParseDuration(g.cfg.Sync.Interval)
+		if err != nil {
+			interval = 15 * time.Minute
+		}
+		g.bgWorker = synce.NewBackgroundWorker(g.sync, interval)
+		g.bgWorker.Start(ctx)
+	}
+
+	fmt.Fprintln(os.Stderr, "(syncing...)")
+}
+
+func runSyncSynchronous(ctx context.Context) {
 	ch, err := g.sync.Sync(ctx, false, false, "")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "sync: %v\n", err)
@@ -201,6 +223,44 @@ func runAutoSync(ctx context.Context) {
 	}
 }
 
+// GetSyncAge returns the age of the last sync in seconds.
+// Returns -1 if never synced. First checks background worker,
+// then falls back to database sync metadata.
+func GetSyncAge() int {
+	// Check background worker first
+	if g.bgWorker != nil {
+		age := g.bgWorker.SyncAge()
+		if age >= 0 {
+			return int(age.Seconds())
+		}
+	}
+
+	// Fall back to database sync metadata
+	if g.db == nil || g.cfg == nil {
+		return -1
+	}
+
+	var oldestSync time.Time
+	for _, src := range g.cfg.SyncSources {
+		meta, err := g.db.GetSyncMeta(src.Name)
+		if err != nil || !meta.LastSyncTime.Valid || meta.LastSyncTime.String == "" {
+			continue
+		}
+		t, err := time.Parse(time.RFC3339, meta.LastSyncTime.String)
+		if err != nil {
+			continue
+		}
+		if oldestSync.IsZero() || t.Before(oldestSync) {
+			oldestSync = t
+		}
+	}
+
+	if oldestSync.IsZero() {
+		return -1
+	}
+	return int(time.Since(oldestSync).Seconds())
+}
+
 // Execute runs the root command.
 func Execute() error {
 	return rootCmd.Execute()
@@ -212,6 +272,7 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&g.jsonOut, "json", false, "output as JSON")
 	rootCmd.PersistentFlags().BoolVar(&g.rawOut, "raw", false, "dump full Jira API JSON (get, query --jql)")
 	rootCmd.PersistentFlags().BoolVar(&g.noSync, "no-sync", false, "skip auto-sync")
+	rootCmd.PersistentFlags().BoolVar(&g.waitSync, "wait-sync", false, "wait for sync to complete before returning results")
 	rootCmd.PersistentFlags().StringVar(&g.fields, "fields", "", "comma-separated field names to include in output")
 }
 
