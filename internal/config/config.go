@@ -85,6 +85,7 @@ type SyncConfig struct {
 	History      bool     `yaml:"history"`       // sync changelog
 	FTSFields    []string `yaml:"fts_fields"`    // extra fields for FTS index
 	Sprints      bool     `yaml:"sprints"`       // sync sprint and board data
+	DevInfo      bool     `yaml:"dev_info"`      // sync development info (requires extra API permissions)
 }
 
 // DBConfig holds database settings.
@@ -173,39 +174,18 @@ func defaults() *Config {
 		DB: DBConfig{
 			Path: DefaultDBPath(),
 		},
-		Snippets: map[string]string{
-			"cycle_time": `SELECT key, summary,
-  CAST(julianday(
-    (SELECT MIN(c.changed_at) FROM changelog c WHERE c.issue_key = issues.key AND c.field = 'status' AND c.to_string IN ('Done','Closed'))
-  ) - julianday(
-    (SELECT MIN(c.changed_at) FROM changelog c WHERE c.issue_key = issues.key AND c.field = 'status' AND c.to_string = 'In Progress')
-  ) AS INTEGER) as cycle_days
-FROM issues
-WHERE status IN ('Done','Closed')`,
-			"time_in_status": `SELECT c1.issue_key, c1.to_string as status,
-  CAST(julianday(COALESCE(c2.changed_at, datetime('now'))) - julianday(c1.changed_at) AS REAL) as days
-FROM changelog c1
-LEFT JOIN changelog c2 ON c1.issue_key = c2.issue_key
-  AND c2.field = 'status' AND c2.changed_at > c1.changed_at
-  AND NOT EXISTS (
-    SELECT 1 FROM changelog cx WHERE cx.issue_key = c1.issue_key
-    AND cx.field = 'status' AND cx.changed_at > c1.changed_at AND cx.changed_at < c2.changed_at
-  )
-WHERE c1.field = 'status'`,
-			"reassignment_count": `SELECT issue_key, COUNT(*) as reassignments
-FROM changelog
-WHERE field = 'assignee'
-GROUP BY issue_key
-HAVING reassignments > 1
-ORDER BY reassignments DESC`,
-			"reopened_issues": `SELECT issue_key, COUNT(*) as reopen_count
-FROM changelog
-WHERE field = 'status' AND from_string IN ('Done','Closed','Resolved')
-  AND to_string NOT IN ('Done','Closed','Resolved')
-GROUP BY issue_key
-ORDER BY reopen_count DESC`,
-		},
+		Templates: copyMap(defaultTemplates),
+		Snippets:  copyMap(defaultSnippets),
 	}
+}
+
+// copyMap creates a shallow copy of a map[string]string.
+func copyMap(src map[string]string) map[string]string {
+	dst := make(map[string]string, len(src))
+	for k, v := range src {
+		dst[k] = v
+	}
+	return dst
 }
 
 // Validate checks that required fields are present.

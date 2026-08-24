@@ -28,6 +28,7 @@ const (
 	ModeDetailLoad       // loading detail data
 	ModeFieldPicker      // field name picker modal (comma key)
 	ModeFieldValue       // value input for chosen field
+	ModeHelp             // help overlay
 )
 
 // App is the root bubbletea model.
@@ -42,6 +43,7 @@ type App struct {
 	tables     []*TableModel
 
 	mode        Mode
+	prevMode    Mode // previous mode before ModeHelp
 	filterInput textinput.Model
 	detail      *DetailPane
 
@@ -393,6 +395,21 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (a *App) handleKey(msg tea.KeyMsg, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 	t := a.tables[a.activeView]
 
+	// ── Help mode ────────────────────────────────────────────────────────────
+	if a.mode == ModeHelp {
+		if key.Matches(msg, a.keys.Help) || key.Matches(msg, a.keys.Back) {
+			a.mode = a.prevMode
+		}
+		return a, tea.Batch(cmds...)
+	}
+
+	// ── Toggle help from any mode ────────────────────────────────────────────
+	if key.Matches(msg, a.keys.Help) {
+		a.prevMode = a.mode
+		a.mode = ModeHelp
+		return a, tea.Batch(cmds...)
+	}
+
 	// ── Filter mode ──────────────────────────────────────────────────────────
 	if a.mode == ModeFilter {
 		switch {
@@ -720,6 +737,12 @@ func (a *App) View() string {
 	sb.WriteString("\n")
 
 	// Main content.
+	if a.mode == ModeHelp {
+		sb.WriteString(a.renderHelp())
+		sb.WriteString(a.renderStatusBar())
+		return sb.String()
+	}
+
 	if a.err != "" {
 		errStyle := lipgloss.NewStyle().Foreground(colorBlocked)
 		sb.WriteString(errStyle.Render("Error: " + a.err))
@@ -773,6 +796,26 @@ func (a *App) renderTabBar() string {
 	return strings.Join(tabs, "  ")
 }
 
+// renderContextualHints returns mode-specific keybinding hints for the status bar.
+func (a *App) renderContextualHints() string {
+	switch a.mode {
+	case ModeTable:
+		return "/ filter  s sort  enter detail  ? help  q quit"
+	case ModeDetail:
+		return "esc back  o open  , edit  ? help"
+	case ModeFilter:
+		return "enter apply  esc cancel"
+	case ModeFieldPicker:
+		return "type filter  ↑↓ select  enter choose  esc back"
+	case ModeFieldValue:
+		return "type value  ↑↓ suggestion  enter save  esc back"
+	case ModeHelp:
+		return "? or esc to close"
+	default:
+		return "? help  q quit"
+	}
+}
+
 func (a *App) renderStatusBar() string {
 	var parts []string
 
@@ -796,16 +839,7 @@ func (a *App) renderStatusBar() string {
 		parts = append(parts, lipgloss.NewStyle().Foreground(colorTab).Render(a.syncStatus))
 	}
 
-	switch a.mode {
-	case ModeDetail:
-		parts = append(parts, "q:quit  esc:back  o:browser  ,:edit  ↑↓:scroll")
-	case ModeFieldPicker:
-		parts = append(parts, "type:filter  ↑↓:select  enter:choose  esc:back")
-	case ModeFieldValue:
-		parts = append(parts, "type:value  ↑↓:suggestion  enter:save  esc:back")
-	default:
-		parts = append(parts, "q:quit  /:filter  s:sort  enter:detail  r:refresh")
-	}
+	parts = append(parts, a.renderContextualHints())
 
 	return lipgloss.NewStyle().Foreground(colorStatusBar).Render(strings.Join(parts, "  |  "))
 }
