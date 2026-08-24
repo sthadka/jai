@@ -440,6 +440,30 @@ Both paths can be overridden with `--config` and `--db` flags, or by setting `db
 
 ---
 
+## Multiple Jira Instances
+
+Use separate config files for each instance:
+
+```sh
+jai --config ~/.config/jai/work.yaml query "SELECT ..."
+jai --config ~/.config/jai/client.yaml query "SELECT ..."
+```
+
+Create a config per instance with `jai init`:
+
+```sh
+JAI_CONFIG=~/.config/jai/client.yaml jai init
+```
+
+Shell aliases for convenience:
+
+```sh
+alias jai-work='jai --config ~/.config/jai/work.yaml'
+alias jai-client='jai --config ~/.config/jai/client.yaml'
+```
+
+---
+
 ## Commands
 
 | Command | Description |
