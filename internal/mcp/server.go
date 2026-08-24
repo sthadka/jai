@@ -45,12 +45,12 @@ func (s *Server) buildServer() *server.MCPServer {
 		server.WithPromptCapabilities(true),
 	)
 
-	// Register tools (stubs for now - will be implemented in separate files)
-	s.registerReadTools(srv)
-	s.registerSchemaTools(srv)
-	s.registerWriteTools(srv)
-	s.registerSyncTools(srv)
-	s.registerConfigTools(srv)
+	// Register tools (implemented in separate tool files)
+	registerReadTools(s, srv)
+	registerSchemaTools(s, srv)
+	registerWriteTools(s, srv)
+	registerSyncTools(s, srv)
+	registerConfigTools(s, srv)
 
 	// Register resources and prompts (stubs for now)
 	s.registerResources(srv)
@@ -77,31 +77,21 @@ func (s *Server) ServeSSE(ctx context.Context, addr string) error {
 	return sseSrv.Start(addr)
 }
 
-// Stub methods for tool registration - will be implemented in separate files
-func (s *Server) registerReadTools(srv *server.MCPServer) {
-	// TODO: implement in tools_read.go
-}
-
-func (s *Server) registerSchemaTools(srv *server.MCPServer) {
-	// TODO: implement in tools_schema.go
-}
-
-func (s *Server) registerWriteTools(srv *server.MCPServer) {
+// Stub functions for tool registration - implemented in separate files
+func registerWriteTools(s *Server, srv *server.MCPServer) {
 	// TODO: implement in tools_write.go
 }
 
-func (s *Server) registerSyncTools(srv *server.MCPServer) {
+func registerSyncTools(s *Server, srv *server.MCPServer) {
 	// TODO: implement in tools_sync.go
 }
 
-func (s *Server) registerConfigTools(srv *server.MCPServer) {
+func registerConfigTools(s *Server, srv *server.MCPServer) {
 	// TODO: implement in tools_config.go
 }
 
-func (s *Server) registerResources(srv *server.MCPServer) {
-	// TODO: implement in resources.go
-}
-
+// registerPrompts stub - will be implemented in prompts.go
 func (s *Server) registerPrompts(srv *server.MCPServer) {
 	// TODO: implement in prompts.go
 }
+
