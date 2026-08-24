@@ -25,6 +25,7 @@ type globals struct {
 	noSync   bool
 	waitSync bool
 	fields   string
+	format   string
 
 	cfg       *config.Config
 	db        *db.DB
@@ -275,5 +276,6 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&g.noSync, "no-sync", false, "skip auto-sync")
 	rootCmd.PersistentFlags().BoolVar(&g.waitSync, "wait-sync", false, "wait for sync to complete before returning results")
 	rootCmd.PersistentFlags().StringVar(&g.fields, "fields", "", "comma-separated field names to include in output")
+	rootCmd.PersistentFlags().StringVar(&g.format, "format", "table", "output format: table, json, csv, tsv, markdown")
 }
 

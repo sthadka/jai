@@ -105,7 +105,44 @@ var fieldsCmd = &cobra.Command{
 			}
 			rows[i] = row
 		}
-		fmt.Print(output.Table(cols, rows))
+
+		// Use --format flag (--json already handled above).
+		switch g.format {
+		case "json":
+			// Already handled above with the full JSON envelope.
+			fields := make([]map[string]interface{}, len(mappings))
+			for i, m := range mappings {
+				f := map[string]interface{}{
+					"name":       m.Name,
+					"jira_id":    m.JiraID,
+					"jira_name":  m.JiraName,
+					"type":       m.Type,
+					"is_custom":  m.IsCustom,
+					"searchable": m.Searchable,
+				}
+				if s, ok := stats[m.Name]; ok {
+					f["populated"] = s.NonNull
+					f["total"] = s.Total
+					if s.Sample != "" {
+						f["sample"] = s.Sample
+					}
+				}
+				fields[i] = f
+			}
+			fmt.Println(string(output.OK(map[string]interface{}{
+				"fields": fields,
+				"count":  len(fields),
+			})))
+		case "csv":
+			fmt.Print(output.CSV(cols, rows))
+		case "tsv":
+			fmt.Print(output.TSV(cols, rows))
+		case "markdown":
+			fmt.Print(output.Markdown(cols, rows))
+		default: // "table"
+			fmt.Print(output.Table(cols, rows))
+		}
+
 		return nil
 	},
 }

@@ -52,13 +52,28 @@ func runSQLQuery(sql string) error {
 		cols, rows = output.FilterColumns(cols, rows, output.ParseFields(g.fields))
 	}
 
+	// --json flag takes precedence over --format for backward compatibility.
 	if g.jsonOut {
 		syncAge := GetSyncAge()
 		fmt.Println(string(output.OKQueryWithMeta(cols, rows, len(rows), syncAge)))
 		return nil
 	}
 
-	fmt.Print(output.Table(cols, rows))
+	// Use --format flag.
+	switch g.format {
+	case "json":
+		syncAge := GetSyncAge()
+		fmt.Println(string(output.OKQueryWithMeta(cols, rows, len(rows), syncAge)))
+	case "csv":
+		fmt.Print(output.CSV(cols, rows))
+	case "tsv":
+		fmt.Print(output.TSV(cols, rows))
+	case "markdown":
+		fmt.Print(output.Markdown(cols, rows))
+	default: // "table"
+		fmt.Print(output.Table(cols, rows))
+	}
+
 	return nil
 }
 
@@ -92,12 +107,28 @@ func runJQLQuery(jql string) error {
 		}
 	}
 
+	// --json flag takes precedence over --format for backward compatibility.
 	if g.jsonOut {
 		syncAge := GetSyncAge()
 		fmt.Println(string(output.OKQueryWithMeta(cols, rows, len(rows), syncAge)))
 		return nil
 	}
-	fmt.Print(output.Table(cols, rows))
+
+	// Use --format flag.
+	switch g.format {
+	case "json":
+		syncAge := GetSyncAge()
+		fmt.Println(string(output.OKQueryWithMeta(cols, rows, len(rows), syncAge)))
+	case "csv":
+		fmt.Print(output.CSV(cols, rows))
+	case "tsv":
+		fmt.Print(output.TSV(cols, rows))
+	case "markdown":
+		fmt.Print(output.Markdown(cols, rows))
+	default: // "table"
+		fmt.Print(output.Table(cols, rows))
+	}
+
 	return nil
 }
 

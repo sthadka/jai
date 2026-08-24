@@ -46,12 +46,26 @@ var searchCmd = &cobra.Command{
 			cols, rows = output.FilterColumns(cols, rows, output.ParseFields(g.fields))
 		}
 
+		// --json flag takes precedence over --format for backward compatibility.
 		if g.jsonOut {
 			fmt.Println(string(output.OKQuery(cols, rows, len(rows))))
 			return nil
 		}
 
-		fmt.Print(output.Table(cols, rows))
+		// Use --format flag.
+		switch g.format {
+		case "json":
+			fmt.Println(string(output.OKQuery(cols, rows, len(rows))))
+		case "csv":
+			fmt.Print(output.CSV(cols, rows))
+		case "tsv":
+			fmt.Print(output.TSV(cols, rows))
+		case "markdown":
+			fmt.Print(output.Markdown(cols, rows))
+		default: // "table"
+			fmt.Print(output.Table(cols, rows))
+		}
+
 		return nil
 	},
 }
