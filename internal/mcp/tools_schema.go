@@ -23,7 +23,7 @@ func registerSchemaTools(s *Server, srv *server.MCPServer) {
 	// jai_schema - Discover database schema, column values, templates, or snippets
 	srv.AddTool(mcp.Tool{
 		Name:        "jai_schema",
-		Description: "Discover database schema, column values, templates, or snippets. Modes: 'db' (large output ~60KB, use jai_fields for targeted lookup), 'values' (distinct values, default limit 20), 'templates' (issue creation templates), 'snippets' (reusable SQL fragments), 'commands' (CLI command catalog).",
+		Description: "Discover database schema, column values, templates, or snippets. Modes: 'db' (returns core Jira columns by default. Use tier=custom for custom fields, tier=all for everything. Use filter parameter to search columns by name), 'values' (distinct values, default limit 20), 'templates' (issue creation templates), 'snippets' (reusable SQL fragments), 'commands' (CLI command catalog).",
 		InputSchema: mcp.ToolInputSchema{
 			Type: "object",
 			Properties: map[string]interface{}{
@@ -35,6 +35,15 @@ func registerSchemaTools(s *Server, srv *server.MCPServer) {
 				"column": map[string]interface{}{
 					"type":        "string",
 					"description": "Column name (required when mode='values')",
+				},
+				"tier": map[string]interface{}{
+					"type":        "string",
+					"enum":        []string{"core", "custom", "all"},
+					"description": "Schema tier (mode='db' only). 'core' (default) = ~20 standard Jira columns, 'custom' = custom fields only with population stats, 'all' = everything",
+				},
+				"filter": map[string]interface{}{
+					"type":        "string",
+					"description": "Filter columns by partial name match (mode='db' only)",
 				},
 			},
 			Required: []string{"mode"},
@@ -83,7 +92,9 @@ func handleSchema(s *Server, ctx context.Context, request mcp.CallToolRequest) (
 
 	switch mode {
 	case "db":
-		return handleSchemaDB(s, ctx)
+		tier := request.GetString("tier", "core")
+		filter := request.GetString("filter", "")
+		return handleSchemaDB(s, ctx, tier, filter)
 	case "values":
 		column := request.GetString("column", "")
 		if column == "" {
@@ -102,7 +113,26 @@ func handleSchema(s *Server, ctx context.Context, request mcp.CallToolRequest) (
 }
 
 // handleSchemaDB returns the database schema (issues table columns).
-func handleSchemaDB(s *Server, ctx context.Context) (*mcp.CallToolResult, error) {
+func handleSchemaDB(s *Server, ctx context.Context, tier, filter string) (*mcp.CallToolResult, error) {
+	// Core standard Jira columns (tier=core default)
+	coreColumns := map[string]bool{
+		"key": true, "summary": true, "status": true, "status_category": true,
+		"issue_type": true, "priority": true, "assignee": true, "assignee_email": true,
+		"reporter": true, "reporter_email": true, "labels": true, "components": true,
+		"fix_versions": true, "parent_key": true, "project": true, "created": true,
+		"updated": true, "resolved": true, "resolution": true, "story_points": true,
+		"sprint_name": true, "sprint_id": true, "description": true,
+	}
+
+	type col struct {
+		Name       string `json:"name"`
+		Type       string `json:"type"`
+		Custom     bool   `json:"custom,omitempty"`
+		JiraName   string `json:"jira_name,omitempty"`
+		Populated  int    `json:"populated,omitempty"`
+		Total      int    `json:"total,omitempty"`
+	}
+
 	// Query table_info for issues table
 	rows, err := s.db.Query("PRAGMA table_info(issues)")
 	if err != nil {
@@ -110,14 +140,8 @@ func handleSchemaDB(s *Server, ctx context.Context) (*mcp.CallToolResult, error)
 	}
 	defer rows.Close()
 
-	type col struct {
-		Name     string `json:"name"`
-		Type     string `json:"type"`
-		Custom   bool   `json:"custom,omitempty"`
-		JiraName string `json:"jira_name,omitempty"`
-	}
-
-	var columns []col
+	// Gather all columns
+	allColumns := []col{}
 	for rows.Next() {
 		var cid int
 		var name, colType string
@@ -127,11 +151,11 @@ func handleSchemaDB(s *Server, ctx context.Context) (*mcp.CallToolResult, error)
 		if err := rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
 			continue
 		}
-		// Skip internal columns
-		if name == "raw_json" || name == "comments_text" || name == "synced_at" {
+		// Always skip internal columns
+		if excludedColumns[name] {
 			continue
 		}
-		columns = append(columns, col{Name: name, Type: strings.ToLower(colType)})
+		allColumns = append(allColumns, col{Name: name, Type: strings.ToLower(colType)})
 	}
 	rows.Close()
 
@@ -151,17 +175,72 @@ func handleSchemaDB(s *Server, ctx context.Context) (*mcp.CallToolResult, error)
 			}
 		}
 		metaRows.Close()
-		for i, c := range columns {
+		for i, c := range allColumns {
 			if fm, ok := metas[c.Name]; ok {
-				columns[i].Custom = fm.isCustom
-				columns[i].JiraName = fm.jiraName
+				allColumns[i].Custom = fm.isCustom
+				allColumns[i].JiraName = fm.jiraName
 			}
 		}
 	}
 
+	// Apply tier filtering
+	var columns []col
+	switch tier {
+	case "core":
+		// Return only core standard Jira columns
+		for _, c := range allColumns {
+			if coreColumns[c.Name] {
+				columns = append(columns, c)
+			}
+		}
+	case "custom":
+		// Return only custom fields with population stats
+		for _, c := range allColumns {
+			if c.Custom {
+				columns = append(columns, c)
+			}
+		}
+		// Add population stats for custom fields
+		if len(columns) > 0 {
+			var totalCount int
+			countRow := s.db.QueryRow("SELECT COUNT(*) FROM issues")
+			countRow.Scan(&totalCount)
+
+			for i, c := range columns {
+				var nonNullCount int
+				sql := fmt.Sprintf(`SELECT COUNT(*) FROM issues WHERE "%s" IS NOT NULL AND "%s" != ''`, c.Name, c.Name)
+				row := s.db.QueryRow(sql)
+				if err := row.Scan(&nonNullCount); err == nil {
+					columns[i].Populated = nonNullCount
+					columns[i].Total = totalCount
+				}
+			}
+		}
+	case "all":
+		// Return everything
+		columns = allColumns
+	default:
+		return mcp.NewToolResultError(fmt.Sprintf("unknown tier: %s (valid: core, custom, all)", tier)), nil
+	}
+
+	// Apply filter if specified
+	if filter != "" {
+		filterLower := strings.ToLower(filter)
+		var filtered []col
+		for _, c := range columns {
+			if strings.Contains(strings.ToLower(c.Name), filterLower) ||
+				strings.Contains(strings.ToLower(c.JiraName), filterLower) {
+				filtered = append(filtered, c)
+			}
+		}
+		columns = filtered
+	}
+
 	return mcp.NewToolResultText(string(output.OK(stripNulls(map[string]interface{}{
 		"table":   "issues",
+		"tier":    tier,
 		"columns": columns,
+		"count":   len(columns),
 		"hint":    "Use 'jai_schema' with mode='values' to see distinct values for any column",
 	})))), nil
 }
