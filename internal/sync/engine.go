@@ -394,7 +394,14 @@ type ChangelogProgress struct {
 // SyncChangelogs fetches changelogs for issues that need them.
 // Uses the bulk changelog API (up to 100 issues per request) with automatic
 // fallback to per-issue fetching if the bulk endpoint is unavailable.
-func (e *Engine) SyncChangelogs(ctx context.Context, sourceFilter string) (<-chan ChangelogProgress, error) {
+// If force is true, resets all changelog_synced_at timestamps first to trigger a full re-sync.
+func (e *Engine) SyncChangelogs(ctx context.Context, sourceFilter string, force bool) (<-chan ChangelogProgress, error) {
+	if force {
+		if _, err := e.db.ResetChangelogSyncTimestamps(); err != nil {
+			return nil, fmt.Errorf("resetting changelog timestamps: %w", err)
+		}
+	}
+
 	var projectFilter []string
 	if sourceFilter != "" {
 		sources, err := effectiveSources(e.cfg, sourceFilter)
@@ -557,6 +564,7 @@ func (e *Engine) syncChangelogsForKeys(ctx context.Context, keys []string) {
 // syncChangelogsPerIssue fetches changelogs one issue at a time, used as a
 // fallback when bulk fetch is unavailable or an issue has no ID mapping yet.
 func (e *Engine) syncChangelogsPerIssue(ctx context.Context, keys []string) {
+	var synced []string
 	for _, key := range keys {
 		resp, err := e.client.GetIssueChangelog(ctx, key)
 		if err != nil {
@@ -566,8 +574,11 @@ func (e *Engine) syncChangelogsPerIssue(ctx context.Context, keys []string) {
 		for _, entry := range entries {
 			_ = e.db.InsertChangelog(entry)
 		}
+		synced = append(synced, key)
 	}
-	_ = e.db.MarkChangelogSynced(keys)
+	if len(synced) > 0 {
+		_ = e.db.MarkChangelogSynced(synced)
+	}
 }
 
 // cursorToJQL converts an RFC3339 timestamp to the format Jira JQL expects.

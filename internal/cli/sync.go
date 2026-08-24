@@ -47,7 +47,7 @@ var syncCmd = &cobra.Command{
 		fmt.Printf("Done. %d issues synced.\n", total)
 
 		if syncChangelogs {
-			clCh, err := g.sync.SyncChangelogs(ctx, syncSourceFlag)
+			clCh, err := g.sync.SyncChangelogs(ctx, syncSourceFlag, true)
 			if err != nil {
 				return fmt.Errorf("changelog sync: %w", err)
 			}

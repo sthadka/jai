@@ -153,6 +153,16 @@ func (db *DB) MarkChangelogSynced(keys []string) error {
 	return nil
 }
 
+// ResetChangelogSyncTimestamps clears changelog_synced_at on all issues,
+// allowing a full re-sync of changelog data.
+func (db *DB) ResetChangelogSyncTimestamps() (int64, error) {
+	result, err := db.Exec(`UPDATE issues SET changelog_synced_at = NULL WHERE changelog_synced_at IS NOT NULL`)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 // GetIssueIDToKeyMapForKeys returns id→key mappings for the given keys.
 // Use for small batches (≤100 keys). For large sets, use GetIssueIDToKeyMap().
 func (db *DB) GetIssueIDToKeyMapForKeys(keys []string) (map[string]string, error) {
