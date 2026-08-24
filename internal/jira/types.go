@@ -522,3 +522,53 @@ type Sprint struct {
 type SprintIssuesResponse struct {
 	Issues []*Issue `json:"issues"`
 }
+
+// DevInfoResponse is the response from GET /rest/dev-status/latest/issue/detail.
+type DevInfoResponse struct {
+	Detail []DevInfoDetail `json:"detail"`
+}
+
+// DevInfoDetail contains development information for a single application type.
+type DevInfoDetail struct {
+	Repositories []DevRepository `json:"repositories"`
+}
+
+// DevRepository contains development links from a single repository.
+type DevRepository struct {
+	Name         string              `json:"name"`
+	PullRequests []DevPullRequest    `json:"pullRequests"`
+	Branches     []DevBranch         `json:"branches"`
+	Commits      []DevCommit         `json:"commits"`
+}
+
+// DevPullRequest represents a pull request linked to an issue.
+type DevPullRequest struct {
+	ID            string `json:"id"`
+	Title         string `json:"title"`
+	URL           string `json:"url"`
+	Status        string `json:"status"`
+	LastUpdate    string `json:"lastUpdate"`
+	Author        *struct {
+		Name string `json:"name"`
+	} `json:"author"`
+}
+
+// DevBranch represents a branch linked to an issue.
+type DevBranch struct {
+	Name          string `json:"name"`
+	URL           string `json:"url"`
+	LastCommit    *struct {
+		ID string `json:"id"`
+	} `json:"lastCommit"`
+}
+
+// DevCommit represents a commit linked to an issue.
+type DevCommit struct {
+	ID            string `json:"id"`
+	Message       string `json:"message"`
+	URL           string `json:"url"`
+	Timestamp     string `json:"timestamp"`
+	Author        *struct {
+		Name string `json:"name"`
+	} `json:"author"`
+}

@@ -371,6 +371,11 @@ func (e *Engine) syncSource(ctx context.Context, src config.SyncSource, full, re
 		e.SyncSprints(ctx, src)
 	}
 
+	// Sync development info if configured.
+	if e.cfg.Sync.DevInfo && full {
+		e.SyncDevInfo(ctx, src)
+	}
+
 	elapsed := time.Since(start).Seconds()
 	_ = e.db.UpdateSyncMeta(src.Name, elapsed, total, newCount+updatedCount, "", lastUpdated)
 

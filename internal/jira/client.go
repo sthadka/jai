@@ -372,3 +372,14 @@ func (c *Client) GetSprintIssues(ctx context.Context, sprintID int) ([]string, e
 	return keys, nil
 }
 
+// GetDevInfo fetches development information for an issue from the dev-status API.
+// Requires the issue's numeric ID (not key). Returns pull requests, branches, and commits.
+func (c *Client) GetDevInfo(ctx context.Context, issueID string) (*DevInfoResponse, error) {
+	path := fmt.Sprintf("/rest/dev-status/latest/issue/detail?issueId=%s&applicationType=GitHub&dataType=pullrequest", issueID)
+	var resp DevInfoResponse
+	if err := c.get(ctx, path, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
