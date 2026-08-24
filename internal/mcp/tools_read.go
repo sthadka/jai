@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -18,16 +19,20 @@ func registerReadTools(s *Server, srv *server.MCPServer) {
 
 	truePtr := true
 
-	// jai_query - Execute SQL against local Jira SQLite database
+	// jai_query - Execute SQL against local Jira SQLite database or JQL against live Jira API
 	srv.AddTool(mcp.Tool{
 		Name:        "jai_query",
-		Description: "Execute SQL against local Jira database. Default limit 20. Use SELECT with specific columns for efficiency.",
+		Description: "Execute SQL against local Jira database, or JQL against live Jira API. Use sql for local queries (fast, free), jql for live queries (slower, for non-synced projects). Default limit 20.",
 		InputSchema: mcp.ToolInputSchema{
 			Type: "object",
 			Properties: map[string]interface{}{
 				"sql": map[string]interface{}{
 					"type":        "string",
-					"description": "SQL SELECT or WITH statement. Only read queries allowed.",
+					"description": "SQL SELECT or WITH statement. Only read queries allowed. Mutually exclusive with jql.",
+				},
+				"jql": map[string]interface{}{
+					"type":        "string",
+					"description": "JQL query string to execute against live Jira API. Mutually exclusive with sql.",
 				},
 				"fields": map[string]interface{}{
 					"type":        "string",
@@ -39,10 +44,9 @@ func registerReadTools(s *Server, srv *server.MCPServer) {
 					"default":     20,
 				},
 			},
-			Required: []string{"sql"},
 		},
 		Annotations: mcp.ToolAnnotation{
-			Title:        "SQL Query",
+			Title:        "SQL/JQL Query",
 			ReadOnlyHint: &truePtr,
 		},
 	}, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -138,13 +142,28 @@ func registerReadTools(s *Server, srv *server.MCPServer) {
 	})
 }
 
-// handleQuery executes a SQL query against the local database.
+// handleQuery executes a SQL query against the local database or a JQL query against live Jira API.
 func handleQuery(s *Server, ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	sql := request.GetString("sql", "")
-	if sql == "" {
-		return mcp.NewToolResultError("sql parameter is required"), nil
+	jql := request.GetString("jql", "")
+
+	// Ensure one and only one query type is provided
+	if sql == "" && jql == "" {
+		return mcp.NewToolResultError("either sql or jql parameter is required"), nil
+	}
+	if sql != "" && jql != "" {
+		return mcp.NewToolResultError("sql and jql parameters are mutually exclusive"), nil
 	}
 
+	// Route to appropriate handler
+	if jql != "" {
+		return handleJQLQuery(s, ctx, request, jql)
+	}
+	return handleSQLQuery(s, ctx, request, sql)
+}
+
+// handleSQLQuery executes a SQL query against the local database.
+func handleSQLQuery(s *Server, ctx context.Context, request mcp.CallToolRequest, sql string) (*mcp.CallToolResult, error) {
 	// Enforce read-only queries
 	sqlUpper := strings.ToUpper(strings.TrimSpace(sql))
 	if !strings.HasPrefix(sqlUpper, "SELECT") && !strings.HasPrefix(sqlUpper, "WITH") {
@@ -172,6 +191,50 @@ func handleQuery(s *Server, ctx context.Context, request mcp.CallToolRequest) (*
 	if fieldsStr != "" {
 		cols, rows = output.FilterColumns(cols, rows, output.ParseFields(fieldsStr))
 	}
+
+	return mcp.NewToolResultText(string(output.OKQuery(cols, rows, len(rows)))), nil
+}
+
+// handleJQLQuery executes a JQL query against the live Jira API.
+func handleJQLQuery(s *Server, ctx context.Context, request mcp.CallToolRequest, jql string) (*mcp.CallToolResult, error) {
+	// Default columns for JQL queries (matches CLI implementation)
+	defaultCols := []string{"key", "summary", "status", "priority", "assignee", "updated"}
+	cols := defaultCols
+
+	// Override with fields parameter if provided
+	fieldsStr := request.GetString("fields", "")
+	if fieldsStr != "" {
+		cols = output.ParseFields(fieldsStr)
+	}
+
+	// Determine which API fields to request based on requested columns
+	apiFields := jqlColumnsToAPIFields(cols)
+
+	// Apply limit
+	limit := request.GetInt("limit", 20)
+	count := 0
+
+	// Execute JQL search via Jira API
+	var rows [][]interface{}
+	for page, err := range s.jira.SearchAll(ctx, jql, apiFields) {
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("JQL query failed: %s", err.Error())), nil
+		}
+
+		for _, issue := range page {
+			if count >= limit {
+				goto done
+			}
+			row, err := jqlIssueToRow(issue, cols)
+			if err != nil {
+				// Skip issues that fail to parse
+				continue
+			}
+			rows = append(rows, row)
+			count++
+		}
+	}
+done:
 
 	return mcp.NewToolResultText(string(output.OKQuery(cols, rows, len(rows)))), nil
 }
@@ -329,4 +392,134 @@ func handleView(s *Server, ctx context.Context, request mcp.CallToolRequest) (*m
 	}
 
 	return mcp.NewToolResultText(string(output.OKQuery(cols, rows, len(rows)))), nil
+}
+
+// jqlColumnsToAPIFields maps requested output columns to Jira API field IDs.
+// The 'key' field is always included by the API, so we exclude it from the fields parameter.
+func jqlColumnsToAPIFields(cols []string) []string {
+	fieldSet := make(map[string]bool)
+
+	for _, col := range cols {
+		switch col {
+		case "key":
+			// Always returned by API, no need to request
+			continue
+		case "summary", "status", "priority", "assignee", "reporter", "created", "updated", "labels", "parent":
+			fieldSet[col] = true
+		case "type", "issuetype":
+			fieldSet["issuetype"] = true
+		case "project":
+			fieldSet["project"] = true
+		case "resolved", "resolution_date":
+			fieldSet["resolutiondate"] = true
+		}
+	}
+
+	// Convert set to slice
+	fields := make([]string, 0, len(fieldSet))
+	for field := range fieldSet {
+		fields = append(fields, field)
+	}
+
+	// If no specific fields requested, use defaults
+	if len(fields) == 0 {
+		return []string{"summary", "status", "priority", "assignee", "updated"}
+	}
+
+	return fields
+}
+
+// jqlIssueToRow extracts the requested columns from a live Jira issue.
+// This mirrors the CLI's jqlIssueToRow implementation.
+func jqlIssueToRow(issue interface{}, cols []string) ([]interface{}, error) {
+	// Type assertion to get the issue struct
+	type jiraIssue struct {
+		Key    string          `json:"key"`
+		Fields json.RawMessage `json:"fields"`
+	}
+
+	// Marshal and unmarshal to convert interface{} to our expected type
+	data, err := json.Marshal(issue)
+	if err != nil {
+		return nil, err
+	}
+
+	var iss jiraIssue
+	if err := json.Unmarshal(data, &iss); err != nil {
+		return nil, err
+	}
+
+	// Parse the fields JSON
+	type issueFields struct {
+		Summary        string `json:"summary"`
+		Status         *struct{ Name string } `json:"status"`
+		Priority       *struct{ Name string } `json:"priority"`
+		Assignee       *struct{ DisplayName string } `json:"assignee"`
+		Reporter       *struct{ DisplayName string } `json:"reporter"`
+		IssueType      *struct{ Name string } `json:"issuetype"`
+		Project        *struct{ Key string } `json:"project"`
+		Created        string `json:"created"`
+		Updated        string `json:"updated"`
+		ResolutionDate string `json:"resolutiondate"`
+		Labels         []string `json:"labels"`
+		Parent         *struct{ Key string } `json:"parent"`
+	}
+
+	var fields issueFields
+	if err := json.Unmarshal(iss.Fields, &fields); err != nil {
+		return nil, err
+	}
+
+	// Extract each requested column
+	get := func(col string) interface{} {
+		switch col {
+		case "key":
+			return iss.Key
+		case "summary":
+			return fields.Summary
+		case "status":
+			if fields.Status != nil {
+				return fields.Status.Name
+			}
+		case "priority":
+			if fields.Priority != nil {
+				return fields.Priority.Name
+			}
+		case "assignee":
+			if fields.Assignee != nil {
+				return fields.Assignee.DisplayName
+			}
+		case "reporter":
+			if fields.Reporter != nil {
+				return fields.Reporter.DisplayName
+			}
+		case "type", "issuetype":
+			if fields.IssueType != nil {
+				return fields.IssueType.Name
+			}
+		case "project":
+			if fields.Project != nil {
+				return fields.Project.Key
+			}
+		case "created":
+			return fields.Created
+		case "updated":
+			return fields.Updated
+		case "resolved", "resolution_date":
+			return fields.ResolutionDate
+		case "labels":
+			return strings.Join(fields.Labels, ", ")
+		case "parent":
+			if fields.Parent != nil {
+				return fields.Parent.Key
+			}
+		}
+		return nil
+	}
+
+	row := make([]interface{}, len(cols))
+	for i, col := range cols {
+		row[i] = get(col)
+	}
+	return row, nil
 }
