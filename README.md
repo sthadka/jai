@@ -231,6 +231,35 @@ jai schema get
 
 ---
 
+## MCP Server
+
+`jai serve` starts an MCP (Model Context Protocol) server that exposes jai functionality to AI agents like Claude Code.
+
+```sh
+# Start with stdio transport (default)
+jai serve
+
+# HTTP transport on custom port
+jai serve --transport http --port 9000
+
+# SSE transport
+jai serve --transport sse
+
+# Read-only mode (block all writes)
+jai serve --read-only
+
+# Enable specific toolsets only
+jai serve --toolsets read,schema
+```
+
+The server provides 17 tools across 6 toolsets (read, schema, write, sync, browser, config), 8 MCP resources (jira://issue/{key}, jira://schema/db, etc.), and 6 MCP prompts (standup-report, sprint-review, bug-triage, etc.).
+
+Background sync runs automatically on a configurable interval (default: 15m).
+
+**Claude Code integration:** The `.claude/skills/jai.md` file provides a `/jai` slash command for use in Claude Code sessions.
+
+---
+
 ## TUI
 
 `jai tui` opens a full-screen terminal UI powered by local SQLite — instant, smooth, works offline.
@@ -400,6 +429,8 @@ jira:
 sync:
   interval: 15m              # auto-sync interval
   rate_limit: 10             # requests/second (Jira Cloud limit)
+  sprints: true              # sync sprint/board data (default: true)
+  dev_info: false            # sync PR/branch dev info (default: false, opt-in)
 
 me: me@company.com           # used in {{me}} template variable
 
@@ -476,9 +507,10 @@ alias jai-client='jai --config ~/.config/jai/client.yaml'
 | `jai get <key>` | Fetch a single issue |
 | `jai search <text>` | FTS5 full-text search |
 | `jai view <name>` | Run a named view |
-| `jai fields` | List available fields and mappings |
+| `jai fields` | List available fields and mappings (`--search`, `--suggest`) |
 | `jai schema <command>` | Command schema for agents |
 | `jai status` | Sync status and pending changes |
+| `jai changelog <key>` | Show changelog history for an issue (`--field` to filter) |
 | `jai open <key>` | Open issue in browser (`--url-only` to print URL) |
 | `jai clone <key>` | Clone an issue with optional overrides |
 | `jai create <project>` | Create a new issue (`--template`, `--body`) |
@@ -487,16 +519,20 @@ alias jai-client='jai --config ~/.config/jai/client.yaml'
 | `jai set <key> <field> --remove <val>` | Remove a value from an array field |
 | `jai set K1,K2,K3 <field> <value>` | Bulk set on comma-separated keys |
 | `jai set --query <sql> <field> <value>` | Bulk set via SQL query |
-| `jai transition <key> <status>` | Transition an issue to a new status |
+| `jai update <key>` | Composite write: set fields, transition, comment in one command |
+| `jai transition <key> <status>` | Transition an issue to a new status (supports bulk) |
 | `jai link <from> <to>` | Link two issues or add a remote URL link |
 | `jai watch <key>` | Add yourself (or a user) as watcher |
 | `jai unwatch <key>` | Remove yourself as watcher |
 | `jai comment <key> <text>` | Add a comment (pushes immediately; `--queue` to defer) |
+| `jai snippet` | Manage SQL query snippets (`list`, `show`, `add`) |
+| `jai deps <key>` | Show issue dependencies in tree format (`--depth`, `--project`) |
 | `jai push` | Push queued changes to Jira (only needed after `--queue`) |
+| `jai serve` | Start MCP server for AI agent integration |
 | `jai tui` | Launch full-screen TUI |
 | `jai completion <shell>` | Generate shell completions (bash/zsh/fish) |
 
-Global flags: `--json`, `--fields`, `--no-sync`, `--config`, `--db`
+Global flags: `--json`, `--fields`, `--format`, `--no-sync`, `--wait-sync`, `--config`, `--db`
 
 ---
 

@@ -100,11 +100,37 @@ jai view my-work
 
 Views are defined in your config YAML. See the README for examples.
 
+### Changelog history
+
+```sh
+jai changelog ROX-123                  # formatted timeline of all field changes
+jai changelog ROX-123 --field status   # filter to specific field
+jai changelog ROX-123 --json           # structured output
+```
+
+Requires `jai sync --changelogs` to fetch changelog data first.
+
+### Data export formats
+
+All read commands support `--format` for different output formats:
+
+```sh
+jai query "SELECT key, summary, status FROM issues LIMIT 10" --format csv
+jai query "SELECT key, summary, status FROM issues LIMIT 10" --format tsv
+jai query "SELECT key, summary, status FROM issues LIMIT 10" --format markdown
+jai view my-work --format json
+jai search "authentication" --format csv
+```
+
+Available formats: `table` (default), `json`, `csv`, `tsv`, `markdown`. The `--json` flag takes precedence over `--format`.
+
 ### Field discovery
 
 ```sh
-jai fields              # list all fields with Jira IDs and types
-jai schema get          # command schema for agents
+jai fields                      # list all fields with Jira IDs and types
+jai fields --search keyword     # LIKE match on field names
+jai fields --suggest ROX-123    # show which custom fields have values for an issue
+jai schema get                  # command schema for agents
 ```
 
 ---
@@ -178,6 +204,33 @@ jai transition ROX-123 "NotAStatus"
 #   - In Progress (id: 51)
 #   - Done (id: 91)
 ```
+
+**Bulk transitions** — transition multiple issues at once:
+
+```sh
+# Comma-separated keys
+jai transition ROX-1,ROX-2,ROX-3 "Done"
+
+# SQL query — any query returning a 'key' column
+jai transition --query "SELECT key FROM issues WHERE type = 'Bug' AND status = 'In Progress'" "Done"
+```
+
+### Composite updates
+
+Update multiple aspects of an issue in one command:
+
+```sh
+# Set fields, transition, and comment together
+jai update ROX-123 --set priority=High --set assignee=alice --transition "In Progress" --comment "Starting work"
+
+# Multiple --set flags allowed
+jai update ROX-456 --set priority=Major --set labels=urgent,security --comment "Escalating"
+
+# Use --queue to defer all operations
+jai update ROX-789 --set priority=High --transition "Done" --queue
+```
+
+Operations execute sequentially. If one fails, subsequent operations are skipped.
 
 ### Issue links
 
@@ -264,6 +317,40 @@ jai completion zsh > "${fpath[1]}/_jai"
 jai completion fish > ~/.config/fish/completions/jai.fish
 ```
 
+### Snippets
+
+Manage SQL query snippets for common patterns:
+
+```sh
+# List all snippets (built-in + user)
+jai snippet list
+
+# Show snippet SQL
+jai snippet show bug
+
+# Add a user snippet to config
+jai snippet add my_open "assignee_email = '{{me}}' AND status != 'Done'"
+```
+
+Built-in snippets: `bug`, `story`, `task`, `spike`, `epic`.
+
+### Dependencies
+
+Visualize issue dependencies and cross-project relationships:
+
+```sh
+# Tree view of dependencies
+jai deps ROX-123
+
+# Limit traversal depth (default: 1, max: 5)
+jai deps ROX-123 --depth 3
+
+# Cross-project dependency summary
+jai deps --project ROX
+```
+
+Detects unsynced projects referenced in links.
+
 ---
 
 ## Sync
@@ -274,7 +361,15 @@ jai sync --full         # full resync with deletion detection
 jai sync --changelogs   # sync status transition history
 ```
 
-Use `--no-sync` on any command to skip the auto-sync that runs before queries:
+By default, sync runs in the background — commands return immediately with cached data. JSON output includes `sync_age_seconds`. Human output shows "(data from N minutes ago)" when stale.
+
+Use `--wait-sync` to block until sync completes:
+
+```sh
+jai query "SELECT count(*) FROM issues" --wait-sync
+```
+
+Use `--no-sync` to skip auto-sync entirely:
 
 ```sh
 jai query "SELECT count(*) FROM issues" --no-sync
@@ -285,6 +380,28 @@ jai query "SELECT count(*) FROM issues" --no-sync
 ```sh
 jai status
 ```
+
+### Sprint and board sync
+
+Sprints and boards are synced automatically from the Jira Agile API (enabled by default):
+
+```yaml
+sync:
+  sprints: true  # default
+```
+
+Issues get `sprint_id` and `sprint_name` columns.
+
+### Dev info sync
+
+Optionally sync PR count, open PR status, and branch names from Jira dev-status API:
+
+```yaml
+sync:
+  dev_info: true  # default: false (opt-in)
+```
+
+Updates `pr_count`, `has_open_pr`, `branch_name` on issues.
 
 ---
 
@@ -313,12 +430,57 @@ Errors are structured:
 
 ---
 
+## MCP Server
+
+Start an MCP (Model Context Protocol) server to expose jai functionality to AI agents:
+
+```sh
+# Start with stdio transport (default) — for Claude Code integration
+jai serve
+
+# HTTP transport on custom port
+jai serve --transport http --port 9000
+
+# SSE transport
+jai serve --transport sse --port 8080
+
+# Read-only mode — blocks all write operations
+jai serve --read-only
+
+# Enable specific toolsets only
+jai serve --toolsets read,schema,sync
+```
+
+**Environment variable overrides:**
+- `JAI_MCP_TOOLSETS` — comma-separated toolsets to enable
+- `JAI_MCP_READ_ONLY` — set to `true` for read-only mode
+- `JAI_MCP_TRANSPORT` — `stdio`, `http`, or `sse`
+- `JAI_MCP_PORT` — port for HTTP/SSE (default: 8947)
+
+**Available toolsets:**
+- `read` — get, query, search, view
+- `schema` — fields, schema introspection
+- `write` — set, create, clone, comment
+- `sync` — sync, status
+- `browser` — open issues in browser
+- `config` — read/write config (excludes credentials)
+
+The server provides 17 tools, 8 MCP resources (jira://issue/{key}, jira://schema/db, etc.), and 6 MCP prompts (standup-report, sprint-review, bug-triage, etc.).
+
+Background sync runs automatically on the configured interval (default: 15m).
+
+**Claude Code integration:** Add jai to `.claude/mcp_servers.json` or use the `/jai` skill from `.claude/skills/jai.md`.
+
+---
+
 ## Global flags
 
 | Flag | Description |
 |------|-------------|
 | `--json` | Structured JSON output |
 | `--fields` | Comma-separated field names to include |
+| `--format` | Output format: table (default), json, csv, tsv, markdown |
 | `--no-sync` | Skip auto-sync before the command |
+| `--wait-sync` | Wait for sync to complete before returning results |
 | `--config` | Path to config file (default: `~/.config/jai/config.yaml`) |
 | `--db` | Path to database file |
