@@ -82,16 +82,14 @@ func registerWriteTools(s *Server, srv *server.MCPServer) {
 	// TODO: implement in tools_write.go
 }
 
-func registerSyncTools(s *Server, srv *server.MCPServer) {
-	// TODO: implement in tools_sync.go
-}
-
 func registerConfigTools(s *Server, srv *server.MCPServer) {
 	// TODO: implement in tools_config.go
 }
 
-// registerPrompts stub - will be implemented in prompts.go
+func (s *Server) registerResources(srv *server.MCPServer) {
+	// TODO: implement in resources.go
+}
+
 func (s *Server) registerPrompts(srv *server.MCPServer) {
 	// TODO: implement in prompts.go
 }
-
