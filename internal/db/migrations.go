@@ -250,18 +250,42 @@ var migrations = []migration{
 					url         TEXT,
 					synced_at   DATETIME NOT NULL DEFAULT (datetime('now'))
 				)`,
-				// issue_links enhancements
-				`ALTER TABLE issue_links ADD COLUMN linked_summary TEXT`,
-				`ALTER TABLE issue_links ADD COLUMN linked_status  TEXT`,
-				`ALTER TABLE issue_links ADD COLUMN linked_project TEXT`,
-				// issues new columns
-				`ALTER TABLE issues ADD COLUMN sprint_id        INTEGER`,
-				`ALTER TABLE issues ADD COLUMN sprint_name      TEXT`,
-				`ALTER TABLE issues ADD COLUMN attachment_count  INTEGER DEFAULT 0`,
-				`ALTER TABLE issues ADD COLUMN pr_count          INTEGER DEFAULT 0`,
-				`ALTER TABLE issues ADD COLUMN has_open_pr       INTEGER DEFAULT 0`,
-				`ALTER TABLE issues ADD COLUMN branch_name       TEXT`,
-				// indexes
+			}
+			for _, s := range stmts {
+				if _, err := tx.Exec(s); err != nil {
+					return err
+				}
+			}
+
+			// Add columns to issue_links table if they don't exist
+			issueLinksCols := map[string]string{
+				"linked_summary": "TEXT",
+				"linked_status":  "TEXT",
+				"linked_project": "TEXT",
+			}
+			for col, typ := range issueLinksCols {
+				if err := addColumnIfNotExists(tx, "issue_links", col, typ); err != nil {
+					return err
+				}
+			}
+
+			// Add columns to issues table if they don't exist
+			issuesCols := map[string]string{
+				"sprint_id":        "INTEGER",
+				"sprint_name":      "TEXT",
+				"attachment_count": "INTEGER DEFAULT 0",
+				"pr_count":         "INTEGER DEFAULT 0",
+				"has_open_pr":      "INTEGER DEFAULT 0",
+				"branch_name":      "TEXT",
+			}
+			for col, typ := range issuesCols {
+				if err := addColumnIfNotExists(tx, "issues", col, typ); err != nil {
+					return err
+				}
+			}
+
+			// Create indexes
+			indexes := []string{
 				`CREATE INDEX IF NOT EXISTS idx_issues_sprint ON issues(sprint_id)`,
 				`CREATE INDEX IF NOT EXISTS idx_boards_project ON boards(project_key)`,
 				`CREATE INDEX IF NOT EXISTS idx_sprints_board ON sprints(board_id)`,
@@ -270,14 +294,30 @@ var migrations = []migration{
 				`CREATE INDEX IF NOT EXISTS idx_dev_links_type ON dev_links(type)`,
 				`CREATE INDEX IF NOT EXISTS idx_attachments_issue ON attachments(issue_key)`,
 			}
-			for _, s := range stmts {
-				if _, err := tx.Exec(s); err != nil {
+			for _, idx := range indexes {
+				if _, err := tx.Exec(idx); err != nil {
 					return err
 				}
 			}
 			return nil
 		},
 	},
+}
+
+func addColumnIfNotExists(tx *sql.Tx, table, column, columnType string) error {
+	var exists bool
+	query := fmt.Sprintf(`SELECT count(*) > 0 FROM pragma_table_info('%s') WHERE name = '%s'`, table, column)
+	row := tx.QueryRow(query)
+	if err := row.Scan(&exists); err != nil {
+		return err
+	}
+	if !exists {
+		alterStmt := fmt.Sprintf(`ALTER TABLE %s ADD COLUMN %s %s`, table, column, columnType)
+		if _, err := tx.Exec(alterStmt); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func convertCSVToJSON(tx *sql.Tx, column string) error {
