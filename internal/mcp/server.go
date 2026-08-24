@@ -76,20 +76,3 @@ func (s *Server) ServeSSE(ctx context.Context, addr string) error {
 	sseSrv := server.NewSSEServer(s.mcpSrv)
 	return sseSrv.Start(addr)
 }
-
-// Stub functions for tool registration - implemented in separate files
-func registerWriteTools(s *Server, srv *server.MCPServer) {
-	// TODO: implement in tools_write.go
-}
-
-func registerConfigTools(s *Server, srv *server.MCPServer) {
-	// TODO: implement in tools_config.go
-}
-
-func (s *Server) registerResources(srv *server.MCPServer) {
-	// TODO: implement in resources.go
-}
-
-func (s *Server) registerPrompts(srv *server.MCPServer) {
-	// TODO: implement in prompts.go
-}
