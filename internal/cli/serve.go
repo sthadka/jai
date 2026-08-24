@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -39,13 +40,13 @@ Examples:
 			g.cfg.MCP.Toolsets = strings.Split(toolsets, ",")
 		}
 
-		// Discover fields first
+		// Discover fields first (non-fatal for serve - will retry in background sync)
 		var overrides map[string]string
 		if g.cfg.Fields.Overrides != nil {
 			overrides = g.cfg.Fields.Overrides
 		}
 		if err := g.sync.DiscoverFields(cmd.Context(), overrides); err != nil {
-			return fmt.Errorf("discovering fields: %w", err)
+			fmt.Fprintf(os.Stderr, "warning: field discovery failed (will retry in background): %v\n", err)
 		}
 
 		// Start background sync worker
