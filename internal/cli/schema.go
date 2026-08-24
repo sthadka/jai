@@ -142,6 +142,17 @@ var commandSchemas = []CommandSchema{
 			"force": {Type: "bool", Description: "Skip confirmation prompt (db reset only)"},
 		},
 	},
+	{
+		Name:        "changelog",
+		Description: "Show changelog history for an issue",
+		Params: map[string]ParamSchema{
+			"key": {Type: "string", Required: true, Description: "Issue key (e.g. ROX-123)"},
+		},
+		Flags: map[string]ParamSchema{
+			"json":  {Type: "bool", Description: "Output as JSON"},
+			"field": {Type: "string", Description: "Filter by field name"},
+		},
+	},
 }
 
 var schemaCmd = &cobra.Command{
@@ -174,11 +185,51 @@ var schemaCmd = &cobra.Command{
 	},
 }
 
-// schemaDBCmd returns a compact representation of the issues table for AI agents.
+// schemaDBCmd returns a compact representation of the issues or changelog table for AI agents.
 var schemaDBCmd = &cobra.Command{
-	Use:   "db",
+	Use:   "db [table]",
 	Short: "Show database schema (for AI agents)",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		tableName := "issues"
+		if len(args) > 0 {
+			tableName = args[0]
+		}
+
+		// Handle changelog table separately.
+		if tableName == "changelog" {
+			rows, err := g.db.Query("PRAGMA table_info(changelog)")
+			if err != nil {
+				fmt.Println(string(output.Err("QueryError", err.Error())))
+				return nil
+			}
+			defer rows.Close()
+
+			type col struct {
+				Name string `json:"name"`
+				Type string `json:"type"`
+			}
+
+			var columns []col
+			for rows.Next() {
+				var cid int
+				var name, colType string
+				var notNull int
+				var dflt interface{}
+				var pk int
+				if err := rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
+					continue
+				}
+				columns = append(columns, col{Name: name, Type: strings.ToUpper(colType)})
+			}
+
+			fmt.Println(string(output.OK(map[string]interface{}{
+				"table":   "changelog",
+				"columns": columns,
+			})))
+			return nil
+		}
+
+		// Handle issues table.
 		rows, err := g.db.Query("PRAGMA table_info(issues)")
 		if err != nil {
 			fmt.Println(string(output.Err("QueryError", err.Error())))
