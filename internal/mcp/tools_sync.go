@@ -135,12 +135,12 @@ func handleJaiSync(s *Server, ctx context.Context, req mcp.CallToolRequest) (*mc
 		return mcp.NewToolResultError(fmt.Sprintf("sync completed with errors: %v", lastError)), nil
 	}
 
-	return mcp.NewToolResultText(string(output.OK(map[string]interface{}{
+	return mcp.NewToolResultText(string(output.OK(stripNulls(map[string]interface{}{
 		"total_synced": totalSynced,
 		"new":          totalNew,
 		"updated":      totalUpdated,
 		"sources":      sources,
-	}))), nil
+	})))), nil
 }
 
 // handleJaiStatus handles the jai_status tool call.
@@ -206,7 +206,7 @@ func handleJaiStatus(s *Server, ctx context.Context, req mcp.CallToolRequest) (*
 		data["db_size_bytes"] = dbInfo.Size()
 	}
 
-	return mcp.NewToolResultText(string(output.OK(data))), nil
+	return mcp.NewToolResultText(string(output.OK(stripNulls(data)))), nil
 }
 
 // handleJaiPush handles the jai_push tool call.
@@ -225,12 +225,12 @@ func handleJaiPush(s *Server, ctx context.Context, req mcp.CallToolRequest) (*mc
 		return mcp.NewToolResultError(fmt.Sprintf("database error: %v", err)), nil
 	}
 	if count == 0 {
-		return mcp.NewToolResultText(string(output.OK(map[string]interface{}{
+		return mcp.NewToolResultText(string(output.OK(stripNulls(map[string]interface{}{
 			"pending":   0,
 			"succeeded": 0,
 			"failed":    0,
 			"message":   "No pending changes",
-		}))), nil
+		})))), nil
 	}
 
 	writer := synce.NewWriter(s.db, s.jira)
@@ -254,12 +254,12 @@ func handleJaiPush(s *Server, ctx context.Context, req mcp.CallToolRequest) (*mc
 		}
 	}
 
-	return mcp.NewToolResultText(string(output.OK(map[string]interface{}{
+	return mcp.NewToolResultText(string(output.OK(stripNulls(map[string]interface{}{
 		"pending":    count,
 		"succeeded":  succeeded,
 		"failed":     failed,
 		"failed_ops": failedOps,
-	}))), nil
+	})))), nil
 }
 
 // handleJaiOpen handles the jai_open tool call.
@@ -273,9 +273,9 @@ func handleJaiOpen(s *Server, ctx context.Context, req mcp.CallToolRequest) (*mc
 	baseURL := strings.TrimRight(s.cfg.Jira.URL, "/")
 	issueURL := baseURL + "/browse/" + key
 
-	return mcp.NewToolResultText(string(output.OK(map[string]string{
+	return mcp.NewToolResultText(string(output.OK(stripNulls(map[string]interface{}{
 		"url": issueURL,
-	}))), nil
+	})))), nil
 }
 
 // humanDuration formats a duration in human-readable form.

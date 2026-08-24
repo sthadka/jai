@@ -492,13 +492,13 @@ func (s *Server) setField(ctx context.Context, issueKey, fieldName, jiraID, valu
 		)
 	}
 
-	return output.OK(map[string]interface{}{
+	return output.OK(stripNulls(map[string]interface{}{
 		"issue_key": issueKey,
 		"field":     fieldName,
 		"value":     value,
 		"operation": operation,
 		"status":    status,
-	}), nil
+	})), nil
 }
 
 // setBulk sets a field on multiple issues.
@@ -577,13 +577,13 @@ func (s *Server) setBulk(ctx context.Context, keys []string, fieldName, jiraID, 
 	if queue {
 		status = "queued"
 	}
-	return output.OK(map[string]interface{}{
+	return output.OK(stripNulls(map[string]interface{}{
 		"count":     len(keys),
 		"keys":      keys,
 		"succeeded": succeeded,
 		"failed":    failed,
 		"status":    status,
-	}), nil
+	})), nil
 }
 
 // Helper functions (mirrored from CLI)
@@ -752,10 +752,10 @@ func (s *Server) handleJaiComment(ctx context.Context, req mcp.CallToolRequest) 
 	_ = s.db.UpsertComment(localComment)
 	_ = s.db.UpdateIssueCommentsText(issueKey)
 
-	return mcp.NewToolResultText(string(output.OK(map[string]string{
+	return mcp.NewToolResultText(string(output.OK(stripNulls(map[string]interface{}{
 		"issue_key": issueKey,
 		"status":    status,
-	}))), nil
+	})))), nil
 }
 
 // jaiTransitionTool returns the jai_transition tool definition.
@@ -788,10 +788,10 @@ func (s *Server) handleJaiTransition(ctx context.Context, req mcp.CallToolReques
 		for i, t := range transitions {
 			items[i] = transitionInfo{ID: t.ID, Name: t.Name}
 		}
-		return mcp.NewToolResultText(string(output.OK(map[string]interface{}{
+		return mcp.NewToolResultText(string(output.OK(stripNulls(map[string]interface{}{
 			"issue_key":   issueKey,
 			"transitions": items,
-		}))), nil
+		})))), nil
 	}
 
 	// Resolve transition
@@ -837,12 +837,12 @@ func (s *Server) handleJaiTransition(ctx context.Context, req mcp.CallToolReques
 		}
 	}
 
-	return mcp.NewToolResultText(string(output.OK(map[string]string{
+	return mcp.NewToolResultText(string(output.OK(stripNulls(map[string]interface{}{
 		"issue_key":     issueKey,
 		"transition":    match.Name,
 		"transition_id": match.ID,
 		"status":        status,
-	}))), nil
+	})))), nil
 }
 
 func resolveTransition(name string, transitions []*jira.Transition) (match *jira.Transition, ambiguous []*jira.Transition) {
@@ -1000,12 +1000,12 @@ func (s *Server) handleJaiCreate(ctx context.Context, req mcp.CallToolRequest) (
 		}
 	}
 
-	return mcp.NewToolResultText(string(output.OK(map[string]string{
+	return mcp.NewToolResultText(string(output.OK(stripNulls(map[string]interface{}{
 		"key":     resp.Key,
 		"id":      resp.ID,
 		"project": project,
 		"status":  "created",
-	}))), nil
+	})))), nil
 }
 
 // handleJaiClone handles the jai_clone tool call.
@@ -1079,13 +1079,13 @@ func (s *Server) handleJaiClone(ctx context.Context, req mcp.CallToolRequest) (*
 		}
 	}
 
-	return mcp.NewToolResultText(string(output.OK(map[string]string{
+	return mcp.NewToolResultText(string(output.OK(stripNulls(map[string]interface{}{
 		"key":     resp.Key,
 		"id":      resp.ID,
 		"source":  sourceKey,
 		"project": project,
 		"status":  "created",
-	}))), nil
+	})))), nil
 }
 
 // extractCloneFields extracts clonable fields from raw JSON
@@ -1286,9 +1286,9 @@ func (s *Server) handleJaiLink(ctx context.Context, req mcp.CallToolRequest) (*m
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("fetching link types: %v", err)), nil
 		}
-		return mcp.NewToolResultText(string(output.OK(map[string]interface{}{
+		return mcp.NewToolResultText(string(output.OK(stripNulls(map[string]interface{}{
 			"link_types": linkTypes,
-		}))), nil
+		})))), nil
 	}
 
 	if target == "" {
@@ -1303,12 +1303,12 @@ func (s *Server) handleJaiLink(ctx context.Context, req mcp.CallToolRequest) (*m
 		if err := s.jira.CreateRemoteLink(ctx, issueKey, target, title); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("creating remote link: %v", err)), nil
 		}
-		return mcp.NewToolResultText(string(output.OK(map[string]string{
+		return mcp.NewToolResultText(string(output.OK(stripNulls(map[string]interface{}{
 			"issue_key": issueKey,
 			"url":       target,
 			"title":     title,
 			"status":    "created",
-		}))), nil
+		})))), nil
 	}
 
 	// Issue-to-issue link
@@ -1322,12 +1322,12 @@ func (s *Server) handleJaiLink(ctx context.Context, req mcp.CallToolRequest) (*m
 		return mcp.NewToolResultError(fmt.Sprintf("creating link: %v", err)), nil
 	}
 
-	return mcp.NewToolResultText(string(output.OK(map[string]string{
+	return mcp.NewToolResultText(string(output.OK(stripNulls(map[string]interface{}{
 		"from_key":  issueKey,
 		"to_key":    target,
 		"link_type": linkType,
 		"status":    "created",
-	}))), nil
+	})))), nil
 }
 
 func isURL(s string) bool {
@@ -1443,9 +1443,9 @@ func (s *Server) handleJaiUpdate(ctx context.Context, req mcp.CallToolRequest) (
 		}
 	}
 
-	return mcp.NewToolResultText(string(output.OK(map[string]interface{}{
+	return mcp.NewToolResultText(string(output.OK(stripNulls(map[string]interface{}{
 		"key":        issueKey,
 		"operations": operations,
 		"failed":     failed,
-	}))), nil
+	})))), nil
 }

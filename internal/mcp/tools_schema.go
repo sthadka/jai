@@ -6,12 +6,10 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/sthadka/jai/internal/output"
-	"github.com/sthadka/jai/internal/query"
 )
 
 // registerSchemaTools registers all schema toolset tools with the MCP server.
@@ -25,7 +23,7 @@ func registerSchemaTools(s *Server, srv *server.MCPServer) {
 	// jai_schema - Discover database schema, column values, templates, or snippets
 	srv.AddTool(mcp.Tool{
 		Name:        "jai_schema",
-		Description: "Discover database schema, column values, templates, or snippets. CALL THIS FIRST before writing queries to learn available columns and their types. Modes: 'db' (columns), 'values' (distinct values for a column), 'templates' (issue creation templates), 'snippets' (reusable SQL fragments), 'commands' (CLI command catalog).",
+		Description: "Discover database schema, column values, templates, or snippets. Modes: 'db' (large output ~60KB, use jai_fields for targeted lookup), 'values' (distinct values, default limit 20), 'templates' (issue creation templates), 'snippets' (reusable SQL fragments), 'commands' (CLI command catalog).",
 		InputSchema: mcp.ToolInputSchema{
 			Type: "object",
 			Properties: map[string]interface{}{
@@ -52,7 +50,7 @@ func registerSchemaTools(s *Server, srv *server.MCPServer) {
 	// jai_fields - List all Jira fields with their mappings
 	srv.AddTool(mcp.Tool{
 		Name:        "jai_fields",
-		Description: "List all Jira fields with their local column names, Jira IDs, types, and population statistics. Use 'filter' to search for fields by partial name.",
+		Description: "Search and discover field mappings. Use filter parameter to search by name.",
 		InputSchema: mcp.ToolInputSchema{
 			Type: "object",
 			Properties: map[string]interface{}{
@@ -161,11 +159,11 @@ func handleSchemaDB(s *Server, ctx context.Context) (*mcp.CallToolResult, error)
 		}
 	}
 
-	return mcp.NewToolResultText(string(output.OK(map[string]interface{}{
+	return mcp.NewToolResultText(string(output.OK(stripNulls(map[string]interface{}{
 		"table":   "issues",
 		"columns": columns,
 		"hint":    "Use 'jai_schema' with mode='values' to see distinct values for any column",
-	}))), nil
+	})))), nil
 }
 
 // safeColumnRe matches valid SQLite column names.
@@ -184,7 +182,7 @@ func handleSchemaValues(s *Server, ctx context.Context, column string) (*mcp.Cal
 		WHERE "%s" IS NOT NULL AND "%s" != ''
 		GROUP BY "%s"
 		ORDER BY count DESC
-		LIMIT 200`, column, column, column, column)
+		LIMIT 20`, column, column, column, column)
 
 	rows, err := s.db.Query(sql)
 	if err != nil {
@@ -209,20 +207,20 @@ func handleSchemaValues(s *Server, ctx context.Context, column string) (*mcp.Cal
 		}
 	}
 
-	return mcp.NewToolResultText(string(output.OK(map[string]interface{}{
+	return mcp.NewToolResultText(string(output.OK(stripNulls(map[string]interface{}{
 		"column": column,
 		"values": values,
 		"count":  len(values),
-	}))), nil
+	})))), nil
 }
 
 // handleSchemaTemplates returns available issue templates from config.
 func handleSchemaTemplates(s *Server, ctx context.Context) (*mcp.CallToolResult, error) {
 	if s.cfg == nil || len(s.cfg.Templates) == 0 {
-		return mcp.NewToolResultText(string(output.OK(map[string]interface{}{
+		return mcp.NewToolResultText(string(output.OK(stripNulls(map[string]interface{}{
 			"templates": []string{},
 			"count":     0,
-		}))), nil
+		})))), nil
 	}
 
 	names := make([]string, 0, len(s.cfg.Templates))
@@ -231,20 +229,20 @@ func handleSchemaTemplates(s *Server, ctx context.Context) (*mcp.CallToolResult,
 	}
 	sort.Strings(names)
 
-	return mcp.NewToolResultText(string(output.OK(map[string]interface{}{
+	return mcp.NewToolResultText(string(output.OK(stripNulls(map[string]interface{}{
 		"templates": names,
 		"count":     len(names),
 		"hint":      "Use template name with 'jai_create' tool to load a template as the description",
-	}))), nil
+	})))), nil
 }
 
 // handleSchemaSnippets returns available SQL snippets from config.
 func handleSchemaSnippets(s *Server, ctx context.Context) (*mcp.CallToolResult, error) {
 	if s.cfg == nil || len(s.cfg.Snippets) == 0 {
-		return mcp.NewToolResultText(string(output.OK(map[string]interface{}{
+		return mcp.NewToolResultText(string(output.OK(stripNulls(map[string]interface{}{
 			"snippets": []interface{}{},
 			"count":    0,
-		}))), nil
+		})))), nil
 	}
 
 	names := make([]string, 0, len(s.cfg.Snippets))
@@ -254,31 +252,24 @@ func handleSchemaSnippets(s *Server, ctx context.Context) (*mcp.CallToolResult, 
 	sort.Strings(names)
 
 	type snippetInfo struct {
-		Name     string `json:"name"`
-		Raw      string `json:"raw"`
-		Expanded string `json:"expanded"`
+		Name string `json:"name"`
+		Raw  string `json:"raw"`
 	}
 
 	snippets := make([]snippetInfo, 0, len(names))
-	now := time.Now()
 	for _, name := range names {
 		raw := s.cfg.Snippets[name]
-		expanded, err := query.ExpandSnippet(raw, now, s.cfg)
-		if err != nil {
-			expanded = fmt.Sprintf("<error: %s>", err.Error())
-		}
 		snippets = append(snippets, snippetInfo{
-			Name:     name,
-			Raw:      raw,
-			Expanded: expanded,
+			Name: name,
+			Raw:  raw,
 		})
 	}
 
-	return mcp.NewToolResultText(string(output.OK(map[string]interface{}{
+	return mcp.NewToolResultText(string(output.OK(stripNulls(map[string]interface{}{
 		"snippets": snippets,
 		"count":    len(snippets),
 		"hint":     "Use {{snippet_name}} in any SQL query to expand a snippet",
-	}))), nil
+	})))), nil
 }
 
 // CommandSchema describes a command's parameters and flags.
@@ -395,10 +386,10 @@ func handleSchemaCommands(s *Server, ctx context.Context) (*mcp.CallToolResult, 
 		}
 	}
 
-	return mcp.NewToolResultText(string(output.OK(map[string]interface{}{
+	return mcp.NewToolResultText(string(output.OK(stripNulls(map[string]interface{}{
 		"commands": list,
 		"count":    len(list),
-	}))), nil
+	})))), nil
 }
 
 // handleFields handles the jai_fields tool call.
@@ -480,8 +471,8 @@ func handleFields(s *Server, ctx context.Context, request mcp.CallToolRequest) (
 		fields[i] = f
 	}
 
-	return mcp.NewToolResultText(string(output.OK(map[string]interface{}{
+	return mcp.NewToolResultText(string(output.OK(stripNulls(map[string]interface{}{
 		"fields": fields,
 		"count":  len(fields),
-	}))), nil
+	})))), nil
 }

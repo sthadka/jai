@@ -21,7 +21,7 @@ func registerReadTools(s *Server, srv *server.MCPServer) {
 	// jai_query - Execute SQL against local Jira SQLite database
 	srv.AddTool(mcp.Tool{
 		Name:        "jai_query",
-		Description: "Execute SQL against local Jira SQLite database. Returns rows as JSON. The main table is `issues` with columns discoverable via jai_schema. Use template variables: {{me}}, {{today}}, {{week_ago}}, etc. TOKEN-SAVING TIP: Always specify columns in SELECT instead of using *. Use LIMIT to cap results.",
+		Description: "Execute SQL against local Jira database. Default limit 20. Use SELECT with specific columns for efficiency.",
 		InputSchema: mcp.ToolInputSchema{
 			Type: "object",
 			Properties: map[string]interface{}{
@@ -35,8 +35,8 @@ func registerReadTools(s *Server, srv *server.MCPServer) {
 				},
 				"limit": map[string]interface{}{
 					"type":        "integer",
-					"description": "Max rows to return. Default 100. Use to prevent accidentally large results.",
-					"default":     100,
+					"description": "Max rows to return. Default 20. Use to prevent accidentally large results.",
+					"default":     20,
 				},
 			},
 			Required: []string{"sql"},
@@ -152,7 +152,7 @@ func handleQuery(s *Server, ctx context.Context, request mcp.CallToolRequest) (*
 	}
 
 	// Apply limit if specified
-	limit := request.GetInt("limit", 100)
+	limit := request.GetInt("limit", 20)
 
 	// Apply LIMIT clause if not present
 	if !strings.Contains(sqlUpper, "LIMIT") {

@@ -480,13 +480,9 @@ func (s *Server) handleIssueResource(ctx context.Context, req mcp.ReadResourceRe
 	result["fix_versions"] = nullStringToInterface(fixVersions)
 	result["affected_versions"] = nullStringToInterface(affectedVersions)
 
-	// Parse raw_json for additional fields
-	if rawJSON.Valid && rawJSON.String != "" {
-		var raw map[string]interface{}
-		if err := json.Unmarshal([]byte(rawJSON.String), &raw); err == nil {
-			result["raw"] = raw
-		}
-	}
+	// Apply filters: remove excluded columns and null values
+	result = filterExcluded(result)
+	result = stripNulls(result)
 
 	data, err := json.Marshal(result)
 	if err != nil {
