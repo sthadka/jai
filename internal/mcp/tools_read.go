@@ -63,7 +63,7 @@ func registerReadTools(s *Server, srv *server.MCPServer) {
 				},
 				"fields": map[string]interface{}{
 					"type":        "string",
-					"description": "Comma-separated fields to include. Omit for all fields.",
+					"description": "Fields to include (default: key, summary, status, priority, assignee, type, etc). Use 'all' for every column including custom fields.",
 				},
 				"comments": map[string]interface{}{
 					"type":        "boolean",
@@ -199,11 +199,8 @@ func handleGet(s *Server, ctx context.Context, request mcp.CallToolRequest) (*mc
 			return mcp.NewToolResultError(fmt.Sprintf("issue %s not found in local database or Jira API", key)), nil
 		}
 
-		// Convert API issue to map
-		data = make(map[string]interface{})
-		data["key"] = issue.Key
-		// Note: Full conversion would require parsing issue.Fields JSON
-		// For now, include raw fields
+		// Convert API issue to map using proper field extraction
+		data = issueFieldsToMap(issue.Key, issue.Fields)
 		data["_source"] = "api"
 	} else {
 		// Convert DB row to map
@@ -213,11 +210,9 @@ func handleGet(s *Server, ctx context.Context, request mcp.CallToolRequest) (*mc
 		}
 	}
 
-	// Apply fields filter if specified
+	// Apply response filters (field selection, null stripping, excluded columns)
 	fieldsStr := request.GetString("fields", "")
-	if fieldsStr != "" {
-		data = output.FilterFields(data, output.ParseFields(fieldsStr))
-	}
+	data = applyResponseFilters(data, fieldsStr)
 
 	// Include comments if requested
 	if includeComments && data["_source"] != "api" {
