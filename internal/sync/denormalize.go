@@ -314,6 +314,7 @@ func ExtractBulkChangelog(entries []jira.BulkChangelogEntry, issueIDToKey map[st
 
 // ExtractIssueLinks extracts formal Jira issue links from a raw issue JSON.
 // Each link produces two rows (inward + outward perspective) so both sides are queryable.
+// Also extracts linked_summary, linked_status, and linked_project from the linked issue.
 func ExtractIssueLinks(issueKey string, raw []byte) []db.IssueLink {
 	var apiIssue jira.Issue
 	if err := json.Unmarshal(raw, &apiIssue); err != nil {
@@ -327,25 +328,92 @@ func ExtractIssueLinks(issueKey string, raw []byte) []db.IssueLink {
 	var links []db.IssueLink
 	for _, l := range fields.IssueLinks {
 		if l.InwardIssue != nil {
+			linkedProject := extractProjectFromKey(l.InwardIssue.Key)
 			links = append(links, db.IssueLink{
-				ID:        l.ID + "_in",
-				IssueKey:  issueKey,
-				LinkType:  l.Type.Inward,
-				Direction: "inward",
-				LinkedKey: l.InwardIssue.Key,
+				ID:            l.ID + "_in",
+				IssueKey:      issueKey,
+				LinkType:      l.Type.Inward,
+				Direction:     "inward",
+				LinkedKey:     l.InwardIssue.Key,
+				LinkedSummary: extractLinkedSummary(l.InwardIssue),
+				LinkedStatus:  extractLinkedStatus(l.InwardIssue),
+				LinkedProject: linkedProject,
 			})
 		}
 		if l.OutwardIssue != nil {
+			linkedProject := extractProjectFromKey(l.OutwardIssue.Key)
 			links = append(links, db.IssueLink{
-				ID:        l.ID + "_out",
-				IssueKey:  issueKey,
-				LinkType:  l.Type.Outward,
-				Direction: "outward",
-				LinkedKey: l.OutwardIssue.Key,
+				ID:            l.ID + "_out",
+				IssueKey:      issueKey,
+				LinkType:      l.Type.Outward,
+				Direction:     "outward",
+				LinkedKey:     l.OutwardIssue.Key,
+				LinkedSummary: extractLinkedSummary(l.OutwardIssue),
+				LinkedStatus:  extractLinkedStatus(l.OutwardIssue),
+				LinkedProject: linkedProject,
 			})
 		}
 	}
 	return links
+}
+
+// extractProjectFromKey extracts the project key from an issue key (e.g., "ROX-123" -> "ROX").
+func extractProjectFromKey(issueKey string) string {
+	parts := strings.Split(issueKey, "-")
+	if len(parts) > 0 {
+		return parts[0]
+	}
+	return ""
+}
+
+// extractLinkedSummary extracts the summary from a linked issue struct.
+func extractLinkedSummary(linkedIssue interface{}) string {
+	// The linked issue in issuelinks contains fields.summary
+	type linkedIssueType struct {
+		Key    string `json:"key"`
+		Fields struct {
+			Summary string `json:"summary"`
+		} `json:"fields"`
+	}
+
+	// Try to marshal and unmarshal to extract the summary
+	b, err := json.Marshal(linkedIssue)
+	if err != nil {
+		return ""
+	}
+
+	var linked linkedIssueType
+	if err := json.Unmarshal(b, &linked); err != nil {
+		return ""
+	}
+
+	return linked.Fields.Summary
+}
+
+// extractLinkedStatus extracts the status from a linked issue struct.
+func extractLinkedStatus(linkedIssue interface{}) string {
+	// The linked issue in issuelinks contains fields.status.name
+	type linkedIssueType struct {
+		Key    string `json:"key"`
+		Fields struct {
+			Status struct {
+				Name string `json:"name"`
+			} `json:"status"`
+		} `json:"fields"`
+	}
+
+	// Try to marshal and unmarshal to extract the status
+	b, err := json.Marshal(linkedIssue)
+	if err != nil {
+		return ""
+	}
+
+	var linked linkedIssueType
+	if err := json.Unmarshal(b, &linked); err != nil {
+		return ""
+	}
+
+	return linked.Fields.Status.Name
 }
 
 // ExtractComments extracts Jira comments from a raw issue JSON.

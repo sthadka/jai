@@ -45,11 +45,14 @@ type Issue struct {
 
 // IssueLink represents a row from the issue_links table.
 type IssueLink struct {
-	ID        string
-	IssueKey  string
-	LinkType  string
-	Direction string // "inward" or "outward"
-	LinkedKey string
+	ID            string
+	IssueKey      string
+	LinkType      string
+	Direction     string // "inward" or "outward"
+	LinkedKey     string
+	LinkedSummary string
+	LinkedStatus  string
+	LinkedProject string
 }
 
 // UpsertIssue inserts or replaces an issue row. Extra contains additional dynamic columns.
@@ -154,8 +157,8 @@ func (db *DB) UpsertIssueLinks(issueKey string, links []IssueLink) error {
 	}
 	for _, l := range links {
 		if _, err := db.Exec(
-			`INSERT OR REPLACE INTO issue_links (id, issue_key, link_type, direction, linked_key) VALUES (?,?,?,?,?)`,
-			l.ID, l.IssueKey, l.LinkType, l.Direction, l.LinkedKey,
+			`INSERT OR REPLACE INTO issue_links (id, issue_key, link_type, direction, linked_key, linked_summary, linked_status, linked_project) VALUES (?,?,?,?,?,?,?,?)`,
+			l.ID, l.IssueKey, l.LinkType, l.Direction, l.LinkedKey, l.LinkedSummary, l.LinkedStatus, l.LinkedProject,
 		); err != nil {
 			return err
 		}
