@@ -361,6 +361,11 @@ func (e *Engine) syncSource(ctx context.Context, src config.SyncSource, full, re
 		e.SyncProjects(ctx)
 	}
 
+	// Sync sprint and board data if configured.
+	if e.cfg.Sync.Sprints && full {
+		e.SyncSprints(ctx, src)
+	}
+
 	elapsed := time.Since(start).Seconds()
 	_ = e.db.UpdateSyncMeta(src.Name, elapsed, total, newCount+updatedCount, "", lastUpdated)
 

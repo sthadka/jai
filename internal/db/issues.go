@@ -39,6 +39,8 @@ type Issue struct {
 	TimeSpent        sql.NullInt64
 	RemainingEstimate sql.NullInt64
 	SubtaskKeys      string
+	SprintID         sql.NullInt64
+	SprintName       string
 }
 
 // IssueLink represents a row from the issue_links table.
@@ -62,7 +64,7 @@ func (db *DB) UpsertIssue(issue *Issue, extra map[string]interface{}) error {
 		"comments_text", "raw_json", "synced_at",
 		"resolution", "due_date",
 		"original_estimate", "time_spent", "remaining_estimate",
-		"subtask_keys",
+		"subtask_keys", "sprint_id", "sprint_name",
 	}
 	vals := []interface{}{
 		issue.ID, issue.Key, issue.Project, issue.Type, issue.Summary, issue.Description,
@@ -75,7 +77,7 @@ func (db *DB) UpsertIssue(issue *Issue, extra map[string]interface{}) error {
 		time.Now().UTC().Format(time.RFC3339),
 		issue.Resolution, issue.DueDate,
 		issue.OriginalEstimate, issue.TimeSpent, issue.RemainingEstimate,
-		issue.SubtaskKeys,
+		issue.SubtaskKeys, issue.SprintID, issue.SprintName,
 	}
 
 	for k, v := range extra {

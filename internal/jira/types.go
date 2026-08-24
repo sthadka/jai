@@ -486,3 +486,39 @@ func adfApplyMarks(text string, marks []adfMark) string {
 	}
 	return s
 }
+
+// BoardResponse is the response from GET /rest/agile/1.0/board.
+type BoardResponse struct {
+	Values []Board `json:"values"`
+}
+
+// Board represents a Jira Agile board.
+type Board struct {
+	ID       int    `json:"id"`
+	Name     string `json:"name"`
+	Type     string `json:"type"`
+	Location *struct {
+		ProjectKey string `json:"projectKey"`
+	} `json:"location"`
+}
+
+// SprintResponse is the response from GET /rest/agile/1.0/board/{boardId}/sprint.
+type SprintResponse struct {
+	Values []Sprint `json:"values"`
+}
+
+// Sprint represents a Jira sprint.
+type Sprint struct {
+	ID            int    `json:"id"`
+	Name          string `json:"name"`
+	State         string `json:"state"`
+	StartDate     string `json:"startDate"`
+	EndDate       string `json:"endDate"`
+	CompleteDate  string `json:"completeDate"`
+	Goal          string `json:"goal"`
+}
+
+// SprintIssuesResponse is the response from GET /rest/agile/1.0/sprint/{sprintId}/issue.
+type SprintIssuesResponse struct {
+	Issues []*Issue `json:"issues"`
+}

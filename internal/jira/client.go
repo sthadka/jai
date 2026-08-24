@@ -338,3 +338,37 @@ func (c *Client) SearchCount(ctx context.Context, jql string) (int, error) {
 	return total, nil
 }
 
+// GetBoards fetches all boards for a project from the Agile API.
+func (c *Client) GetBoards(ctx context.Context, projectKey string) ([]Board, error) {
+	path := fmt.Sprintf("/rest/agile/1.0/board?projectKeyOrId=%s&type=scrum", projectKey)
+	var resp BoardResponse
+	if err := c.get(ctx, path, &resp); err != nil {
+		return nil, err
+	}
+	return resp.Values, nil
+}
+
+// GetSprints fetches all sprints for a board from the Agile API.
+func (c *Client) GetSprints(ctx context.Context, boardID int) ([]Sprint, error) {
+	path := fmt.Sprintf("/rest/agile/1.0/board/%d/sprint?state=active,closed,future", boardID)
+	var resp SprintResponse
+	if err := c.get(ctx, path, &resp); err != nil {
+		return nil, err
+	}
+	return resp.Values, nil
+}
+
+// GetSprintIssues fetches all issue keys in a sprint from the Agile API.
+func (c *Client) GetSprintIssues(ctx context.Context, sprintID int) ([]string, error) {
+	path := fmt.Sprintf("/rest/agile/1.0/sprint/%d/issue?fields=key", sprintID)
+	var resp SprintIssuesResponse
+	if err := c.get(ctx, path, &resp); err != nil {
+		return nil, err
+	}
+	keys := make([]string, len(resp.Issues))
+	for i, issue := range resp.Issues {
+		keys[i] = issue.Key
+	}
+	return keys, nil
+}
+

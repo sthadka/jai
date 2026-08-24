@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/sthadka/jai/internal/db"
@@ -133,6 +134,14 @@ func Denormalize(raw []byte, fieldMap map[string]*db.FieldMapping) (*db.Issue, m
 	var rawFields map[string]json.RawMessage
 	if err := json.Unmarshal(apiIssue.Fields, &rawFields); err != nil {
 		return issue, nil, nil
+	}
+
+	// Extract sprint info from custom field (if present).
+	// The Jira API includes sprint data as a JSON array in a sprint custom field.
+	sprintID, sprintName, found := extractSprintFromRawFields(rawFields)
+	if found {
+		issue.SprintID = sql.NullInt64{Int64: int64(sprintID), Valid: true}
+		issue.SprintName = sprintName
 	}
 
 	extra := make(map[string]interface{})
@@ -371,4 +380,37 @@ func ExtractComments(issueKey string, raw []byte) ([]*db.Comment, error) {
 		comments = append(comments, dbC)
 	}
 	return comments, nil
+}
+
+// extractSprintFromRawFields extracts sprint info from an issue's raw field data.
+// The Jira API includes sprint data as a JSON array in a sprint custom field.
+// This function searches for sprint custom fields and extracts the first active sprint.
+// Returns (sprintID, sprintName, found).
+func extractSprintFromRawFields(rawFields map[string]json.RawMessage) (int, string, bool) {
+	// Look for sprint custom fields. The field name varies by Jira instance,
+	// but it's typically customfield_10020 or similar.
+	for fieldID, rawVal := range rawFields {
+		if !strings.HasPrefix(fieldID, "customfield_") {
+			continue
+		}
+
+		// Try to parse as a sprint array.
+		var sprints []struct {
+			ID    int    `json:"id"`
+			Name  string `json:"name"`
+			State string `json:"state"`
+		}
+		if err := json.Unmarshal(rawVal, &sprints); err != nil {
+			continue
+		}
+
+		// Find the first active sprint.
+		for _, s := range sprints {
+			if s.State == "active" {
+				return s.ID, s.Name, true
+			}
+		}
+	}
+
+	return 0, "", false
 }

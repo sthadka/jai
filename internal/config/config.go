@@ -84,6 +84,7 @@ type SyncConfig struct {
 	RateLimit    float64  `yaml:"rate_limit"`    // requests per second
 	History      bool     `yaml:"history"`       // sync changelog
 	FTSFields    []string `yaml:"fts_fields"`    // extra fields for FTS index
+	Sprints      bool     `yaml:"sprints"`       // sync sprint and board data
 }
 
 // DBConfig holds database settings.
@@ -167,6 +168,7 @@ func defaults() *Config {
 		Sync: SyncConfig{
 			Interval:  "15m",
 			RateLimit: 10,
+			Sprints:   true,
 		},
 		DB: DBConfig{
 			Path: DefaultDBPath(),
