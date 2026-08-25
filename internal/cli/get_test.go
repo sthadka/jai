@@ -36,11 +36,13 @@ func setupTestGlobals(t *testing.T) {
 	g.query = query.New(database, &config.Config{})
 	g.jsonOut = false
 	g.fields = ""
+	g.format = ""
 	t.Cleanup(func() {
 		g.db = nil
 		g.query = nil
 		g.jsonOut = false
 		g.fields = ""
+		g.format = ""
 	})
 }
 
@@ -161,5 +163,169 @@ func TestGetNoFields(t *testing.T) {
 	}
 	if !strings.Contains(out, "---") {
 		t.Errorf("expected YAML front matter delimiter in full output, got:\n%s", out)
+	}
+}
+
+// TestGetFormatMarkdown is the regression test for the bug where --format was
+// ignored by `get` and it always printed the front-matter document.
+func TestGetFormatMarkdown(t *testing.T) {
+	setupTestGlobals(t)
+	g.format = "markdown"
+
+	out := captureStdout(t, func() {
+		if err := getCmd.RunE(getCmd, []string{"TEST-1"}); err != nil {
+			t.Fatalf("RunE: %v", err)
+		}
+	})
+
+	if !strings.HasPrefix(out, "| ") {
+		t.Errorf("expected a markdown pipe table, got:\n%s", out)
+	}
+	if strings.Contains(out, "---\nkey:") {
+		t.Errorf("expected markdown format, not front-matter document, got:\n%s", out)
+	}
+	if !strings.Contains(out, "TEST-1") {
+		t.Errorf("expected TEST-1 in output, got:\n%s", out)
+	}
+}
+
+// TestGetFormatCSV verifies --format csv renders a single-row CSV.
+func TestGetFormatCSV(t *testing.T) {
+	setupTestGlobals(t)
+	g.format = "csv"
+
+	out := captureStdout(t, func() {
+		if err := getCmd.RunE(getCmd, []string{"TEST-1"}); err != nil {
+			t.Fatalf("RunE: %v", err)
+		}
+	})
+
+	if !strings.Contains(out, "Key") || !strings.Contains(out, "TEST-1") {
+		t.Errorf("expected CSV header and value, got:\n%s", out)
+	}
+}
+
+// TestGetFormatsUseSameCuratedFieldsByDefault is the regression test for the
+// bug where table/json used the curated field set but csv/tsv/markdown
+// dumped every column (including verbose ones like raw_json).
+func TestGetFormatsUseSameCuratedFieldsByDefault(t *testing.T) {
+	setupTestGlobals(t)
+
+	for _, format := range []string{"table", "json", "csv", "tsv", "markdown"} {
+		g.format = format
+		out := captureStdout(t, func() {
+			if err := getCmd.RunE(getCmd, []string{"TEST-1"}); err != nil {
+				t.Fatalf("format %s: RunE: %v", format, err)
+			}
+		})
+		if strings.Contains(out, "raw_json") {
+			t.Errorf("format %s: expected raw_json to be excluded from the default curated view, got:\n%s", format, out)
+		}
+		if !strings.Contains(out, "TEST-1") {
+			t.Errorf("format %s: expected TEST-1 in output, got:\n%s", format, out)
+		}
+	}
+}
+
+// TestGetFieldsAll verifies --fields all bypasses curation and returns every
+// column, across every --format. json keeps the raw column name (machine
+// consumption); csv/tsv/markdown show the title-cased header instead.
+func TestGetFieldsAll(t *testing.T) {
+	setupTestGlobals(t)
+	g.fields = "all"
+
+	wantByFormat := map[string]string{
+		"json":     "raw_json",
+		"csv":      "Raw Json",
+		"tsv":      "Raw Json",
+		"markdown": "Raw Json",
+	}
+	for format, want := range wantByFormat {
+		g.format = format
+		out := captureStdout(t, func() {
+			if err := getCmd.RunE(getCmd, []string{"TEST-1"}); err != nil {
+				t.Fatalf("format %s: RunE: %v", format, err)
+			}
+		})
+		if !strings.Contains(out, want) {
+			t.Errorf("format %s: expected %q with --fields all, got:\n%s", format, want, out)
+		}
+	}
+}
+
+// TestGetFormatMarkdownUsesReadableLabels is the regression test for the bug
+// where csv/tsv/markdown headers showed raw DB column names (e.g. parent_key)
+// instead of human-readable labels. A field_map entry (as populated by real
+// syncs from Jira's field discovery) takes priority; unmapped columns fall
+// back to a generic snake_case -> Title Case conversion.
+func TestGetFormatMarkdownUsesReadableLabels(t *testing.T) {
+	setupTestGlobals(t)
+
+	database := g.db
+	if err := database.UpsertFieldMapping(&db.FieldMapping{
+		JiraID: "parent", JiraName: "Parent", Name: "parent_key", Type: "issuelink",
+	}); err != nil {
+		t.Fatalf("UpsertFieldMapping: %v", err)
+	}
+	issue := &db.Issue{
+		Key: "TEST-2", Project: "TEST", Summary: "Has a parent and due date",
+		ParentKey: "TEST-1", DueDate: "2026-01-01", RawJSON: "{}",
+	}
+	if err := database.UpsertIssue(issue, nil); err != nil {
+		t.Fatalf("upsert issue: %v", err)
+	}
+
+	g.format = "markdown"
+	out := captureStdout(t, func() {
+		if err := getCmd.RunE(getCmd, []string{"TEST-2"}); err != nil {
+			t.Fatalf("RunE: %v", err)
+		}
+	})
+
+	if strings.Contains(out, "parent_key") {
+		t.Errorf("expected raw column name 'parent_key' to be relabeled, got:\n%s", out)
+	}
+	if !strings.Contains(out, "| Parent ") && !strings.Contains(out, "| Parent |") {
+		t.Errorf("expected field_map label 'Parent' in header, got:\n%s", out)
+	}
+	if strings.Contains(out, "due_date") {
+		t.Errorf("expected raw column name 'due_date' to be relabeled, got:\n%s", out)
+	}
+	if !strings.Contains(out, "Due Date") {
+		t.Errorf("expected generic title-case fallback 'Due Date' for an unmapped column, got:\n%s", out)
+	}
+}
+
+// TestGetFormatJSON verifies --format json behaves the same as --json.
+func TestGetFormatJSON(t *testing.T) {
+	setupTestGlobals(t)
+	g.format = "json"
+
+	out := captureStdout(t, func() {
+		if err := getCmd.RunE(getCmd, []string{"TEST-1"}); err != nil {
+			t.Fatalf("RunE: %v", err)
+		}
+	})
+
+	var result map[string]interface{}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &result); err != nil {
+		t.Fatalf("unmarshal: %v\noutput: %s", err, out)
+	}
+}
+
+// TestGetFormatDefaultUnchanged verifies the default ("table"/unset) format
+// keeps the original front-matter document behavior.
+func TestGetFormatDefaultUnchanged(t *testing.T) {
+	setupTestGlobals(t)
+	g.format = "table"
+
+	out := captureStdout(t, func() {
+		if err := getCmd.RunE(getCmd, []string{"TEST-1"}); err != nil {
+			t.Fatalf("RunE: %v", err)
+		}
+	})
+
+	if !strings.Contains(out, "key: TEST-1") {
+		t.Errorf("expected front-matter document for --format table, got:\n%s", out)
 	}
 }

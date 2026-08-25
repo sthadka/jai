@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -19,9 +20,16 @@ var getShowComments bool
 var getCmd = &cobra.Command{
 	Use:   "get <key>",
 	Short: "Fetch a single issue from the local database",
-	Args:  cobra.ExactArgs(1),
+	Long: `Fetch a single issue from the local database.
+
+By default (no --fields), every --format (table, json, csv, tsv, markdown)
+returns the same curated set of fields — the ones shown in the table/
+front-matter view. Pass --fields all to get every column instead, or
+--fields <comma-separated names> to select specific ones.`,
+	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		key := args[0]
+		jsonMode := g.jsonOut || g.format == "json"
 
 		if g.rawOut {
 			return getRaw(cmd, key)
@@ -29,7 +37,7 @@ var getCmd = &cobra.Command{
 
 		results, err := g.query.Execute("SELECT * FROM issues WHERE key = ?", key)
 		if err != nil {
-			if g.jsonOut {
+			if jsonMode {
 				fmt.Println(string(output.Err("QueryError", err.Error())))
 				return nil
 			}
@@ -43,14 +51,14 @@ var getCmd = &cobra.Command{
 				// exist, we just can't see it unauthenticated.
 				var authErr *jira.AuthError
 				if errors.As(apiErr, &authErr) {
-					if g.jsonOut {
+					if jsonMode {
 						fmt.Println(string(output.Err("AuthError", authErr.Error())))
 						return nil
 					}
 					return authErr
 				}
 				msg := fmt.Sprintf("issue %s not found in local database (try: jai sync)", key)
-				if g.jsonOut {
+				if jsonMode {
 					fmt.Println(string(output.Err("NotFoundError", msg)))
 					return nil
 				}
@@ -59,66 +67,157 @@ var getCmd = &cobra.Command{
 			var f jira.IssueFields
 			_ = json.Unmarshal(issue.Fields, &f)
 			fields := issueFieldsToMap(issue.Key, &f)
-			if g.fields != "" {
-				fields = output.FilterFields(fields, output.ParseFields(g.fields))
-			}
+			fields = curateGetFields(fields, g.fields)
 			var apiComments []map[string]interface{}
 			if getShowComments && f.Comment != nil {
 				apiComments = apiCommentsToMaps(f.Comment.Comments)
 			}
-			if g.jsonOut {
-				if getShowComments {
-					fields["comments"] = apiComments
-				}
-				fmt.Println(string(output.OK(fields)))
-				return nil
+			if !jsonMode {
+				fmt.Fprintln(os.Stderr, "(live from Jira API — not in local database)")
 			}
-			fmt.Fprintln(os.Stderr, "(live from Jira API — not in local database)")
-			printMarkdownDoc(fields)
-			if getShowComments {
-				printCommentsSection(apiComments)
-			}
-			return nil
+			return renderGet(fields, apiComments, jsonMode)
 		}
 
 		data := make(map[string]interface{}, len(results.Columns))
 		for i, col := range results.Columns {
 			data[col] = results.Rows[0][i]
 		}
-		if g.fields != "" {
-			data = output.FilterFields(data, output.ParseFields(g.fields))
+		if !jsonMode {
+			if rawJSON := output.ValueStr(data["raw_json"]); rawJSON != "" {
+				var wrapper struct {
+					Fields struct {
+						Description json.RawMessage `json:"description"`
+					} `json:"fields"`
+				}
+				if err := json.Unmarshal([]byte(rawJSON), &wrapper); err == nil {
+					if md := jira.ADFToMarkdown(wrapper.Fields.Description); md != "" {
+						data["description"] = md
+					}
+				}
+			}
 		}
+		data = curateGetFields(data, g.fields)
 		var dbComments []map[string]interface{}
 		if getShowComments {
 			if cs, err := g.db.GetComments(key); err == nil {
 				dbComments = dbCommentsToMaps(cs)
 			}
 		}
-		if g.jsonOut {
-			if getShowComments {
-				data["comments"] = dbComments
-			}
-			fmt.Println(string(output.OK(data)))
-			return nil
+		return renderGet(data, dbComments, jsonMode)
+	},
+}
+
+// defaultGetFields is the curated field set shown when --fields is not given,
+// derived from frontMatterEntries so every output format (table/json/csv/tsv/
+// markdown) is as compact as the human-readable front-matter document.
+// "description" is included too, since it's rendered separately from the
+// front-matter block itself but is still part of the curated view.
+var defaultGetFields = func() []string {
+	fields := make([]string, len(frontMatterEntries)+1)
+	for i, e := range frontMatterEntries {
+		fields[i] = e.field
+	}
+	fields[len(frontMatterEntries)] = "description"
+	return fields
+}()
+
+// curateGetFields applies --fields to an issue data map: empty uses the
+// curated default, "all" returns every column unfiltered, anything else is
+// treated as an explicit comma-separated field list.
+func curateGetFields(data map[string]interface{}, requested string) map[string]interface{} {
+	switch requested {
+	case "":
+		return output.FilterFields(data, defaultGetFields)
+	case "all":
+		return data
+	default:
+		return output.FilterFields(data, output.ParseFields(requested))
+	}
+}
+
+// renderGet writes a single issue's data using the --json flag or --format flag.
+// "table" (the default) keeps the curated front-matter document; csv/tsv/markdown
+// render every field as a single-row table, matching how query/view/search honor --format.
+func renderGet(data map[string]interface{}, comments []map[string]interface{}, jsonMode bool) error {
+	if jsonMode {
+		if getShowComments {
+			data["comments"] = comments
 		}
-		if rawJSON := output.ValueStr(data["raw_json"]); rawJSON != "" {
-			var wrapper struct {
-				Fields struct {
-					Description json.RawMessage `json:"description"`
-				} `json:"fields"`
-			}
-			if err := json.Unmarshal([]byte(rawJSON), &wrapper); err == nil {
-				if md := jira.ADFToMarkdown(wrapper.Fields.Description); md != "" {
-					data["description"] = md
-				}
-			}
+		fmt.Println(string(output.OK(data)))
+		return nil
+	}
+
+	switch g.format {
+	case "csv", "tsv", "markdown":
+		cols, row := issueDataToRow(data, jiraFieldNames())
+		switch g.format {
+		case "csv":
+			fmt.Print(output.CSV(cols, [][]interface{}{row}))
+		case "tsv":
+			fmt.Print(output.TSV(cols, [][]interface{}{row}))
+		case "markdown":
+			fmt.Print(output.Markdown(cols, [][]interface{}{row}))
 		}
+	default: // "table" or unset
 		printMarkdownDoc(data)
 		if getShowComments {
-			printCommentsSection(dbComments)
+			printCommentsSection(comments)
 		}
+	}
+	return nil
+}
+
+// jiraFieldNames returns a map of DB column name -> Jira's own display name
+// (e.g. "team" -> "Team", "target_version" -> "Target Version"), sourced from
+// field_map (populated during sync from Jira's field discovery). Returns nil
+// on error, in which case fieldLabel falls back to a generic title-case.
+func jiraFieldNames() map[string]string {
+	mappings, err := g.db.AllFieldMappings()
+	if err != nil {
 		return nil
-	},
+	}
+	names := make(map[string]string, len(mappings))
+	for _, m := range mappings {
+		if m.JiraName != "" {
+			names[m.Name] = m.JiraName
+		}
+	}
+	return names
+}
+
+// fieldLabel returns the human-readable label for a raw column name: Jira's
+// own field display name if known, otherwise a generic snake_case -> Title
+// Case conversion (e.g. "fix_version" -> "Fix Version").
+func fieldLabel(field string, jiraNames map[string]string) string {
+	if label, ok := jiraNames[field]; ok {
+		return label
+	}
+	words := strings.Split(field, "_")
+	for i, w := range words {
+		if w != "" {
+			words[i] = strings.ToUpper(w[:1]) + w[1:]
+		}
+	}
+	return strings.Join(words, " ")
+}
+
+// issueDataToRow flattens an issue data map into a single-row table with
+// stable (alphabetical, by raw field name) column order and human-readable
+// column headers.
+func issueDataToRow(data map[string]interface{}, jiraNames map[string]string) ([]string, []interface{}) {
+	fields := make([]string, 0, len(data))
+	for k := range data {
+		fields = append(fields, k)
+	}
+	sort.Strings(fields)
+
+	cols := make([]string, len(fields))
+	row := make([]interface{}, len(fields))
+	for i, f := range fields {
+		cols[i] = fieldLabel(f, jiraNames)
+		row[i] = data[f]
+	}
+	return cols, row
 }
 
 func getRaw(cmd *cobra.Command, key string) error {
