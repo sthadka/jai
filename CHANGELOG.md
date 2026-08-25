@@ -1,5 +1,22 @@
 # Changelog
 
+## [3.1.0](https://github.com/sthadka/jai/compare/v3.0.0...v3.1.0) (2026-08-25)
+
+
+### Features
+
+* add --raw flag to dump full Jira API JSON ([3906b14](https://github.com/sthadka/jai/commit/3906b14c82daa63e8227cda31ce022c68dba1dd0))
+
+
+### Bug Fixes
+
+* error out when unauthenticated instead of swallowing the failure ([e5c47cf](https://github.com/sthadka/jai/commit/e5c47cfeda2d14e524d981ac7fe6b58e1be1f320))
+
+
+### Documentation
+
+* rewrite CLAUDE.md for effectiveness ([3a82a1c](https://github.com/sthadka/jai/commit/3a82a1c7776d414c4dc5989e228788e61899a09f))
+
 ## [3.0.0](https://github.com/sthadka/jai/compare/v2.3.0...v3.0.0) (2026-08-03)
 
 
