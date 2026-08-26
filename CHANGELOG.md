@@ -1,5 +1,60 @@
 # Changelog
 
+## [4.0.0](https://github.com/sthadka/jai/compare/v3.1.0...v4.0.0) (2026-08-26)
+
+
+### ⚠ BREAKING CHANGES
+
+* `jai get` (and `jai get --json`) now returns only a curated subset of fields by default, matching the front-matter table view, instead of every column in the issues table. Scripts relying on the previous all-columns default must pass --fields all to get the old behavior back.
+
+### Features
+
+* add attachment metadata sync ([6357e4b](https://github.com/sthadka/jai/commit/6357e4bfe527bb5f998c58e9923ea758159a8235))
+* add bulk transition support ([ea3f704](https://github.com/sthadka/jai/commit/ea3f70436e740e22d595990c8c1817baab1fe7c2))
+* add changelog query interface with built-in snippets ([1ed1a6d](https://github.com/sthadka/jai/commit/1ed1a6d44677eb00869923a5aa71ebce043ccf52))
+* add Claude Code skill file for jai ([c3771d4](https://github.com/sthadka/jai/commit/c3771d4760636e35f0045a8983ba2a01ab2829ce))
+* add composite jai update command ([8f5f91f](https://github.com/sthadka/jai/commit/8f5f91f31e2eb915edd938eca8e557d94b61c30e))
+* add cross-project dependency analysis ([ab484a2](https://github.com/sthadka/jai/commit/ab484a28c96c63f4edc7b1a0e7a45721b3ed8fce))
+* add CSV/TSV/Markdown export formats ([3b458d7](https://github.com/sthadka/jai/commit/3b458d75947438d9880916135903dba4f9b66d64))
+* add development info sync ([1464abe](https://github.com/sthadka/jai/commit/1464abe604849072d24c43fa1920feebc3704d8a))
+* add field search and suggestion helpers plus value counts ([88a4a35](https://github.com/sthadka/jai/commit/88a4a35f19ac5c9a0e460fd353f1d0bb2d6f1fe6))
+* add JQL support to MCP jai_query tool ([d32e1e1](https://github.com/sthadka/jai/commit/d32e1e1225f80455bc02be5f9a0ac8e7043726b4))
+* add MCP response efficiency helpers and default field sets ([8edf582](https://github.com/sthadka/jai/commit/8edf5821051b031c4715b07f25e2e1e0eb5eadc2))
+* add MCP server core with stdio transport ([f7756a3](https://github.com/sthadka/jai/commit/f7756a37392a65303d72f58398e36e430ca02893))
+* add migration 10 for agent integration tables ([62ac12e](https://github.com/sthadka/jai/commit/62ac12edcfa567e2518699c07af19dd2286cccdc))
+* add non-blocking auto-sync with background worker ([a234a3d](https://github.com/sthadka/jai/commit/a234a3df61393bd5b6f349db3f3842cb06fbe7a0))
+* add sprint and board data sync from Jira Agile API ([81a0d43](https://github.com/sthadka/jai/commit/81a0d438b29f6ea1890660a58b995813067e5b3d))
+* add templates and snippets library ([6146cd0](https://github.com/sthadka/jai/commit/6146cd0ec068a3534449c904e0372b3066fd59d5))
+* add tiered schema discovery for MCP token efficiency ([86347fd](https://github.com/sthadka/jai/commit/86347fd22616d94351827e7058ce3ab5b086f769))
+* apply token efficiency to all MCP tools and update descriptions ([df4c962](https://github.com/sthadka/jai/commit/df4c9622e2f10072383e5969fe4641cf271c06d1))
+* extend MCP toolset system with full toolset map and env var overrides ([681bcf1](https://github.com/sthadka/jai/commit/681bcf193c1714838bb01619368519a4ac444ad7))
+* implement MCP config tool for managing jai configuration ([260aab5](https://github.com/sthadka/jai/commit/260aab58600b5917ca09e4321b99d9d4b568b83b))
+* implement MCP prompt templates ([f615c64](https://github.com/sthadka/jai/commit/f615c648944cd00bfb55d402c1f23e5da43957ad))
+* implement MCP read and schema tools ([cb93e6f](https://github.com/sthadka/jai/commit/cb93e6fe4850af585a1d070198f5defa4acb48c8))
+* implement MCP resource registration ([10690ed](https://github.com/sthadka/jai/commit/10690ed7b97101ab2f6d2c78394bc70ccd9ce09e))
+* implement MCP write and sync tools ([83bbb3a](https://github.com/sthadka/jai/commit/83bbb3a3e7829ef9b528c5492340f8b2861b0182))
+
+
+### Bug Fixes
+
+* changelog sync backfill finding zero candidates ([ccf3da3](https://github.com/sthadka/jai/commit/ccf3da3a3949458872088c9f4f2c568f87f066d4))
+* honor --format and --fields in jai get ([85fbfe2](https://github.com/sthadka/jai/commit/85fbfe2a64cdc328e5b1a2fc24844da1fad1aed3))
+* make field discovery non-fatal in serve command ([4cd52bc](https://github.com/sthadka/jai/commit/4cd52bcc75b866972f199ac74c70cc50573107c3))
+* resolve golangci-lint staticcheck/unused findings ([32222d7](https://github.com/sthadka/jai/commit/32222d727543c5e78c7dece3a34b365954dd676d))
+
+
+### Refactoring
+
+* restructure Claude Code skill into directory with progressive disclosure ([33180b5](https://github.com/sthadka/jai/commit/33180b51dc13a34fe36f17b10c0fe509e8f5cc77))
+
+
+### Documentation
+
+* add MCP token efficiency and composability recommendations ([26bf7ae](https://github.com/sthadka/jai/commit/26bf7aecba02fcfe9b2aa262dc062bef0d8cab59))
+* add multiple Jira instances section to README ([8a83231](https://github.com/sthadka/jai/commit/8a8323174288f87ad3da41ad6608d25fee1db08a))
+* enhance HTTP/SSE transport method documentation ([6336e2c](https://github.com/sthadka/jai/commit/6336e2c1b101534bbf88365b44235fc144c9ee3f))
+* update README and user guide for agent integration features ([1dbc890](https://github.com/sthadka/jai/commit/1dbc8904688bb923e1b406bc887aec0e56a795c8))
+
 ## [3.1.0](https://github.com/sthadka/jai/compare/v3.0.0...v3.1.0) (2026-08-25)
 
 
