@@ -103,24 +103,26 @@ Examples:
 			}
 		}
 		if updateTransition != "" {
-			if result.TransitionStatus == "ok" {
+			switch result.TransitionStatus {
+			case "ok":
 				statusMark := "✓"
 				if updateQueue {
 					statusMark = "(queued)"
 				}
 				fmt.Printf("  Transition: %s %s\n", result.TransitionName, statusMark)
-			} else if result.TransitionStatus == "failed" {
+			case "failed":
 				fmt.Printf("  Transition: failed (%s)\n", result.TransitionError)
 			}
 		}
 		if updateComment != "" {
-			if result.CommentStatus == "ok" {
+			switch result.CommentStatus {
+			case "ok":
 				statusMark := "✓"
 				if updateQueue {
 					statusMark = "(queued)"
 				}
 				fmt.Printf("  Comment: added %s\n", statusMark)
-			} else if result.CommentStatus == "failed" {
+			case "failed":
 				fmt.Printf("  Comment: failed (%s)\n", result.CommentError)
 			}
 		}

@@ -408,7 +408,7 @@ func (s *Server) handleJaiSet(ctx context.Context, req mcp.CallToolRequest) (*mc
 // setField sets a field on a single issue.
 func (s *Server) setField(ctx context.Context, issueKey, fieldName, jiraID, value, fieldType, operation string, queue bool) ([]byte, error) {
 	var payloadVal interface{} = value
-	var localVal string = value
+	localVal := value
 
 	if operation == "set" {
 		if fieldType == "array" {
@@ -463,15 +463,13 @@ func (s *Server) setField(ctx context.Context, issueKey, fieldName, jiraID, valu
 		}
 	}
 
-	// Update local DB
+	// Update local DB. Best-effort: the write to Jira above already
+	// succeeded (or was queued), so a local cache-update failure is non-fatal.
 	if operation == "set" {
-		_, err := s.db.Exec(
+		_, _ = s.db.Exec(
 			fmt.Sprintf("UPDATE issues SET %s = ?, synced_at = datetime('now') WHERE key = ?", fieldName),
 			localVal, issueKey,
 		)
-		if err != nil {
-			// Non-fatal, continue
-		}
 	} else {
 		// For add/remove, update the local array
 		current := s.readCurrentArray(issueKey, fieldName)

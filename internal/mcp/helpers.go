@@ -71,7 +71,8 @@ func applyResponseFilters(data map[string]interface{}, requestedFields string) m
 	var result map[string]interface{}
 
 	// Determine which fields to keep
-	if requestedFields == "" {
+	switch requestedFields {
+	case "":
 		// Default: use curated field set
 		result = make(map[string]interface{})
 		for _, field := range defaultGetFields {
@@ -79,10 +80,10 @@ func applyResponseFilters(data map[string]interface{}, requestedFields string) m
 				result[field] = val
 			}
 		}
-	} else if requestedFields == "all" {
+	case "all":
 		// All fields except excluded columns
 		result = filterExcluded(data)
-	} else {
+	default:
 		// Specific fields requested - parse and filter
 		fields := parseFieldList(requestedFields)
 		result = make(map[string]interface{})
