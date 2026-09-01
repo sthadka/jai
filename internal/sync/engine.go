@@ -225,7 +225,7 @@ func (e *Engine) Sync(ctx context.Context, full, resume bool, sourceFilter strin
 
 	jiraTZ := e.jiraTimezone()
 	if jiraTZ == nil {
-		return nil, fmt.Errorf("Jira timezone is not initialized; call VerifyAuth before Sync")
+		return nil, fmt.Errorf("jira timezone is not initialized; call VerifyAuth before Sync")
 	}
 
 	ch := make(chan Progress, 64)
