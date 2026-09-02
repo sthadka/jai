@@ -43,8 +43,8 @@ CYAN   := \033[36m
 .PHONY: help \
         build install run clean \
         mcp mcp-stdio mcp-http \
-        fmt fmt-check vet test test-race lint check ci \
-        setup doctor
+        fmt vet test test-race lint check ci \
+        setup hooks doctor
 
 # ── Help ────────────────────────────────────────────────────────────────────
 
@@ -96,11 +96,6 @@ fmt: ## Format Go code (gofmt -w)
 	@gofmt -w $(GOFILES)
 	@printf "  $(GREEN)✓$(RESET) formatted\n"
 
-fmt-check: ## Fail if any Go file needs gofmt
-	@out=$$(gofmt -l $(GOFILES)); \
-	  if [ -n "$$out" ]; then printf "  $(RED)✗$(RESET) needs gofmt:\n%s\n" "$$out"; exit 1; \
-	  else printf "  $(GREEN)✓$(RESET) gofmt clean\n"; fi
-
 vet: ## Run go vet
 	@printf "  $(CYAN)→$(RESET) go vet ./...\n"
 	@$(GO) vet $(GOFLAGS) ./... && printf "  $(GREEN)✓$(RESET) go vet passed\n"
@@ -117,14 +112,22 @@ lint: ## Run golangci-lint (must be installed separately)
 	@printf "  $(CYAN)→$(RESET) golangci-lint run ./...\n"
 	@golangci-lint run ./...
 
-check: vet test ## Pre-commit gate: vet + tests (no external tools required)
+check: ## Pre-commit gate: gofmt + vet + tests
+	@out=$$(gofmt -l $(GOFILES)); \
+	  if [ -n "$$out" ]; then printf "  $(RED)✗$(RESET) needs gofmt (run make fmt):\n%s\n" "$$out"; exit 1; \
+	  else printf "  $(GREEN)✓$(RESET) gofmt clean\n"; fi
+	@$(MAKE) --no-print-directory vet test
 
-ci: check lint ## Mirror CI locally: check + lint (run `make fmt-check` too)
+ci: check lint ## Mirror CI locally: gofmt + vet + tests + lint
 
 ##@ Onboarding
 
-setup: install ## Install jai then run the init wizard
+setup: install hooks ## Install jai, enable git hooks, then run the init wizard
 	@$(BINARY) init
+
+hooks: ## Enable the tracked git hooks (pre-push runs make ci)
+	@git config core.hooksPath .beads/hooks
+	@printf "  $(GREEN)✓$(RESET) git hooks enabled $(DIM)(.beads/hooks — pre-push runs make ci)$(RESET)\n"
 
 doctor: ## Check your toolchain + environment (go, CGO, fts5, golangci-lint)
 	@printf "\n  $(BOLD)Environment check$(RESET)\n\n"
