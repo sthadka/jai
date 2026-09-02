@@ -55,11 +55,11 @@ var statusCmd = &cobra.Command{
 				}
 			}
 			data := map[string]any{
-				"auth":             auth,
-				"sources":          sources,
-				"total_issues":     totalIssues,
+				"auth":              auth,
+				"sources":           sources,
+				"total_issues":      totalIssues,
 				"issues_by_project": countByProject,
-				"pending_changes":  pendingCount,
+				"pending_changes":   pendingCount,
 			}
 			if dbInfo != nil {
 				data["db_size_bytes"] = dbInfo.Size()

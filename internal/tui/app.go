@@ -48,11 +48,11 @@ type App struct {
 	detail      *DetailPane
 
 	// Field picker state (ModeFieldPicker / ModeFieldValue).
-	fieldPickerInput    textinput.Model
-	fieldPickerAll      []*db.FieldMapping
-	fieldPickerFiltered []*db.FieldMapping
-	fieldPickerCursor   int
-	fieldPickerChosen   *db.FieldMapping
+	fieldPickerInput      textinput.Model
+	fieldPickerAll        []*db.FieldMapping
+	fieldPickerFiltered   []*db.FieldMapping
+	fieldPickerCursor     int
+	fieldPickerChosen     *db.FieldMapping
 	fieldValueInput       textinput.Model
 	fieldValueCurrent     string
 	fieldValueSugFiltered []string // DB-queried suggestions for the current input
@@ -85,17 +85,17 @@ func New(cfg *config.Config, queryEng *query.Engine, syncEng *synce.Engine, data
 	fvi.CharLimit = 256
 
 	a := &App{
-		cfg:              cfg,
-		queryEng:         queryEng,
-		syncEngine:       syncEng,
-		database:         database,
-		jiraClient:       jiraClient,
-		keys:             DefaultKeys(),
-		filterInput:      ti,
-		fieldPickerInput: fpi,
-		fieldValueInput:  fvi,
+		cfg:                 cfg,
+		queryEng:            queryEng,
+		syncEngine:          syncEng,
+		database:            database,
+		jiraClient:          jiraClient,
+		keys:                DefaultKeys(),
+		filterInput:         ti,
+		fieldPickerInput:    fpi,
+		fieldValueInput:     fvi,
 		fieldValueSugCursor: -1,
-		syncTick:         15 * time.Minute,
+		syncTick:            15 * time.Minute,
 	}
 
 	if d, err := time.ParseDuration(cfg.Sync.Interval); err == nil {
@@ -205,8 +205,8 @@ type viewLoadedMsg struct {
 
 // detailLoadedMsg carries the result of an async detail data load.
 type detailLoadedMsg struct {
-	data        *DetailData
-	err         error
+	data *DetailData
+	err  error
 }
 
 // loadDetailCmd asynchronously fetches all data needed for the detail pane.

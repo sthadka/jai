@@ -24,14 +24,14 @@ func DefaultDBPath() string {
 
 // Config holds the full jai configuration.
 type Config struct {
-	Jira        JiraConfig      `yaml:"jira"`
-	Sync        SyncConfig      `yaml:"sync"`
-	DB          DBConfig        `yaml:"db"`
-	Fields      FieldsConfig    `yaml:"fields"`
-	Views       []ViewConfig    `yaml:"views"`
-	Me          string          `yaml:"me"`
-	Team        string          `yaml:"team"`
-	SyncSources []SyncSource    `yaml:"sync_sources"`
+	Jira        JiraConfig        `yaml:"jira"`
+	Sync        SyncConfig        `yaml:"sync"`
+	DB          DBConfig          `yaml:"db"`
+	Fields      FieldsConfig      `yaml:"fields"`
+	Views       []ViewConfig      `yaml:"views"`
+	Me          string            `yaml:"me"`
+	Team        string            `yaml:"team"`
+	SyncSources []SyncSource      `yaml:"sync_sources"`
 	Hierarchy   HierarchyConfig   `yaml:"hierarchy"`
 	Detail      DetailConfig      `yaml:"detail"`
 	Templates   map[string]string `yaml:"templates"`
@@ -80,12 +80,12 @@ type JiraConfig struct {
 
 // SyncConfig holds sync behavior settings.
 type SyncConfig struct {
-	Interval     string   `yaml:"interval"`      // e.g. "15m"
-	RateLimit    float64  `yaml:"rate_limit"`    // requests per second
-	History      bool     `yaml:"history"`       // sync changelog
-	FTSFields    []string `yaml:"fts_fields"`    // extra fields for FTS index
-	Sprints      bool     `yaml:"sprints"`       // sync sprint and board data
-	DevInfo      bool     `yaml:"dev_info"`      // sync development info (requires extra API permissions)
+	Interval  string   `yaml:"interval"`   // e.g. "15m"
+	RateLimit float64  `yaml:"rate_limit"` // requests per second
+	History   bool     `yaml:"history"`    // sync changelog
+	FTSFields []string `yaml:"fts_fields"` // extra fields for FTS index
+	Sprints   bool     `yaml:"sprints"`    // sync sprint and board data
+	DevInfo   bool     `yaml:"dev_info"`   // sync development info (requires extra API permissions)
 }
 
 // DBConfig holds database settings.

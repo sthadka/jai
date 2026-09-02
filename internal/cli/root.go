@@ -27,12 +27,12 @@ type globals struct {
 	fields   string
 	format   string
 
-	cfg       *config.Config
-	db        *db.DB
-	jira      *jira.Client
-	query     *query.Engine
-	sync      *synce.Engine
-	bgWorker  *synce.BackgroundWorker
+	cfg      *config.Config
+	db       *db.DB
+	jira     *jira.Client
+	query    *query.Engine
+	sync     *synce.Engine
+	bgWorker *synce.BackgroundWorker
 }
 
 var g globals
@@ -279,4 +279,3 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&g.fields, "fields", "", "comma-separated field names to include in output")
 	rootCmd.PersistentFlags().StringVar(&g.format, "format", "table", "output format: table, json, csv, tsv, markdown")
 }
-

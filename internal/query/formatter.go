@@ -94,7 +94,7 @@ func (r *Results) JSONBytes() ([]byte, error) {
 func (r *Results) SingleJSON() ([]byte, error) {
 	if len(r.Rows) == 0 {
 		return json.Marshal(map[string]interface{}{
-			"ok":   false,
+			"ok":    false,
 			"error": map[string]string{"type": "NotFoundError", "message": "not found"},
 		})
 	}

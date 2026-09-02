@@ -1369,31 +1369,31 @@ func (s *Server) handleJaiUpdate(ctx context.Context, req mcp.CallToolRequest) (
 	// Set fields
 	if args, ok := req.Params.Arguments.(map[string]interface{}); ok {
 		if setRaw, ok := args["set"]; ok {
-		if setFields, ok := setRaw.(map[string]interface{}); ok {
-			fieldsSet := 0
-			for field, valueRaw := range setFields {
-				value, _ := valueRaw.(string)
-				// Call jai_set for each field
-				setReq := mcp.CallToolRequest{
-					Params: mcp.CallToolParams{
-						Arguments: map[string]interface{}{
-							"keys":      issueKey,
-							"field":     field,
-							"value":     value,
-							"operation": "set",
-							"queue":     queue,
+			if setFields, ok := setRaw.(map[string]interface{}); ok {
+				fieldsSet := 0
+				for field, valueRaw := range setFields {
+					value, _ := valueRaw.(string)
+					// Call jai_set for each field
+					setReq := mcp.CallToolRequest{
+						Params: mcp.CallToolParams{
+							Arguments: map[string]interface{}{
+								"keys":      issueKey,
+								"field":     field,
+								"value":     value,
+								"operation": "set",
+								"queue":     queue,
+							},
 						},
-					},
+					}
+					_, err := s.handleJaiSet(ctx, setReq)
+					if err == nil {
+						fieldsSet++
+					} else {
+						failed = append(failed, fmt.Sprintf("set_%s", field))
+					}
 				}
-				_, err := s.handleJaiSet(ctx, setReq)
-				if err == nil {
-					fieldsSet++
-				} else {
-					failed = append(failed, fmt.Sprintf("set_%s", field))
-				}
+				operations["fields_set"] = fieldsSet
 			}
-			operations["fields_set"] = fieldsSet
-		}
 		}
 
 		// Transition
@@ -1420,24 +1420,24 @@ func (s *Server) handleJaiUpdate(ctx context.Context, req mcp.CallToolRequest) (
 
 		// Comment
 		if commentRaw, ok := args["comment"]; ok {
-		if commentText, ok := commentRaw.(string); ok && commentText != "" {
-			commentReq := mcp.CallToolRequest{
-				Params: mcp.CallToolParams{
-					Arguments: map[string]interface{}{
-						"key":   issueKey,
-						"text":  commentText,
-						"queue": queue,
+			if commentText, ok := commentRaw.(string); ok && commentText != "" {
+				commentReq := mcp.CallToolRequest{
+					Params: mcp.CallToolParams{
+						Arguments: map[string]interface{}{
+							"key":   issueKey,
+							"text":  commentText,
+							"queue": queue,
+						},
 					},
-				},
+				}
+				_, err := s.handleJaiComment(ctx, commentReq)
+				if err == nil {
+					operations["comment"] = "ok"
+				} else {
+					operations["comment"] = "failed"
+					failed = append(failed, "comment")
+				}
 			}
-			_, err := s.handleJaiComment(ctx, commentReq)
-			if err == nil {
-				operations["comment"] = "ok"
-			} else {
-				operations["comment"] = "failed"
-				failed = append(failed, "comment")
-			}
-		}
 		}
 	}
 

@@ -4,14 +4,14 @@ import "time"
 
 // Attachment represents a row from the attachments table.
 type Attachment struct {
-	ID        int
-	IssueKey  string
-	Filename  string
-	Size      int
-	MimeType  string
-	Author    string
-	Created   string
-	URL       string
+	ID       int
+	IssueKey string
+	Filename string
+	Size     int
+	MimeType string
+	Author   string
+	Created  string
+	URL      string
 }
 
 // UpsertAttachments replaces all attachments for an issue and updates attachment_count.

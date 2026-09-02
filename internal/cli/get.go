@@ -478,7 +478,6 @@ func printCommentsSection(comments []map[string]interface{}) {
 	}
 }
 
-
 func init() {
 	rootCmd.AddCommand(getCmd)
 	getCmd.Flags().BoolVar(&getShowComments, "comments", false, "include comments in output")

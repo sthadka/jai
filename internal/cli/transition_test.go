@@ -15,11 +15,11 @@ func TestResolveTransition(t *testing.T) {
 	}
 
 	tests := []struct {
-		name        string
-		input       string
-		wantMatch   string
-		wantAmbig   int
-		wantNone    bool
+		name      string
+		input     string
+		wantMatch string
+		wantAmbig int
+		wantNone  bool
 	}{
 		{name: "exact match", input: "Done", wantMatch: "31"},
 		{name: "case insensitive", input: "done", wantMatch: "31"},

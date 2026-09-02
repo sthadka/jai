@@ -2,11 +2,11 @@ package config
 
 // defaultTemplates provides built-in issue description templates.
 var defaultTemplates = map[string]string{
-	"bug": "## Steps to Reproduce\n1. \n\n## Expected Behavior\n\n\n## Actual Behavior\n\n\n## Environment\n",
+	"bug":   "## Steps to Reproduce\n1. \n\n## Expected Behavior\n\n\n## Actual Behavior\n\n\n## Environment\n",
 	"story": "## User Story\nAs a [role], I want [feature] so that [benefit].\n\n## Acceptance Criteria\n- [ ] \n\n## Notes\n",
-	"task": "## Description\n\n\n## Steps\n- [ ] \n\n## Done When\n",
+	"task":  "## Description\n\n\n## Steps\n- [ ] \n\n## Done When\n",
 	"spike": "## Question\n\n\n## Research Areas\n- \n\n## Time Box\n\n## Output\n",
-	"epic": "## Goal\n\n\n## Success Metrics\n- \n\n## Scope\n\n### In Scope\n- \n\n### Out of Scope\n- \n",
+	"epic":  "## Goal\n\n\n## Success Metrics\n- \n\n## Scope\n\n### In Scope\n- \n\n### Out of Scope\n- \n",
 }
 
 // defaultSnippets provides built-in SQL query snippets.

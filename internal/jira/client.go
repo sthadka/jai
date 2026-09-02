@@ -382,4 +382,3 @@ func (c *Client) GetDevInfo(ctx context.Context, issueID string) (*DevInfoRespon
 	}
 	return &resp, nil
 }
-

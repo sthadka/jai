@@ -14,10 +14,10 @@ import (
 
 // CommandSchema describes a command's parameters and flags.
 type CommandSchema struct {
-	Name        string                     `json:"command"`
-	Description string                     `json:"description"`
-	Params      map[string]ParamSchema     `json:"params,omitempty"`
-	Flags       map[string]ParamSchema     `json:"flags,omitempty"`
+	Name        string                 `json:"command"`
+	Description string                 `json:"description"`
+	Params      map[string]ParamSchema `json:"params,omitempty"`
+	Flags       map[string]ParamSchema `json:"flags,omitempty"`
 }
 
 // ParamSchema describes a single parameter.

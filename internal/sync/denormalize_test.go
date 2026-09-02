@@ -117,10 +117,10 @@ func TestDenormalize_CustomArrayField(t *testing.T) {
 
 func TestDenormalize_ObjectFieldFallback(t *testing.T) {
 	tests := []struct {
-		name     string
+		name      string
 		fieldType string
-		rawValue string
-		want     string
+		rawValue  string
+		want      string
 	}{
 		{"name key (Team-type)", "text", `{"id":"abc","name":"ACS Cloud Service","isShared":true}`, "ACS Cloud Service"},
 		{"value key", "text", `{"id":"xyz","value":"High Impact"}`, "High Impact"},
@@ -195,16 +195,20 @@ func TestExtractChangelog(t *testing.T) {
 		Changelog: &jira.Changelog{
 			Histories: []jira.ChangelogHistory{
 				{
-					ID:      "100",
-					Author:  &struct{ DisplayName string `json:"displayName"` }{"Jane Doe"},
+					ID: "100",
+					Author: &struct {
+						DisplayName string `json:"displayName"`
+					}{"Jane Doe"},
 					Created: "2026-06-10T14:30:00.000+0000",
 					Items: []jira.ChangelogItem{
 						{Field: "status", FieldType: "jira", From: "10001", FromString: "In Progress", To: "10002", ToString: "Release Pending"},
 					},
 				},
 				{
-					ID:      "101",
-					Author:  &struct{ DisplayName string `json:"displayName"` }{"Bob Smith"},
+					ID: "101",
+					Author: &struct {
+						DisplayName string `json:"displayName"`
+					}{"Bob Smith"},
 					Created: "2026-06-01T10:00:00.000+0000",
 					Items: []jira.ChangelogItem{
 						{Field: "status", FieldType: "jira", From: "10000", FromString: "New", To: "10001", ToString: "In Progress"},
@@ -269,7 +273,9 @@ func TestExtractBulkChangelog(t *testing.T) {
 		{
 			ID:      "200",
 			IssueID: "10042",
-			Author:  &struct{ DisplayName string `json:"displayName"` }{"Jane Doe"},
+			Author: &struct {
+				DisplayName string `json:"displayName"`
+			}{"Jane Doe"},
 			Created: "2026-06-10T14:30:00.000+0000",
 			Items: []jira.ChangelogItem{
 				{Field: "status", FieldType: "jira", From: "10001", FromString: "In Progress", To: "10002", ToString: "Release Pending"},
@@ -278,7 +284,9 @@ func TestExtractBulkChangelog(t *testing.T) {
 		{
 			ID:      "201",
 			IssueID: "10043",
-			Author:  &struct{ DisplayName string `json:"displayName"` }{"Bob Smith"},
+			Author: &struct {
+				DisplayName string `json:"displayName"`
+			}{"Bob Smith"},
 			Created: "2026-06-01T10:00:00.000+0000",
 			Items: []jira.ChangelogItem{
 				{Field: "status", FieldType: "jira", FromString: "New", ToString: "In Progress"},

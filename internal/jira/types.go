@@ -8,9 +8,9 @@ import (
 
 // SearchResponse is the Jira /rest/api/3/search/jql response.
 type SearchResponse struct {
-	Issues        []*Issue `json:"issues"`
-	NextPageToken string   `json:"nextPageToken"`
-	ErrorMessages []string `json:"errorMessages"`
+	Issues          []*Issue `json:"issues"`
+	NextPageToken   string   `json:"nextPageToken"`
+	ErrorMessages   []string `json:"errorMessages"`
 	WarningMessages []string `json:"warningMessages"`
 }
 
@@ -42,9 +42,9 @@ type IssueFields struct {
 		DisplayName  string `json:"displayName"`
 		EmailAddress string `json:"emailAddress"`
 	} `json:"reporter"`
-	Created        string `json:"created"`
-	Updated        string `json:"updated"`
-	ResolutionDate string `json:"resolutiondate"`
+	Created        string   `json:"created"`
+	Updated        string   `json:"updated"`
+	ResolutionDate string   `json:"resolutiondate"`
 	Labels         []string `json:"labels"`
 	Components     []struct {
 		Name string `json:"name"`
@@ -81,8 +81,12 @@ type IssueFields struct {
 			Inward  string `json:"inward"`
 			Outward string `json:"outward"`
 		} `json:"type"`
-		InwardIssue  *struct{ Key string `json:"key"` } `json:"inwardIssue"`
-		OutwardIssue *struct{ Key string `json:"key"` } `json:"outwardIssue"`
+		InwardIssue *struct {
+			Key string `json:"key"`
+		} `json:"inwardIssue"`
+		OutwardIssue *struct {
+			Key string `json:"key"`
+		} `json:"outwardIssue"`
 	} `json:"issuelinks"`
 }
 
@@ -111,8 +115,8 @@ type Changelog struct {
 
 // ChangelogHistory is a single changelog entry (one user action at one timestamp).
 type ChangelogHistory struct {
-	ID      string `json:"id"`
-	Author  *struct {
+	ID     string `json:"id"`
+	Author *struct {
 		DisplayName string `json:"displayName"`
 	} `json:"author"`
 	Created string          `json:"created"`
@@ -510,13 +514,13 @@ type SprintResponse struct {
 
 // Sprint represents a Jira sprint.
 type Sprint struct {
-	ID            int    `json:"id"`
-	Name          string `json:"name"`
-	State         string `json:"state"`
-	StartDate     string `json:"startDate"`
-	EndDate       string `json:"endDate"`
-	CompleteDate  string `json:"completeDate"`
-	Goal          string `json:"goal"`
+	ID           int    `json:"id"`
+	Name         string `json:"name"`
+	State        string `json:"state"`
+	StartDate    string `json:"startDate"`
+	EndDate      string `json:"endDate"`
+	CompleteDate string `json:"completeDate"`
+	Goal         string `json:"goal"`
 }
 
 // SprintIssuesResponse is the response from GET /rest/agile/1.0/sprint/{sprintId}/issue.
@@ -536,40 +540,40 @@ type DevInfoDetail struct {
 
 // DevRepository contains development links from a single repository.
 type DevRepository struct {
-	Name         string              `json:"name"`
-	PullRequests []DevPullRequest    `json:"pullRequests"`
-	Branches     []DevBranch         `json:"branches"`
-	Commits      []DevCommit         `json:"commits"`
+	Name         string           `json:"name"`
+	PullRequests []DevPullRequest `json:"pullRequests"`
+	Branches     []DevBranch      `json:"branches"`
+	Commits      []DevCommit      `json:"commits"`
 }
 
 // DevPullRequest represents a pull request linked to an issue.
 type DevPullRequest struct {
-	ID            string `json:"id"`
-	Title         string `json:"title"`
-	URL           string `json:"url"`
-	Status        string `json:"status"`
-	LastUpdate    string `json:"lastUpdate"`
-	Author        *struct {
+	ID         string `json:"id"`
+	Title      string `json:"title"`
+	URL        string `json:"url"`
+	Status     string `json:"status"`
+	LastUpdate string `json:"lastUpdate"`
+	Author     *struct {
 		Name string `json:"name"`
 	} `json:"author"`
 }
 
 // DevBranch represents a branch linked to an issue.
 type DevBranch struct {
-	Name          string `json:"name"`
-	URL           string `json:"url"`
-	LastCommit    *struct {
+	Name       string `json:"name"`
+	URL        string `json:"url"`
+	LastCommit *struct {
 		ID string `json:"id"`
 	} `json:"lastCommit"`
 }
 
 // DevCommit represents a commit linked to an issue.
 type DevCommit struct {
-	ID            string `json:"id"`
-	Message       string `json:"message"`
-	URL           string `json:"url"`
-	Timestamp     string `json:"timestamp"`
-	Author        *struct {
+	ID        string `json:"id"`
+	Message   string `json:"message"`
+	URL       string `json:"url"`
+	Timestamp string `json:"timestamp"`
+	Author    *struct {
 		Name string `json:"name"`
 	} `json:"author"`
 }

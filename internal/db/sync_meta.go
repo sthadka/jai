@@ -7,14 +7,14 @@ import (
 
 // SyncMeta holds sync metadata for a project.
 type SyncMeta struct {
-	Project            string
-	LastSyncTime       sql.NullString
-	LastFullSync       sql.NullString
-	IssuesTotal        sql.NullInt64
-	IssuesSynced       sql.NullInt64
-	LastSyncDuration   sql.NullFloat64
-	LastSyncError      sql.NullString
-	LastIssueUpdated   sql.NullString
+	Project          string
+	LastSyncTime     sql.NullString
+	LastFullSync     sql.NullString
+	IssuesTotal      sql.NullInt64
+	IssuesSynced     sql.NullInt64
+	LastSyncDuration sql.NullFloat64
+	LastSyncError    sql.NullString
+	LastIssueUpdated sql.NullString
 }
 
 // GetSyncMeta retrieves sync metadata for a project. Returns zero value if not found.

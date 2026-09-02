@@ -9,38 +9,38 @@ import (
 
 // Issue represents a row from the issues table.
 type Issue struct {
-	ID               string
-	Key              string
-	Project          string
-	Type             string
-	Summary          string
-	Description      string
-	Status           string
-	StatusCategory   string
-	Priority         string
-	Assignee         string
-	AssigneeEmail    string
-	Reporter         string
-	Created          string
-	Updated          string
-	Resolved         string
-	Labels           string
-	Components       string
-	FixVersion       string
-	ParentKey        string
-	EpicKey          string
-	StoryPoints      sql.NullFloat64
-	CommentsText     string
-	RawJSON          string
-	SyncedAt         string
-	Resolution       string
-	DueDate          string
-	OriginalEstimate sql.NullInt64
-	TimeSpent        sql.NullInt64
+	ID                string
+	Key               string
+	Project           string
+	Type              string
+	Summary           string
+	Description       string
+	Status            string
+	StatusCategory    string
+	Priority          string
+	Assignee          string
+	AssigneeEmail     string
+	Reporter          string
+	Created           string
+	Updated           string
+	Resolved          string
+	Labels            string
+	Components        string
+	FixVersion        string
+	ParentKey         string
+	EpicKey           string
+	StoryPoints       sql.NullFloat64
+	CommentsText      string
+	RawJSON           string
+	SyncedAt          string
+	Resolution        string
+	DueDate           string
+	OriginalEstimate  sql.NullInt64
+	TimeSpent         sql.NullInt64
 	RemainingEstimate sql.NullInt64
-	SubtaskKeys      string
-	SprintID         sql.NullInt64
-	SprintName       string
+	SubtaskKeys       string
+	SprintID          sql.NullInt64
+	SprintName        string
 }
 
 // IssueLink represents a row from the issue_links table.
