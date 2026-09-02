@@ -417,11 +417,11 @@ func (e *Engine) syncSource(ctx context.Context, src config.SyncSource, full, re
 
 // ChangelogProgress reports changelog sync progress.
 type ChangelogProgress struct {
-	Total     int
-	Synced    int
-	Skipped   int
-	Error     error
-	Done      bool
+	Total   int
+	Synced  int
+	Skipped int
+	Error   error
+	Done    bool
 }
 
 // SyncChangelogs fetches changelogs for issues that need them.

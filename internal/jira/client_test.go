@@ -145,16 +145,20 @@ func TestGetIssueChangelog(t *testing.T) {
 			Changelog: &Changelog{
 				Histories: []ChangelogHistory{
 					{
-						ID:      "100",
-						Author:  &struct{ DisplayName string `json:"displayName"` }{"Jane Doe"},
+						ID: "100",
+						Author: &struct {
+							DisplayName string `json:"displayName"`
+						}{"Jane Doe"},
 						Created: "2026-06-10T14:30:00.000+0000",
 						Items: []ChangelogItem{
 							{Field: "status", FieldType: "jira", From: "10001", FromString: "In Progress", To: "10002", ToString: "Release Pending"},
 						},
 					},
 					{
-						ID:      "101",
-						Author:  &struct{ DisplayName string `json:"displayName"` }{"Bob Smith"},
+						ID: "101",
+						Author: &struct {
+							DisplayName string `json:"displayName"`
+						}{"Bob Smith"},
 						Created: "2026-06-01T10:00:00.000+0000",
 						Items: []ChangelogItem{
 							{Field: "status", FieldType: "jira", From: "10000", FromString: "New", To: "10001", ToString: "In Progress"},
@@ -214,21 +218,27 @@ func TestBulkFetchChangelogs(t *testing.T) {
 				{
 					ID:      "100",
 					IssueID: "10042",
-					Author:  &struct{ DisplayName string `json:"displayName"` }{"Jane"},
+					Author: &struct {
+						DisplayName string `json:"displayName"`
+					}{"Jane"},
 					Created: "2026-06-10T14:30:00.000+0000",
 					Items:   []ChangelogItem{{Field: "status", FieldType: "jira", ToString: "Done"}},
 				},
 				{
 					ID:      "101",
 					IssueID: "10042",
-					Author:  &struct{ DisplayName string `json:"displayName"` }{"Bob"},
+					Author: &struct {
+						DisplayName string `json:"displayName"`
+					}{"Bob"},
 					Created: "2026-06-01T10:00:00.000+0000",
 					Items:   []ChangelogItem{{Field: "status", FieldType: "jira", ToString: "In Progress"}},
 				},
 				{
 					ID:      "102",
 					IssueID: "10043",
-					Author:  &struct{ DisplayName string `json:"displayName"` }{"Jane"},
+					Author: &struct {
+						DisplayName string `json:"displayName"`
+					}{"Jane"},
 					Created: "2026-06-05T08:00:00.000+0000",
 					Items:   []ChangelogItem{{Field: "priority", FieldType: "jira", ToString: "High"}},
 				},

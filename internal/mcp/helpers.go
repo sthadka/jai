@@ -151,9 +151,9 @@ func issueFieldsToMap(key string, fields json.RawMessage) map[string]interface{}
 			DisplayName  string `json:"displayName"`
 			EmailAddress string `json:"emailAddress"`
 		} `json:"reporter"`
-		Created        string `json:"created"`
-		Updated        string `json:"updated"`
-		ResolutionDate string `json:"resolutiondate"`
+		Created        string   `json:"created"`
+		Updated        string   `json:"updated"`
+		ResolutionDate string   `json:"resolutiondate"`
 		Labels         []string `json:"labels"`
 		Components     []struct {
 			Name string `json:"name"`

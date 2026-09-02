@@ -132,9 +132,9 @@ func runDepsProject(project string) error {
 
 	if g.jsonOut {
 		type response struct {
-			Project      string        `json:"project"`
-			Links        []linkSummary `json:"links"`
-			UnsyncedProjects []string  `json:"unsynced_projects"`
+			Project          string        `json:"project"`
+			Links            []linkSummary `json:"links"`
+			UnsyncedProjects []string      `json:"unsynced_projects"`
 		}
 		unsynced := findUnsyncedProjectsFromResults(results)
 		fmt.Println(string(output.OK(response{
@@ -190,18 +190,18 @@ func runDepsProject(project string) error {
 
 // depsTreeNode represents a node in the dependency tree.
 type depsTreeNode struct {
-	Key     string          `json:"key"`
-	Summary string          `json:"summary"`
-	Status  string          `json:"status"`
-	Project string          `json:"project"`
-	Links   []depsTreeLink  `json:"links"`
+	Key     string         `json:"key"`
+	Summary string         `json:"summary"`
+	Status  string         `json:"status"`
+	Project string         `json:"project"`
+	Links   []depsTreeLink `json:"links"`
 }
 
 // depsTreeLink represents a link in the dependency tree.
 type depsTreeLink struct {
-	Type      string        `json:"type"`
-	Direction string        `json:"direction"` // "→" or "←"
-	Target    depsTreeNode  `json:"target"`
+	Type      string       `json:"type"`
+	Direction string       `json:"direction"` // "→" or "←"
+	Target    depsTreeNode `json:"target"`
 }
 
 // buildDepsTree recursively builds a dependency tree.

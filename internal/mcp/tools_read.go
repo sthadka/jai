@@ -451,18 +451,18 @@ func jqlIssueToRow(issue interface{}, cols []string) ([]interface{}, error) {
 
 	// Parse the fields JSON
 	type issueFields struct {
-		Summary        string `json:"summary"`
-		Status         *struct{ Name string } `json:"status"`
-		Priority       *struct{ Name string } `json:"priority"`
+		Summary        string                        `json:"summary"`
+		Status         *struct{ Name string }        `json:"status"`
+		Priority       *struct{ Name string }        `json:"priority"`
 		Assignee       *struct{ DisplayName string } `json:"assignee"`
 		Reporter       *struct{ DisplayName string } `json:"reporter"`
-		IssueType      *struct{ Name string } `json:"issuetype"`
-		Project        *struct{ Key string } `json:"project"`
-		Created        string `json:"created"`
-		Updated        string `json:"updated"`
-		ResolutionDate string `json:"resolutiondate"`
-		Labels         []string `json:"labels"`
-		Parent         *struct{ Key string } `json:"parent"`
+		IssueType      *struct{ Name string }        `json:"issuetype"`
+		Project        *struct{ Key string }         `json:"project"`
+		Created        string                        `json:"created"`
+		Updated        string                        `json:"updated"`
+		ResolutionDate string                        `json:"resolutiondate"`
+		Labels         []string                      `json:"labels"`
+		Parent         *struct{ Key string }         `json:"parent"`
 	}
 
 	var fields issueFields

@@ -21,22 +21,22 @@ type ChainItem struct {
 
 // DetailData holds all data needed to render the issue detail pane.
 type DetailData struct {
-	IssueKey    string
-	ProjectName string // display name, e.g. "Rox Platform"
-	Chain       []ChainItem
-	Issue       map[string]interface{} // full row from issues table
-	Comments    []*db.Comment
-	FieldMap    []*db.FieldMapping
+	IssueKey     string
+	ProjectName  string // display name, e.g. "Rox Platform"
+	Chain        []ChainItem
+	Issue        map[string]interface{} // full row from issues table
+	Comments     []*db.Comment
+	FieldMap     []*db.FieldMapping
 	SidebarExtra []string // jira_name values from config.Detail.SidebarFields
 }
 
 // DetailPane renders a rich two-panel issue view.
 type DetailPane struct {
-	data        *DetailData
-	jiraURL     string
+	data         *DetailData
+	jiraURL      string
 	scrollOffset int
-	leftLines   []string  // pre-rendered left panel lines
-	rightLines  []string  // pre-rendered right panel lines (sidebar, static)
+	leftLines    []string // pre-rendered left panel lines
+	rightLines   []string // pre-rendered right panel lines (sidebar, static)
 }
 
 // NewDetailPane creates a DetailPane from loaded data.

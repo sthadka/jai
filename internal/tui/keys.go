@@ -15,17 +15,17 @@ type KeyMap struct {
 	GoBottom key.Binding
 
 	// View switching.
-	TabNext  key.Binding
-	TabPrev  key.Binding
-	Tab1     key.Binding
-	Tab2     key.Binding
-	Tab3     key.Binding
-	Tab4     key.Binding
-	Tab5     key.Binding
-	Tab6     key.Binding
-	Tab7     key.Binding
-	Tab8     key.Binding
-	Tab9     key.Binding
+	TabNext key.Binding
+	TabPrev key.Binding
+	Tab1    key.Binding
+	Tab2    key.Binding
+	Tab3    key.Binding
+	Tab4    key.Binding
+	Tab5    key.Binding
+	Tab6    key.Binding
+	Tab7    key.Binding
+	Tab8    key.Binding
+	Tab9    key.Binding
 
 	// Actions.
 	Select      key.Binding

@@ -125,12 +125,12 @@ func handleSchemaDB(s *Server, ctx context.Context, tier, filter string) (*mcp.C
 	}
 
 	type col struct {
-		Name       string `json:"name"`
-		Type       string `json:"type"`
-		Custom     bool   `json:"custom,omitempty"`
-		JiraName   string `json:"jira_name,omitempty"`
-		Populated  int    `json:"populated,omitempty"`
-		Total      int    `json:"total,omitempty"`
+		Name      string `json:"name"`
+		Type      string `json:"type"`
+		Custom    bool   `json:"custom,omitempty"`
+		JiraName  string `json:"jira_name,omitempty"`
+		Populated int    `json:"populated,omitempty"`
+		Total     int    `json:"total,omitempty"`
 	}
 
 	// Query table_info for issues table

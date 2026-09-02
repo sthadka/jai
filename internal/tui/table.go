@@ -11,8 +11,8 @@ import (
 // TableModel renders a sortable, scrollable, filterable table.
 type TableModel struct {
 	columns    []string
-	rows       [][]string   // all rows
-	filtered   [][]string   // filtered rows (subset of rows)
+	rows       [][]string // all rows
+	filtered   [][]string // filtered rows (subset of rows)
 	cursor     int
 	offset     int
 	height     int
