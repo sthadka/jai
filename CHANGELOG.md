@@ -1,5 +1,13 @@
 # Changelog
 
+## [4.0.1](https://github.com/sthadka/jai/compare/v4.0.0...v4.0.1) (2026-09-02)
+
+
+### Bug Fixes
+
+* convert sync cursor to user's Jira timezone before JQL query ([c279a80](https://github.com/sthadka/jai/commit/c279a80bf138a332c27ac72b9bc5caa6f9d8c9eb))
+* lowercase error string to satisfy staticcheck ST1005 ([ff5911a](https://github.com/sthadka/jai/commit/ff5911ab1b4a4b75b6012b2ab02abdda1c88ac36))
+
 ## [Unreleased]
 
 ### Bug Fixes
