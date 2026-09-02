@@ -22,3 +22,22 @@ if command -v bd >/dev/null 2>&1; then
   if [ $_bd_exit -ne 0 ]; then exit $_bd_exit; fi
 fi
 # --- END BEADS INTEGRATION v1.0.4 ---
+
+# --- jai CI gate (keeps remote CI green) ---
+# Runs the deterministic gate (gofmt + vet + tests) before every push.
+# Set CI_HOOK_TARGET=ci to also run lint (needs a golangci-lint matching your
+# Go toolchain). Bypass everything with:   git push --no-verify
+# Skip only this gate with:                SKIP_CI_HOOK=1 git push
+if [ "${SKIP_CI_HOOK:-}" = "1" ]; then
+  echo >&2 "jai: SKIP_CI_HOOK=1 — skipping local CI gate"
+elif ! command -v make >/dev/null 2>&1; then
+  echo >&2 "jai: make not found — skipping local CI gate"
+else
+  _ci_target="${CI_HOOK_TARGET:-check}"
+  echo >&2 "jai: running 'make $_ci_target' before push (SKIP_CI_HOOK=1 to skip, --no-verify to bypass all hooks)"
+  if ! make "$_ci_target"; then
+    echo >&2 "jai: 'make $_ci_target' failed — fix the issues above, or push with --no-verify"
+    exit 1
+  fi
+fi
+# --- END jai CI gate ---

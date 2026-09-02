@@ -125,9 +125,9 @@ ci: check lint ## Mirror CI locally: gofmt + vet + tests + lint
 setup: install hooks ## Install jai, enable git hooks, then run the init wizard
 	@$(BINARY) init
 
-hooks: ## Enable the tracked git hooks (pre-push runs make ci)
+hooks: ## Enable the tracked git hooks (pre-push runs make check)
 	@git config core.hooksPath .beads/hooks
-	@printf "  $(GREEN)✓$(RESET) git hooks enabled $(DIM)(.beads/hooks — pre-push runs make ci)$(RESET)\n"
+	@printf "  $(GREEN)✓$(RESET) git hooks enabled $(DIM)(.beads/hooks — pre-push runs make check; CI_HOOK_TARGET=ci adds lint)$(RESET)\n"
 
 doctor: ## Check your toolchain + environment (go, CGO, fts5, golangci-lint)
 	@printf "\n  $(BOLD)Environment check$(RESET)\n\n"
