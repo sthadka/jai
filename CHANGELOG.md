@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.0.2](https://github.com/sthadka/jai/compare/v4.0.1...v4.0.2) (2026-09-03)
+
+
+### Bug Fixes
+
+* make jai sync --changelogs incremental instead of full refetch ([202de37](https://github.com/sthadka/jai/commit/202de37bf50bcc2b7883396514982efb1a8ac190))
+
 ## [4.0.1](https://github.com/sthadka/jai/compare/v4.0.0...v4.0.1) (2026-09-02)
 
 
