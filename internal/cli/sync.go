@@ -16,6 +16,7 @@ var syncResume bool
 var syncSourceFlag string
 var syncVerbose bool
 var syncChangelogs bool
+var syncChangelogsForce bool
 
 var syncCmd = &cobra.Command{
 	Use:   "sync",
@@ -47,7 +48,10 @@ var syncCmd = &cobra.Command{
 		fmt.Printf("Done. %d issues synced.\n", total)
 
 		if syncChangelogs {
-			clCh, err := g.sync.SyncChangelogs(ctx, syncSourceFlag, true)
+			// Incremental by default: only issues whose changelog was never
+			// synced (or that were updated since) are re-fetched. --force resets
+			// all changelog_synced_at timestamps first for a full re-fetch.
+			clCh, err := g.sync.SyncChangelogs(ctx, syncSourceFlag, syncChangelogsForce)
 			if err != nil {
 				return fmt.Errorf("changelog sync: %w", err)
 			}
@@ -210,6 +214,8 @@ func init() {
 	syncCmd.Flags().StringVar(&syncSourceFlag, "source", "", "sync only this named source (from sync_sources in config)")
 	syncCmd.Flags().BoolVar(&syncVerbose, "verbose", false, "print effective JQL for each source")
 	syncCmd.Flags().BoolVar(&syncChangelogs, "changelogs", false,
-		"backfill changelog history (only needed for initial import; day-to-day syncs include changelogs automatically)")
+		"backfill changelog history (incremental; only fetches issues whose changelog is missing or stale)")
+	syncCmd.Flags().BoolVar(&syncChangelogsForce, "force", false,
+		"with --changelogs, re-fetch all changelog history from scratch (resets incremental state)")
 	rootCmd.AddCommand(syncCmd)
 }
