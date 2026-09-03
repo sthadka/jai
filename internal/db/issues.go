@@ -55,7 +55,14 @@ type IssueLink struct {
 	LinkedProject string
 }
 
-// UpsertIssue inserts or replaces an issue row. Extra contains additional dynamic columns.
+// UpsertIssue inserts a new issue row or updates an existing one. Extra contains
+// additional dynamic columns.
+//
+// It uses INSERT ... ON CONFLICT(key) DO UPDATE rather than INSERT OR REPLACE:
+// REPLACE deletes the existing row and re-inserts it, which resets any column not
+// listed here to its default (NULL). That would wipe columns maintained outside
+// this function — notably changelog_synced_at — forcing a full changelog re-fetch
+// on the next sync. Upsert only touches the columns we explicitly set.
 func (db *DB) UpsertIssue(issue *Issue, extra map[string]interface{}) error {
 	cols := []string{
 		"id", "key", "project", "type", "summary", "description",
@@ -89,14 +96,22 @@ func (db *DB) UpsertIssue(issue *Issue, extra map[string]interface{}) error {
 	}
 
 	placeholders := make([]string, len(cols))
-	for i := range cols {
+	updates := make([]string, 0, len(cols))
+	for i, c := range cols {
 		placeholders[i] = "?"
+		// The primary key is the conflict target and never changes; every other
+		// column is overwritten from the incoming row.
+		if c == "key" {
+			continue
+		}
+		updates = append(updates, fmt.Sprintf("%s = excluded.%s", c, c))
 	}
 
 	query := fmt.Sprintf(
-		"INSERT OR REPLACE INTO issues (%s) VALUES (%s)",
+		"INSERT INTO issues (%s) VALUES (%s) ON CONFLICT(key) DO UPDATE SET %s",
 		strings.Join(cols, ", "),
 		strings.Join(placeholders, ", "),
+		strings.Join(updates, ", "),
 	)
 
 	_, err := db.Exec(query, vals...)

@@ -217,6 +217,44 @@ func TestGetChangelogSyncCandidates_IncludesNeverSynced(t *testing.T) {
 	}
 }
 
+func TestUpsertIssue_PreservesChangelogSyncedAt(t *testing.T) {
+	db := openTestDB(t)
+
+	issue := &Issue{Key: "TEST-1", Project: "TEST", Summary: "Original", Updated: "2026-06-01T00:00:00Z"}
+	if err := db.UpsertIssue(issue, nil); err != nil {
+		t.Fatalf("first UpsertIssue: %v", err)
+	}
+
+	// Simulate a changelog sync stamping the issue.
+	if err := db.MarkChangelogSynced([]string{"TEST-1"}); err != nil {
+		t.Fatalf("MarkChangelogSynced: %v", err)
+	}
+
+	// Re-upsert the issue (as a subsequent sync would). This must not clear
+	// changelog_synced_at — otherwise every full sync forces a changelog refetch.
+	issue.Summary = "Updated"
+	if err := db.UpsertIssue(issue, nil); err != nil {
+		t.Fatalf("second UpsertIssue: %v", err)
+	}
+
+	var syncedAt *string
+	if err := db.QueryRow(`SELECT changelog_synced_at FROM issues WHERE key = 'TEST-1'`).Scan(&syncedAt); err != nil {
+		t.Fatalf("querying changelog_synced_at: %v", err)
+	}
+	if syncedAt == nil || *syncedAt == "" {
+		t.Error("expected changelog_synced_at to survive re-upsert, but it was cleared")
+	}
+
+	// Confirm the row was actually updated (upsert, not a no-op).
+	var summary string
+	if err := db.QueryRow(`SELECT summary FROM issues WHERE key = 'TEST-1'`).Scan(&summary); err != nil {
+		t.Fatalf("querying summary: %v", err)
+	}
+	if summary != "Updated" {
+		t.Errorf("expected summary to be updated to %q, got %q", "Updated", summary)
+	}
+}
+
 func TestGetIssueIDToKeyMapForKeys(t *testing.T) {
 	db := openTestDB(t)
 
