@@ -80,12 +80,13 @@ type JiraConfig struct {
 
 // SyncConfig holds sync behavior settings.
 type SyncConfig struct {
-	Interval  string   `yaml:"interval"`   // e.g. "15m"
-	RateLimit float64  `yaml:"rate_limit"` // requests per second
-	History   bool     `yaml:"history"`    // sync changelog
-	FTSFields []string `yaml:"fts_fields"` // extra fields for FTS index
-	Sprints   bool     `yaml:"sprints"`    // sync sprint and board data
-	DevInfo   bool     `yaml:"dev_info"`   // sync development info (requires extra API permissions)
+	Interval       string   `yaml:"interval"`        // e.g. "15m"
+	RateLimit      float64  `yaml:"rate_limit"`      // requests per second
+	History        bool     `yaml:"history"`         // sync changelog
+	FTSFields      []string `yaml:"fts_fields"`      // extra fields for FTS index
+	Sprints        bool     `yaml:"sprints"`         // sync sprint and board data
+	DevInfo        bool     `yaml:"dev_info"`        // sync development info (requires extra API permissions)
+	LookbackWindow string   `yaml:"lookback_window"` // incremental re-scan overlap below the high-water mark, e.g. "1h" (default 1h)
 }
 
 // DBConfig holds database settings.
@@ -167,9 +168,10 @@ func Load(path string) (*Config, error) {
 func defaults() *Config {
 	return &Config{
 		Sync: SyncConfig{
-			Interval:  "15m",
-			RateLimit: 10,
-			Sprints:   true,
+			Interval:       "15m",
+			RateLimit:      10,
+			Sprints:        true,
+			LookbackWindow: "1h",
 		},
 		DB: DBConfig{
 			Path: DefaultDBPath(),

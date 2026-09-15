@@ -140,6 +140,49 @@ func TestSyncMeta(t *testing.T) {
 	}
 }
 
+func TestUpdateSyncMeta_WatermarkNeverRollsBack(t *testing.T) {
+	db := openTestDB(t)
+
+	// Advance the high-water mark to a recent timestamp.
+	if err := db.UpdateSyncMeta("T", 1, 5, 5, "", "2026-09-15T00:00:00Z"); err != nil {
+		t.Fatalf("UpdateSyncMeta: %v", err)
+	}
+
+	// A later interrupted sync reports an earlier mark — it must not win, or
+	// freshly-updated issues get stranded below a lowered mark forever.
+	if err := db.UpdateSyncMeta("T", 1, 2, 2, "context canceled", "2026-03-21T00:00:00Z"); err != nil {
+		t.Fatalf("UpdateSyncMeta: %v", err)
+	}
+	if got := mustSyncMeta(t, db, "T").LastIssueUpdated.String; got != "2026-09-15T00:00:00Z" {
+		t.Errorf("watermark rolled back: got %q, want 2026-09-15T00:00:00Z", got)
+	}
+
+	// An empty hwm leaves the mark untouched.
+	if err := db.UpdateSyncMeta("T", 1, 0, 0, "", ""); err != nil {
+		t.Fatalf("UpdateSyncMeta: %v", err)
+	}
+	if got := mustSyncMeta(t, db, "T").LastIssueUpdated.String; got != "2026-09-15T00:00:00Z" {
+		t.Errorf("empty hwm changed mark: got %q, want 2026-09-15T00:00:00Z", got)
+	}
+
+	// A genuinely newer mark advances.
+	if err := db.UpdateSyncMeta("T", 1, 9, 9, "", "2026-10-01T00:00:00Z"); err != nil {
+		t.Fatalf("UpdateSyncMeta: %v", err)
+	}
+	if got := mustSyncMeta(t, db, "T").LastIssueUpdated.String; got != "2026-10-01T00:00:00Z" {
+		t.Errorf("watermark did not advance: got %q, want 2026-10-01T00:00:00Z", got)
+	}
+}
+
+func mustSyncMeta(t *testing.T, db *DB, project string) *SyncMeta {
+	t.Helper()
+	m, err := db.GetSyncMeta(project)
+	if err != nil {
+		t.Fatalf("GetSyncMeta: %v", err)
+	}
+	return m
+}
+
 func TestEnsureColumn(t *testing.T) {
 	db := openTestDB(t)
 

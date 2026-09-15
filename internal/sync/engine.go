@@ -285,10 +285,19 @@ func (e *Engine) syncSource(ctx context.Context, src config.SyncSource, full, re
 			hwm = meta.LastSyncTime.String
 		}
 		if hwm != "" {
-			jqlTime := cursorToJQL(hwm, jiraTZ)
-			jql = fmt.Sprintf(`(%s) AND updated >= "%s" ORDER BY updated ASC`, base, jqlTime)
+			// Re-scan a lookback window below the high-water mark. Jira's
+			// "updated >=" search is eventually consistent: an issue updated at
+			// T can be absent from results until after the mark has advanced
+			// past T, orphaning it. Overlapping the window catches it; unchanged
+			// issues are skipped below, so the re-scan is cheap.
+			floor := applyLookback(hwm, e.cfg.Sync.LookbackWindow)
+			jqlTime := cursorToJQL(floor, jiraTZ)
+			// Newest-first: an interrupted incremental sync refreshes the most
+			// recently changed issues before it runs out of time, rather than
+			// grinding through the oldest backlog first.
+			jql = fmt.Sprintf(`(%s) AND updated >= "%s" ORDER BY updated DESC`, base, jqlTime)
 		} else {
-			jql = base + ` ORDER BY updated ASC`
+			jql = base + ` ORDER BY updated DESC`
 		}
 	}
 
@@ -306,8 +315,18 @@ func (e *Engine) syncSource(ctx context.Context, src config.SyncSource, full, re
 			if full && lastUpdated != "" {
 				_ = e.db.SetResumeCursor(src.Name, lastUpdated)
 			}
+			// Only a full sync advances the high-water mark on failure: it walks
+			// updated ASC, so lastUpdated is a true floor — everything below it
+			// has been seen. An incremental sync walks DESC, so lastUpdated is
+			// the newest issue, not a floor; advancing to it would strand every
+			// older unsynced issue in the window. Leave the mark put and let the
+			// next run re-scan.
+			hwm := ""
+			if full {
+				hwm = lastUpdated
+			}
 			elapsed := time.Since(start).Seconds()
-			_ = e.db.UpdateSyncMeta(src.Name, elapsed, total, newCount+updatedCount, err.Error(), lastUpdated)
+			_ = e.db.UpdateSyncMeta(src.Name, elapsed, total, newCount+updatedCount, err.Error(), hwm)
 			ch <- Progress{Project: src.Name, New: newCount, Updated: updatedCount, Total: total, Error: err, Done: true}
 			return
 		}
@@ -631,6 +650,32 @@ func cursorToJQL(cursor string, loc *time.Location) string {
 		loc = time.UTC
 	}
 	return t.In(loc).Format("2006-01-02 15:04")
+}
+
+// defaultLookbackWindow is the incremental re-scan overlap applied below the
+// high-water mark when none is configured. It covers Jira's "updated" search
+// eventual-consistency lag so a change landing just under the mark is re-scanned
+// rather than orphaned.
+const defaultLookbackWindow = time.Hour
+
+// applyLookback shifts an RFC3339 high-water mark earlier by the configured
+// lookback window, widening the incremental query so boundary changes are
+// re-scanned. window is a Go duration string (e.g. "1h", "24h"); empty or
+// unparseable falls back to defaultLookbackWindow rather than dropping the
+// overlap. Returns the shifted RFC3339 timestamp, or the input unchanged if it
+// cannot be parsed.
+func applyLookback(hwm, window string) string {
+	d := defaultLookbackWindow
+	if window != "" {
+		if parsed, err := time.ParseDuration(window); err == nil && parsed >= 0 {
+			d = parsed
+		}
+	}
+	t, err := time.Parse(time.RFC3339, hwm)
+	if err != nil {
+		return hwm
+	}
+	return t.Add(-d).UTC().Format(time.RFC3339)
 }
 
 // ensureCustomColumns creates columns in the issues table for custom fields that don't have one yet.

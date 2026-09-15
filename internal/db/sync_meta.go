@@ -33,6 +33,12 @@ func (db *DB) GetSyncMeta(project string) (*SyncMeta, error) {
 
 // UpdateSyncMeta upserts sync metadata for a project.
 // hwm is the RFC3339 timestamp of the most recently updated issue seen in this sync run (empty to leave unchanged).
+//
+// last_issue_updated only ever moves forward: it is set to max(existing, hwm).
+// A partial/interrupted sync must never drag the high-water mark backward — that
+// would re-open an already-covered window and, worse, strand freshly-updated
+// issues below a lowered mark. Timestamps are stored as RFC3339 UTC (see
+// sync.normalizeDate), so lexicographic max() is chronological.
 func (db *DB) UpdateSyncMeta(project string, duration float64, total, synced int, syncErr, hwm string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	var errVal interface{}
@@ -52,7 +58,11 @@ func (db *DB) UpdateSyncMeta(project string, duration float64, total, synced int
 			issues_synced = excluded.issues_synced,
 			last_sync_duration = excluded.last_sync_duration,
 			last_sync_error = excluded.last_sync_error,
-			last_issue_updated = CASE WHEN excluded.last_issue_updated IS NOT NULL THEN excluded.last_issue_updated ELSE last_issue_updated END`,
+			last_issue_updated = CASE
+				WHEN excluded.last_issue_updated IS NULL THEN last_issue_updated
+				WHEN last_issue_updated IS NULL THEN excluded.last_issue_updated
+				ELSE max(last_issue_updated, excluded.last_issue_updated)
+			END`,
 		project, now, total, synced, duration, errVal, hwmVal,
 	)
 	return err

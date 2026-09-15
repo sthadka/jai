@@ -6,8 +6,38 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/sthadka/jai/internal/db"
 	"github.com/sthadka/jai/internal/output"
 )
+
+// syncWarnings returns human-readable health warnings for a source's sync
+// metadata. It exists because "last sync ran N seconds ago" (last_sync_time)
+// says nothing about whether the data is actually current: a sync that keeps
+// erroring out, or that has never completed a full pass, can leave individual
+// rows frozen while the source still looks freshly synced.
+func syncWarnings(m *db.SyncMeta) []string {
+	var w []string
+	if m.LastSyncError.Valid && m.LastSyncError.String != "" {
+		w = append(w, fmt.Sprintf("last sync did not finish: %s", m.LastSyncError.String))
+	}
+	if !m.LastFullSync.Valid || m.LastFullSync.String == "" {
+		w = append(w, "no completed full sync on record — run `jai sync --full` and let it finish")
+	}
+	// A failing sync that is also far behind "now" is the stuck-watermark
+	// signature: the incremental high-water mark can't advance, so recent
+	// changes never get re-fetched.
+	if m.LastSyncError.Valid && m.LastSyncError.String != "" &&
+		m.LastIssueUpdated.Valid && m.LastIssueUpdated.String != "" {
+		if t, err := time.Parse(time.RFC3339, m.LastIssueUpdated.String); err == nil {
+			if behind := time.Since(t); behind > 48*time.Hour {
+				w = append(w, fmt.Sprintf(
+					"data only current through %s (%s behind) — sync may be stuck; run `jai sync --full --resume` to completion",
+					m.LastIssueUpdated.String[:10], humanDuration(behind)))
+			}
+		}
+	}
+	return w
+}
 
 var statusCmd = &cobra.Command{
 	Use:   "status",
@@ -47,11 +77,16 @@ var statusCmd = &cobra.Command{
 			}
 			sources := make([]map[string]any, len(metas))
 			for i, m := range metas {
+				warnings := syncWarnings(m)
 				sources[i] = map[string]any{
 					"source":             m.Project,
 					"last_sync_time":     m.LastSyncTime.String,
+					"last_full_sync":     m.LastFullSync.String,
+					"last_issue_updated": m.LastIssueUpdated.String,
 					"last_sync_duration": m.LastSyncDuration.Float64,
 					"last_sync_error":    m.LastSyncError.String,
+					"warnings":           warnings,
+					"healthy":            len(warnings) == 0,
 				}
 			}
 			data := map[string]any{
@@ -92,8 +127,8 @@ var statusCmd = &cobra.Command{
 				fmt.Printf(", data through %s", m.LastIssueUpdated.String[:10])
 			}
 			fmt.Println()
-			if m.LastSyncError.Valid && m.LastSyncError.String != "" {
-				fmt.Printf("    Error: %s\n", m.LastSyncError.String)
+			for _, warn := range syncWarnings(m) {
+				fmt.Printf("    ⚠ %s\n", warn)
 			}
 		}
 

@@ -166,6 +166,48 @@ func TestCursorToJQL(t *testing.T) {
 	}
 }
 
+func TestApplyLookback(t *testing.T) {
+	tests := []struct {
+		name   string
+		hwm    string
+		window string
+		want   string
+	}{
+		{
+			name:   "empty window uses default one hour",
+			hwm:    "2026-09-15T12:00:00Z",
+			window: "",
+			want:   "2026-09-15T11:00:00Z",
+		},
+		{
+			name:   "explicit window",
+			hwm:    "2026-09-15T12:00:00Z",
+			window: "24h",
+			want:   "2026-09-14T12:00:00Z",
+		},
+		{
+			name:   "unparseable window falls back to default rather than dropping overlap",
+			hwm:    "2026-09-15T12:00:00Z",
+			window: "bogus",
+			want:   "2026-09-15T11:00:00Z",
+		},
+		{
+			name:   "unparseable high-water mark is returned unchanged",
+			hwm:    "not-a-timestamp",
+			window: "1h",
+			want:   "not-a-timestamp",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := applyLookback(tt.hwm, tt.window); got != tt.want {
+				t.Errorf("applyLookback(%q, %q) = %q, want %q", tt.hwm, tt.window, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestEngineTimezoneConcurrentAuthAndSync(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(jira.MySelf{
