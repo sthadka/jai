@@ -165,7 +165,7 @@ func Denormalize(raw []byte, fieldMap map[string]*db.FieldMapping) (*db.Issue, m
 // extractFieldValue converts a raw JSON field value to a Go value based on Jira field type.
 func extractFieldValue(raw json.RawMessage, fieldType string) interface{} {
 	switch fieldType {
-	case "text", "string":
+	case "text", "string", "richtext":
 		var s string
 		if err := json.Unmarshal(raw, &s); err == nil {
 			return s

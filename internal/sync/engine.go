@@ -739,6 +739,9 @@ func inferColumnName(f *jira.Field, overrides map[string]string) string {
 
 // jiraSchemaToType maps Jira field schema to our internal type name.
 func jiraSchemaToType(schema *jira.FieldSchema) string {
+	if jira.SchemaIsADF(schema) {
+		return "richtext"
+	}
 	switch schema.Type {
 	case "number":
 		return "number"

@@ -302,6 +302,17 @@ var migrations = []migration{
 			return nil
 		},
 	},
+	{
+		version:     11,
+		description: "type description/environment fields as richtext for ADF writes",
+		up: func(tx *sql.Tx) error {
+			_, err := tx.Exec(
+				`UPDATE field_map SET type = 'richtext'
+				 WHERE jira_id IN ('description', 'environment') AND type = 'text'`,
+			)
+			return err
+		},
+	},
 }
 
 func addColumnIfNotExists(tx *sql.Tx, table, column, columnType string) error {

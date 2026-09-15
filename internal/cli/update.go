@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/sthadka/jai/internal/db"
+	"github.com/sthadka/jai/internal/jira"
 	"github.com/sthadka/jai/internal/output"
 	synce "github.com/sthadka/jai/internal/sync"
 )
@@ -198,6 +199,8 @@ func updateSetFields(cmd *cobra.Command, issueKey string, result *updateResult) 
 					continue
 				}
 				payloadVal = wrapped
+			} else if jira.IsADFField(jiraID, fieldType) {
+				payloadVal = jira.TextToADF(value)
 			}
 		}
 

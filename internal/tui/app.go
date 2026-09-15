@@ -987,8 +987,8 @@ func fmtCell(v interface{}) string {
 }
 
 // marshalSetPayload builds the JSON payload for a set_field pending change.
-func marshalSetPayload(fieldID, value string) string {
-	payload := map[string]string{"field": fieldID, "value": value}
+func marshalSetPayload(fieldID string, value interface{}) string {
+	payload := map[string]interface{}{"field": fieldID, "value": value}
 	b, _ := json.Marshal(payload)
 	return string(b)
 }
@@ -996,8 +996,14 @@ func marshalSetPayload(fieldID, value string) string {
 func (a *App) saveFieldCmd(issueKey, fieldID, value string) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
-		if err := a.jiraClient.UpdateField(ctx, issueKey, fieldID, value); err != nil {
-			payload := marshalSetPayload(fieldID, value)
+		// Rich-text fields (description, environment, textarea customs) must be
+		// sent as ADF documents, not raw strings.
+		var payloadVal interface{} = value
+		if jira.IsADFField(fieldID, "") {
+			payloadVal = jira.TextToADF(value)
+		}
+		if err := a.jiraClient.UpdateField(ctx, issueKey, fieldID, payloadVal); err != nil {
+			payload := marshalSetPayload(fieldID, payloadVal)
 			_ = a.database.InsertPendingChange(issueKey, "set_field", payload)
 			return fieldSavedMsg{err: err}
 		}

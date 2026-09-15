@@ -430,6 +430,8 @@ func (s *Server) setField(ctx context.Context, issueKey, fieldName, jiraID, valu
 					return nil, fmt.Errorf("resolving %s: %v", fieldName, err)
 				}
 				payloadVal = wrapped
+			} else if jira.IsADFField(jiraID, fieldType) {
+				payloadVal = jira.TextToADF(value)
 			}
 		}
 	} else {
@@ -526,6 +528,8 @@ func (s *Server) setBulk(ctx context.Context, keys []string, fieldName, jiraID, 
 					return nil, fmt.Errorf("resolving %s: %v", fieldName, err)
 				}
 				scalarPayloadVal = wrapped
+			} else if jira.IsADFField(jiraID, fieldType) {
+				scalarPayloadVal = jira.TextToADF(value)
 			}
 		}
 	}

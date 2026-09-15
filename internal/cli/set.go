@@ -4,9 +4,11 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/sthadka/jai/internal/jira"
 	"github.com/sthadka/jai/internal/output"
 )
 
@@ -15,6 +17,7 @@ var (
 	setRemoveValues []string
 	setQuery        string
 	setQueue        bool
+	setFile         string
 )
 
 var setCmd = &cobra.Command{
@@ -27,6 +30,10 @@ defer the push until 'jai push'.
 
 For scalar fields:
   jai set ROX-123 priority High
+
+For rich-text fields (description), the value is converted to ADF automatically.
+Read a large markdown value from a file with --file:
+  jai set ROX-123 description --file brief.md
 
 For array fields (labels, components, fixVersions):
   jai set ROX-123 labels --add rit-escalated
@@ -88,6 +95,34 @@ Bulk operations with a SQL query:
 			if len(args) == 3 {
 				scalarValue = args[2]
 			}
+		}
+
+		if setFile != "" {
+			if scalarValue != "" {
+				msg := "cannot combine --file with a positional value"
+				if g.jsonOut {
+					fmt.Println(string(output.Err("ValidationError", msg)))
+					return nil
+				}
+				return fmt.Errorf("%s", msg)
+			}
+			if hasAdd || hasRemove {
+				msg := "cannot combine --file with --add/--remove"
+				if g.jsonOut {
+					fmt.Println(string(output.Err("ValidationError", msg)))
+					return nil
+				}
+				return fmt.Errorf("%s", msg)
+			}
+			data, err := os.ReadFile(setFile)
+			if err != nil {
+				if g.jsonOut {
+					fmt.Println(string(output.Err("ReadError", err.Error())))
+					return nil
+				}
+				return fmt.Errorf("reading %s: %w", setFile, err)
+			}
+			scalarValue = strings.TrimRight(string(data), "\n")
 		}
 
 		hasScalarValue := scalarValue != ""
@@ -225,6 +260,8 @@ func setScalarField(cmd *cobra.Command, issueKey, fieldName, jiraID, value, fiel
 				return fmt.Errorf("%s", msg)
 			}
 			payloadVal = wrapped
+		} else if jira.IsADFField(jiraID, fieldType) {
+			payloadVal = jira.TextToADF(value)
 		}
 	}
 
@@ -349,6 +386,8 @@ func setBulk(cmd *cobra.Command, keys []string, fieldName, jiraID, value, fieldT
 					return fmt.Errorf("%s", msg)
 				}
 				scalarPayloadVal = wrapped
+			} else if jira.IsADFField(jiraID, fieldType) {
+				scalarPayloadVal = jira.TextToADF(value)
 			}
 		}
 	}
@@ -590,6 +629,7 @@ func init() {
 	setCmd.Flags().StringArrayVar(&setAddValues, "add", nil, "Add a value to an array field (repeatable)")
 	setCmd.Flags().StringArrayVar(&setRemoveValues, "remove", nil, "Remove a value from an array field (repeatable)")
 	setCmd.Flags().StringVar(&setQuery, "query", "", "SQL query returning a 'key' column to bulk-set")
+	setCmd.Flags().StringVar(&setFile, "file", "", "Read the field value from a file (useful for large markdown descriptions)")
 	setCmd.Flags().BoolVarP(&setQueue, "queue", "q", false, "Queue change locally instead of pushing to Jira immediately")
 	rootCmd.AddCommand(setCmd)
 }

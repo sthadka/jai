@@ -85,7 +85,7 @@ func createSchema(tx *sql.Tx) error {
 			('project',      'Project',         'project',        'text',     0, 1, 0),
 			('issuetype',    'Issue Type',      'type',           'text',     0, 1, 0),
 			('summary',      'Summary',         'summary',        'text',     0, 1, 1),
-			('description',  'Description',     'description',    'text',     0, 1, 1),
+			('description',  'Description',     'description',    'richtext', 0, 1, 1),
 			('status',       'Status',          'status',         'option',   0, 1, 0),
 			('priority',     'Priority',        'priority',       'option',   0, 1, 0),
 			('assignee',     'Assignee',        'assignee',       'user',     0, 1, 0),

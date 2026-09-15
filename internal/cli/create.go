@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/sthadka/jai/internal/db"
+	"github.com/sthadka/jai/internal/jira"
 	"github.com/sthadka/jai/internal/output"
 	synce "github.com/sthadka/jai/internal/sync"
 )
@@ -109,18 +110,7 @@ Examples:
 		}
 
 		if createFlags.description != "" {
-			fields["description"] = map[string]interface{}{
-				"type":    "doc",
-				"version": 1,
-				"content": []map[string]interface{}{
-					{
-						"type": "paragraph",
-						"content": []map[string]interface{}{
-							{"type": "text", "text": createFlags.description},
-						},
-					},
-				},
-			}
+			fields["description"] = jira.TextToADF(createFlags.description)
 		}
 
 		if createFlags.parent != "" {

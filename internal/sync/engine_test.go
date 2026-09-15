@@ -254,3 +254,24 @@ func TestEngineTimezoneConcurrentAuthAndSync(t *testing.T) {
 		}
 	}
 }
+
+func TestJiraSchemaToType(t *testing.T) {
+	cases := []struct {
+		name   string
+		schema *jira.FieldSchema
+		want   string
+	}{
+		{"description", &jira.FieldSchema{Type: "string", System: "description"}, "richtext"},
+		{"environment", &jira.FieldSchema{Type: "string", System: "environment"}, "richtext"},
+		{"textarea custom", &jira.FieldSchema{Type: "string", Custom: "com.atlassian.jira.plugin.system.customfieldtypes:textarea"}, "richtext"},
+		{"summary", &jira.FieldSchema{Type: "string", System: "summary"}, "text"},
+		{"plain textfield", &jira.FieldSchema{Type: "string", Custom: "com.atlassian.jira.plugin.system.customfieldtypes:textfield"}, "text"},
+		{"number", &jira.FieldSchema{Type: "number"}, "number"},
+		{"array", &jira.FieldSchema{Type: "array", Items: "string"}, "array"},
+	}
+	for _, c := range cases {
+		if got := jiraSchemaToType(c.schema); got != c.want {
+			t.Errorf("jiraSchemaToType(%s) = %q, want %q", c.name, got, c.want)
+		}
+	}
+}
