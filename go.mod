@@ -9,6 +9,7 @@ require (
 	github.com/mark3labs/mcp-go v0.58.0
 	github.com/mattn/go-sqlite3 v1.14.34
 	github.com/spf13/cobra v1.10.2
+	github.com/yuin/goldmark v1.8.6
 	golang.org/x/time v0.15.0
 	gopkg.in/yaml.v3 v3.0.1
 )

@@ -110,7 +110,7 @@ Examples:
 		}
 
 		if createFlags.description != "" {
-			fields["description"] = jira.TextToADF(createFlags.description)
+			fields["description"] = jira.MarkdownToADF(createFlags.description)
 		}
 
 		if createFlags.parent != "" {

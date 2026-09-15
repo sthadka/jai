@@ -431,7 +431,7 @@ func (s *Server) setField(ctx context.Context, issueKey, fieldName, jiraID, valu
 				}
 				payloadVal = wrapped
 			} else if jira.IsADFField(jiraID, fieldType) {
-				payloadVal = jira.TextToADF(value)
+				payloadVal = jira.MarkdownToADF(value)
 			}
 		}
 	} else {
@@ -529,7 +529,7 @@ func (s *Server) setBulk(ctx context.Context, keys []string, fieldName, jiraID, 
 				}
 				scalarPayloadVal = wrapped
 			} else if jira.IsADFField(jiraID, fieldType) {
-				scalarPayloadVal = jira.TextToADF(value)
+				scalarPayloadVal = jira.MarkdownToADF(value)
 			}
 		}
 	}

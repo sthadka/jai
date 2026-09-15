@@ -261,7 +261,7 @@ func setScalarField(cmd *cobra.Command, issueKey, fieldName, jiraID, value, fiel
 			}
 			payloadVal = wrapped
 		} else if jira.IsADFField(jiraID, fieldType) {
-			payloadVal = jira.TextToADF(value)
+			payloadVal = jira.MarkdownToADF(value)
 		}
 	}
 
@@ -387,7 +387,7 @@ func setBulk(cmd *cobra.Command, keys []string, fieldName, jiraID, value, fieldT
 				}
 				scalarPayloadVal = wrapped
 			} else if jira.IsADFField(jiraID, fieldType) {
-				scalarPayloadVal = jira.TextToADF(value)
+				scalarPayloadVal = jira.MarkdownToADF(value)
 			}
 		}
 	}

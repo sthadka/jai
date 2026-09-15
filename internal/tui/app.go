@@ -1000,7 +1000,7 @@ func (a *App) saveFieldCmd(issueKey, fieldID, value string) tea.Cmd {
 		// sent as ADF documents, not raw strings.
 		var payloadVal interface{} = value
 		if jira.IsADFField(fieldID, "") {
-			payloadVal = jira.TextToADF(value)
+			payloadVal = jira.MarkdownToADF(value)
 		}
 		if err := a.jiraClient.UpdateField(ctx, issueKey, fieldID, payloadVal); err != nil {
 			payload := marshalSetPayload(fieldID, payloadVal)

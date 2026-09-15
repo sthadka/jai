@@ -55,18 +55,7 @@ func (c *Client) UpdateFieldOp(ctx context.Context, issueKey, fieldID, op string
 // AddComment adds a comment to a Jira issue and returns the comment ID.
 func (c *Client) AddComment(ctx context.Context, issueKey, body string) (string, error) {
 	payload := map[string]interface{}{
-		"body": map[string]interface{}{
-			"type":    "doc",
-			"version": 1,
-			"content": []map[string]interface{}{
-				{
-					"type": "paragraph",
-					"content": []map[string]interface{}{
-						{"type": "text", "text": body},
-					},
-				},
-			},
-		},
+		"body": MarkdownToADF(body),
 	}
 	var resp struct {
 		ID string `json:"id"`

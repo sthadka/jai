@@ -200,7 +200,7 @@ func updateSetFields(cmd *cobra.Command, issueKey string, result *updateResult) 
 				}
 				payloadVal = wrapped
 			} else if jira.IsADFField(jiraID, fieldType) {
-				payloadVal = jira.TextToADF(value)
+				payloadVal = jira.MarkdownToADF(value)
 			}
 		}
 
