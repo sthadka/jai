@@ -166,6 +166,55 @@ func TestHandleQueryLimit(t *testing.T) {
 	}
 }
 
+// TestJQLIssueToRow_DescriptionPreservesLinks guards the MCP JQL path against
+// the smart-link drop bug: a requested description column must render the ADF to
+// markdown (preserving URLs) rather than return null.
+func TestJQLIssueToRow_DescriptionPreservesLinks(t *testing.T) {
+	const docURL = "https://docs.google.com/document/d/1gXyX/edit"
+	issue := map[string]interface{}{
+		"key": "ROX-36990",
+		"fields": map[string]interface{}{
+			"summary": "Project with linked doc",
+			"description": map[string]interface{}{
+				"type":    "doc",
+				"version": 1,
+				"content": []interface{}{
+					map[string]interface{}{
+						"type": "paragraph",
+						"content": []interface{}{
+							map[string]interface{}{"type": "inlineCard", "attrs": map[string]interface{}{"url": docURL}},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	row, err := jqlIssueToRow(issue, []string{"key", "description"})
+	if err != nil {
+		t.Fatalf("jqlIssueToRow: %v", err)
+	}
+	desc, _ := row[1].(string)
+	if !strings.Contains(desc, docURL) {
+		t.Errorf("expected description column to contain %q, got %q", docURL, desc)
+	}
+}
+
+// TestJQLColumnsToAPIFields_Description verifies a requested description column
+// is fetched from the API (otherwise it comes back null).
+func TestJQLColumnsToAPIFields_Description(t *testing.T) {
+	got := jqlColumnsToAPIFields([]string{"key", "description"})
+	found := false
+	for _, f := range got {
+		if f == "description" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected 'description' in API fields, got %v", got)
+	}
+}
+
 // TestHandleGet_PreservesSmartLink is a regression test for the MCP smart-link
 // drop bug: the stored `description` column is link-stripped plaintext, so
 // handleGet must re-render from raw_json (ADFToMarkdown) to keep smart-link and

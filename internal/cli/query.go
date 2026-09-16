@@ -80,17 +80,50 @@ func runSQLQuery(sql string) error {
 // jqlColumns defines the default columns returned for a live JQL query.
 var jqlColumns = []string{"key", "summary", "status", "priority", "assignee", "updated"}
 
-// jqlAPIFields are the Jira field IDs requested from the API.
+// jqlAPIFields are the Jira field IDs requested from the API by default.
 var jqlAPIFields = []string{"summary", "status", "priority", "assignee", "updated"}
+
+// jqlColumnsToAPIFields maps requested output columns to the Jira API field IDs
+// that must be fetched to populate them. Without this, a --fields selection
+// (e.g. "description") would request only the default fields and the column
+// would come back null.
+func jqlColumnsToAPIFields(cols []string) []string {
+	set := make(map[string]bool)
+	for _, col := range cols {
+		switch col {
+		case "key":
+			// Always returned by the API.
+			continue
+		case "summary", "status", "priority", "assignee", "reporter", "created", "updated", "labels", "parent", "description":
+			set[col] = true
+		case "type", "issuetype":
+			set["issuetype"] = true
+		case "project":
+			set["project"] = true
+		case "resolved", "resolution_date":
+			set["resolutiondate"] = true
+		}
+	}
+	fields := make([]string, 0, len(set))
+	for f := range set {
+		fields = append(fields, f)
+	}
+	if len(fields) == 0 {
+		return jqlAPIFields
+	}
+	return fields
+}
 
 func runJQLQuery(jql string) error {
 	cols := jqlColumns
+	apiFields := jqlAPIFields
 	if g.fields != "" {
 		cols = output.ParseFields(g.fields)
+		apiFields = jqlColumnsToAPIFields(cols)
 	}
 
 	var rows [][]interface{}
-	for page, err := range g.jira.SearchAll(context.Background(), jql, jqlAPIFields) {
+	for page, err := range g.jira.SearchAll(context.Background(), jql, apiFields) {
 		if err != nil {
 			if g.jsonOut {
 				fmt.Println(string(output.Err("JQLError", err.Error())))
@@ -210,6 +243,10 @@ func jqlIssueToRow(issue *jira.Issue, cols []string) ([]interface{}, error) {
 		case "parent":
 			if fields.Parent != nil {
 				return fields.Parent.Key
+			}
+		case "description":
+			if md := jira.ADFToMarkdown(fields.Description); md != "" {
+				return md
 			}
 		}
 		return nil

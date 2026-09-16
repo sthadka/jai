@@ -82,17 +82,19 @@ front-matter view. Pass --fields all to get every column instead, or
 		for i, col := range results.Columns {
 			data[col] = results.Rows[0][i]
 		}
-		if !jsonMode {
-			if rawJSON := output.ValueStr(data["raw_json"]); rawJSON != "" {
-				var wrapper struct {
-					Fields struct {
-						Description json.RawMessage `json:"description"`
-					} `json:"fields"`
-				}
-				if err := json.Unmarshal([]byte(rawJSON), &wrapper); err == nil {
-					if md := jira.ADFToMarkdown(wrapper.Fields.Description); md != "" {
-						data["description"] = md
-					}
+		// The stored `description` column is link-stripped plaintext
+		// (ADFToPlaintext). Re-render it from raw_json via ADFToMarkdown so
+		// hyperlinks and smart-links survive in every output mode (including
+		// --json), matching the live-from-API path above.
+		if rawJSON := output.ValueStr(data["raw_json"]); rawJSON != "" {
+			var wrapper struct {
+				Fields struct {
+					Description json.RawMessage `json:"description"`
+				} `json:"fields"`
+			}
+			if err := json.Unmarshal([]byte(rawJSON), &wrapper); err == nil {
+				if md := jira.ADFToMarkdown(wrapper.Fields.Description); md != "" {
+					data["description"] = md
 				}
 			}
 		}

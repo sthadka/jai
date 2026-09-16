@@ -421,7 +421,7 @@ func jqlColumnsToAPIFields(cols []string) []string {
 		case "key":
 			// Always returned by API, no need to request
 			continue
-		case "summary", "status", "priority", "assignee", "reporter", "created", "updated", "labels", "parent":
+		case "summary", "status", "priority", "assignee", "reporter", "created", "updated", "labels", "parent", "description":
 			fieldSet[col] = true
 		case "type", "issuetype":
 			fieldSet["issuetype"] = true
@@ -480,6 +480,7 @@ func jqlIssueToRow(issue interface{}, cols []string) ([]interface{}, error) {
 		ResolutionDate string                        `json:"resolutiondate"`
 		Labels         []string                      `json:"labels"`
 		Parent         *struct{ Key string }         `json:"parent"`
+		Description    json.RawMessage               `json:"description"`
 	}
 
 	var fields issueFields
@@ -529,6 +530,10 @@ func jqlIssueToRow(issue interface{}, cols []string) ([]interface{}, error) {
 		case "parent":
 			if fields.Parent != nil {
 				return fields.Parent.Key
+			}
+		case "description":
+			if md := jira.ADFToMarkdown(fields.Description); md != "" {
+				return md
 			}
 		}
 		return nil
