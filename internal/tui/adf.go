@@ -171,7 +171,7 @@ func renderBlock(n *adfNode, width, indent int) []string {
 		lines = append(lines, lipgloss.NewStyle().Foreground(colorTab).Render("  [attachment]"))
 		lines = append(lines, "")
 
-	case "inlineCard", "embedCard":
+	case "inlineCard", "embedCard", "blockCard":
 		url := ""
 		if raw, ok := n.Attrs["url"]; ok {
 			json.Unmarshal(raw, &url) //nolint

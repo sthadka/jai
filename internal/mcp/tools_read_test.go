@@ -166,6 +166,57 @@ func TestHandleQueryLimit(t *testing.T) {
 	}
 }
 
+// TestHandleGet_PreservesSmartLink is a regression test for the MCP smart-link
+// drop bug: the stored `description` column is link-stripped plaintext, so
+// handleGet must re-render from raw_json (ADFToMarkdown) to keep smart-link and
+// hyperlink URLs — matching the CLI's `jai get` output.
+func TestHandleGet_PreservesSmartLink(t *testing.T) {
+	srv := testServer(t, false, nil)
+
+	const docURL = "https://docs.google.com/document/d/1gXyX/edit"
+	rawJSON := `{"fields":{"description":{"type":"doc","version":1,"content":[` +
+		`{"type":"paragraph","content":[{"type":"text","text":"See project document:"}]},` +
+		`{"type":"paragraph","content":[{"type":"inlineCard","attrs":{"url":"` + docURL + `"}}]}` +
+		`]}}}`
+
+	issue := &db.Issue{
+		Key:     "ROX-36990",
+		Project: "ROX",
+		Summary: "Project with linked doc",
+		Status:  "Open",
+		// Stored description is the link-stripped plaintext (as denormalize writes).
+		Description: "See project document:",
+		RawJSON:     rawJSON,
+	}
+	if err := srv.db.UpsertIssue(issue, nil); err != nil {
+		t.Fatalf("failed to insert test issue: %v", err)
+	}
+
+	mcpReq := mcp.CallToolRequest{
+		Params: mcp.CallToolParams{
+			Arguments: map[string]interface{}{
+				"key":    "ROX-36990",
+				"fields": "all",
+			},
+		},
+	}
+
+	result, err := handleGet(srv, context.Background(), mcpReq)
+	if err != nil {
+		t.Fatalf("handleGet returned error: %v", err)
+	}
+	if len(result.Content) == 0 {
+		t.Fatal("handleGet returned no content")
+	}
+	textContent, ok := result.Content[0].(mcp.TextContent)
+	if !ok {
+		t.Fatalf("unexpected content type %T", result.Content[0])
+	}
+	if !strings.Contains(textContent.Text, docURL) {
+		t.Errorf("expected smart-link URL %q in output, got:\n%s", docURL, textContent.Text)
+	}
+}
+
 func TestHandleGet(t *testing.T) {
 	srv := testServer(t, false, nil)
 

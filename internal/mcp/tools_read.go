@@ -8,6 +8,7 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+	"github.com/sthadka/jai/internal/jira"
 	"github.com/sthadka/jai/internal/output"
 )
 
@@ -270,6 +271,22 @@ func handleGet(s *Server, ctx context.Context, request mcp.CallToolRequest) (*mc
 		data = make(map[string]interface{}, len(results.Columns))
 		for i, col := range results.Columns {
 			data[col] = results.Rows[0][i]
+		}
+		// The stored `description` column is link-stripped plaintext
+		// (ADFToPlaintext). Re-render it from raw_json via ADFToMarkdown so
+		// hyperlinks and smart-links (inlineCard/embedCard/blockCard) survive,
+		// matching the CLI's `jai get` output.
+		if rawJSON := output.ValueStr(data["raw_json"]); rawJSON != "" {
+			var wrapper struct {
+				Fields struct {
+					Description json.RawMessage `json:"description"`
+				} `json:"fields"`
+			}
+			if err := json.Unmarshal([]byte(rawJSON), &wrapper); err == nil {
+				if md := jira.ADFToMarkdown(wrapper.Fields.Description); md != "" {
+					data["description"] = md
+				}
+			}
 		}
 	}
 

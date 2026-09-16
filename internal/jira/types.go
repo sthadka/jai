@@ -287,7 +287,7 @@ func (n *adfNode) markdown(depth int) string {
 			return t
 		}
 		return ""
-	case "inlineCard", "embedCard":
+	case "inlineCard", "embedCard", "blockCard":
 		if raw, ok := n.Attrs["url"]; ok {
 			var u string
 			json.Unmarshal(raw, &u) //nolint
