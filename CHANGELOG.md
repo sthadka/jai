@@ -1,5 +1,22 @@
 # Changelog
 
+## [4.1.0](https://github.com/sthadka/jai/compare/v4.0.1...v4.1.0) (2026-09-21)
+
+
+### Features
+
+* convert Markdown to structured ADF on rich-text writes ([1262b35](https://github.com/sthadka/jai/commit/1262b3531f0e8c3fd60754479d469d6028f08d71))
+
+
+### Bug Fixes
+
+* convert rich-text fields to ADF on set/update writes ([aca49ce](https://github.com/sthadka/jai/commit/aca49ce1ca934aeb9f8b83e6e82b1edec5fac4b1))
+* make jai sync --changelogs incremental instead of full refetch ([202de37](https://github.com/sthadka/jai/commit/202de37bf50bcc2b7883396514982efb1a8ac190))
+* match Jira bulk changelog API response shape ([7fff592](https://github.com/sthadka/jai/commit/7fff592d2beb1c5df2b8c0ad1053f991c2a7a67c))
+* preserve description links in CLI get --json and JQL queries ([0591080](https://github.com/sthadka/jai/commit/0591080daf52c3e9691c0b3535406bd98353a136))
+* preserve smart-link/hyperlink URLs in MCP jai_get description ([4879c27](https://github.com/sthadka/jai/commit/4879c2721527026a0e86b55a6a368bdcf7571449))
+* stop incremental sync watermark from freezing and stranding issues ([4190bd7](https://github.com/sthadka/jai/commit/4190bd792e6f0df7ea49c31cce1d17650de80946))
+
 ## [4.0.1](https://github.com/sthadka/jai/compare/v4.0.0...v4.0.1) (2026-09-02)
 
 
