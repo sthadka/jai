@@ -194,6 +194,42 @@ func effectiveSources(cfg *config.Config, filter string) ([]config.SyncSource, e
 	return nil, fmt.Errorf("sync source %q not found", filter)
 }
 
+// FullSyncOverdue returns the names of sources whose last full sync is missing
+// or older than sync.full_sync_warning_age (default 24h). An empty result means
+// no source is overdue. sourceFilter, when non-empty, restricts the check to
+// that single source. The reconcile pass only refreshes configured fields, so a
+// periodic full sync is what reconciles everything else — this drives the
+// reminder shown by both the CLI and MCP.
+func (e *Engine) FullSyncOverdue(sourceFilter string) []string {
+	age := 24 * time.Hour
+	if e.cfg.Sync.FullSyncWarningAge != "" {
+		if d, err := time.ParseDuration(e.cfg.Sync.FullSyncWarningAge); err == nil {
+			age = d
+		}
+	}
+
+	metas, err := e.db.AllSyncMeta()
+	if err != nil {
+		return nil
+	}
+	cutoff := time.Now().Add(-age)
+	var stale []string
+	for _, m := range metas {
+		if sourceFilter != "" && m.Project != sourceFilter {
+			continue
+		}
+		if !m.LastFullSync.Valid || m.LastFullSync.String == "" {
+			stale = append(stale, m.Project)
+			continue
+		}
+		t, err := time.Parse(time.RFC3339, m.LastFullSync.String)
+		if err != nil || t.Before(cutoff) {
+			stale = append(stale, m.Project)
+		}
+	}
+	return stale
+}
+
 // sourceJQL builds the base JQL for a SyncSource.
 func sourceJQL(s config.SyncSource) string {
 	if s.JQL != "" {

@@ -224,20 +224,33 @@ func displayChangelogProgress(ch <-chan synce.ChangelogProgress) {
 	}
 }
 
-// displayReconcileProgress consumes the reconcile progress channel and prints
-// a one-line summary per source once it finishes.
+// displayReconcileProgress consumes the reconcile progress channel, rendering a
+// live per-source counter while scanning and a final summary line per source.
+// It never stays silent when drift was detected: a pass that finds drift but
+// fails to correct all of it reports that distinctly from a clean run, so the
+// feature can't itself fail silently.
 func displayReconcileProgress(ch <-chan synce.ReconcileProgress) {
 	for p := range ch {
 		if !p.Done {
+			// Live counter for large scans (mirrors the changelog phase).
+			fmt.Fprintf(os.Stderr, "\r  ⋯ reconcile %-16s scanned %d, drifted %d\033[K", p.Source, p.Scanned, p.Changed)
 			continue
 		}
 		switch {
 		case p.Err != nil:
-			fmt.Fprintf(os.Stderr, "  ✗ reconcile %-16s ERROR: %v\n", p.Source, p.Err)
+			// Refetch failed partway: known-drifted issues may be uncorrected.
+			fmt.Fprintf(os.Stderr, "\r  ✗ reconcile %-16s %d drifted, %d fixed — ERROR: %v\033[K\n",
+				p.Source, p.Changed, p.Refetched, p.Err)
 		case p.Skipped:
-			fmt.Fprintf(os.Stderr, "  ⚠ reconcile %-16s %d issues drifted (> cap) — run 'jai sync --full'\n", p.Source, p.Changed)
-		case p.Refetched > 0:
-			fmt.Fprintf(os.Stderr, "  ✓ reconcile %-16s %d re-synced (%v)\n", p.Source, p.Refetched, p.Fields)
+			fmt.Fprintf(os.Stderr, "\r  ⚠ reconcile %-16s %d issues drifted (> cap) — run 'jai sync --full'\033[K\n", p.Source, p.Changed)
+		case p.Changed == 0:
+			// Clean run — stay quiet (clear the live counter line).
+			fmt.Fprintf(os.Stderr, "\r\033[K")
+		case p.Refetched == p.Changed:
+			fmt.Fprintf(os.Stderr, "\r  ✓ reconcile %-16s %d re-synced (%v)\033[K\n", p.Source, p.Refetched, p.Fields)
+		default:
+			// Drift detected but not fully corrected (some upserts failed).
+			fmt.Fprintf(os.Stderr, "\r  ⚠ reconcile %-16s %d drifted, only %d fixed\033[K\n", p.Source, p.Changed, p.Refetched)
 		}
 	}
 }
@@ -247,33 +260,7 @@ func displayReconcileProgress(ch <-chan synce.ReconcileProgress) {
 // reconciled incrementally, so arbitrary silently-changed fields still rely on
 // a periodic full sync.
 func warnIfFullSyncOverdue(g globals, sourceFilter string) {
-	age := 24 * time.Hour
-	if g.cfg.Sync.FullSyncWarningAge != "" {
-		if d, err := time.ParseDuration(g.cfg.Sync.FullSyncWarningAge); err == nil {
-			age = d
-		}
-	}
-
-	metas, err := g.db.AllSyncMeta()
-	if err != nil {
-		return
-	}
-	cutoff := time.Now().Add(-age)
-	var stale []string
-	for _, m := range metas {
-		if sourceFilter != "" && m.Project != sourceFilter {
-			continue
-		}
-		if !m.LastFullSync.Valid || m.LastFullSync.String == "" {
-			stale = append(stale, m.Project)
-			continue
-		}
-		t, err := time.Parse(time.RFC3339, m.LastFullSync.String)
-		if err != nil || t.Before(cutoff) {
-			stale = append(stale, m.Project)
-		}
-	}
-
+	stale := g.sync.FullSyncOverdue(sourceFilter)
 	if len(stale) > 0 {
 		fmt.Fprintf(os.Stderr,
 			"  ⚠ full sync overdue for: %v — run 'jai sync --full' to reconcile all fields\n"+

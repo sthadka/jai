@@ -464,6 +464,13 @@ issue-link edits) are only fully reconciled by a periodic **full sync**. Sync
 records `last_full_sync` per source and warns when it is older than
 `sync.full_sync_warning_age` (default 24h); disable via `sync.full_sync_warning`.
 
+**Cost trade-off:** the 500-issue cap bounds the *refetch* cost, but the *scan*
+in step 1 is a full, unfiltered pass over every issue in the source on every
+incremental sync (~1 request per 100 issues). Its payload is tiny (key + the
+reconcile fields only), but the request count scales with backlog size, not with
+how much changed — a deliberate trade to avoid missing `updated`-invisible rank
+drift. Set `sync.reconcile_fields: []` to opt out entirely.
+
 ### Denormalization
 
 ```go

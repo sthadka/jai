@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sthadka/jai/internal/config"
 	"github.com/sthadka/jai/internal/db"
@@ -212,5 +213,207 @@ func TestReconcileFields_EmptyIsNoop(t *testing.T) {
 	}
 	for range ch {
 		t.Error("expected no progress events for empty field list")
+	}
+}
+
+func TestNormalizeRaw_CanonicalizesObjectKeyOrder(t *testing.T) {
+	// Same object, different key order → must compare equal (no false drift).
+	if !rawFieldEqual(json.RawMessage(`{"id":"1","name":"x"}`), json.RawMessage(`{"name":"x","id":"1"}`)) {
+		t.Error("object fields with reordered keys should compare equal")
+	}
+	// Genuinely different values still differ.
+	if rawFieldEqual(json.RawMessage(`{"id":"1"}`), json.RawMessage(`{"id":"2"}`)) {
+		t.Error("object fields with different values should differ")
+	}
+}
+
+// seedRankIssue registers rank as a custom column and inserts an issue with the
+// given stored rank in both the column and raw_json.
+func seedRankIssue(t *testing.T, database *db.DB, key, storedRank string) {
+	t.Helper()
+	if err := database.UpsertFieldMapping(&db.FieldMapping{
+		JiraID: "customfield_10019", JiraName: "Rank", Name: "rank",
+		Type: "text", IsCustom: true, IsColumn: false,
+	}); err != nil {
+		t.Fatalf("UpsertFieldMapping: %v", err)
+	}
+	if err := database.EnsureColumn("rank", "TEXT"); err != nil {
+		t.Fatalf("EnsureColumn: %v", err)
+	}
+	_ = database.MarkFieldAsColumn("customfield_10019")
+	raw := `{"id":"` + key + `","key":"` + key + `","fields":{"summary":"An issue","customfield_10019":"` + storedRank + `"}}`
+	issue := &db.Issue{ID: key, Key: key, Project: "TEST", Summary: "An issue",
+		Updated: "2026-06-01T00:00:00Z", RawJSON: raw}
+	if err := database.UpsertIssue(issue, map[string]interface{}{"rank": storedRank}); err != nil {
+		t.Fatalf("UpsertIssue: %v", err)
+	}
+}
+
+func TestReconcileFields_CapExceededSkipsRefetch(t *testing.T) {
+	orig := maxReconcileRefetch
+	maxReconcileRefetch = 1
+	defer func() { maxReconcileRefetch = orig }()
+
+	var refetchRequests int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasPrefix(r.URL.Path, "/rest/api/3/search/jql") {
+			t.Errorf("unexpected request to %s", r.URL.Path)
+			return
+		}
+		var body map[string]interface{}
+		json.NewDecoder(r.Body).Decode(&body)
+		if jql, _ := body["jql"].(string); strings.Contains(jql, "key in") {
+			refetchRequests++
+		}
+		// Two issues, both drifted (fresh rank differs from any stored value).
+		mk := func(key string) *jira.Issue {
+			f, _ := json.Marshal(map[string]interface{}{"summary": "x", "customfield_10019": "1|fresh:"})
+			return &jira.Issue{ID: key, Key: key, Fields: f}
+		}
+		json.NewEncoder(w).Encode(jira.SearchResponse{Issues: []*jira.Issue{mk("TEST-1"), mk("TEST-2")}})
+	}))
+	defer srv.Close()
+
+	database, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer database.Close()
+	seedRankIssue(t, database, "TEST-1", "1|old1:")
+	seedRankIssue(t, database, "TEST-2", "1|old2:")
+
+	cfg := &config.Config{SyncSources: []config.SyncSource{{Name: "TEST", Projects: []string{"TEST"}}}}
+	e := New(database, jira.New(srv.URL, "t@t.com", "tok", 100), cfg)
+
+	ch, err := e.ReconcileFields(context.Background(), "", []string{"rank"})
+	if err != nil {
+		t.Fatalf("ReconcileFields: %v", err)
+	}
+	var sawSkip bool
+	for p := range ch {
+		if p.Done {
+			sawSkip = p.Skipped
+			if p.Refetched != 0 {
+				t.Errorf("refetched = %d, want 0 when cap exceeded", p.Refetched)
+			}
+		}
+	}
+	if !sawSkip {
+		t.Error("expected Skipped=true when change set exceeds cap")
+	}
+	if refetchRequests != 0 {
+		t.Errorf("refetch requests = %d, want 0 when cap exceeded", refetchRequests)
+	}
+}
+
+func TestReconcileFields_RefetchFailureSurfacesError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasPrefix(r.URL.Path, "/rest/api/3/search/jql") {
+			t.Errorf("unexpected request to %s", r.URL.Path)
+			return
+		}
+		var body map[string]interface{}
+		json.NewDecoder(r.Body).Decode(&body)
+		// Only the scan (project-scoped) query succeeds; the refetch fails. Match
+		// on "project in" rather than "key in" so that a client retry which
+		// re-sends an empty body (5xx retries reuse the consumed reader) also
+		// fails instead of falling through to the scan branch.
+		if jql, _ := body["jql"].(string); strings.Contains(jql, "project in") {
+			f, _ := json.Marshal(map[string]interface{}{"summary": "x", "customfield_10019": "1|fresh:"})
+			json.NewEncoder(w).Encode(jira.SearchResponse{Issues: []*jira.Issue{{ID: "TEST-1", Key: "TEST-1", Fields: f}}})
+			return
+		}
+		http.Error(w, `{"errorMessages":["boom"]}`, http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	database, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer database.Close()
+	seedRankIssue(t, database, "TEST-1", "1|old:")
+
+	cfg := &config.Config{SyncSources: []config.SyncSource{{Name: "TEST", Projects: []string{"TEST"}}}}
+	e := New(database, jira.New(srv.URL, "t@t.com", "tok", 100), cfg)
+
+	ch, err := e.ReconcileFields(context.Background(), "", []string{"rank"})
+	if err != nil {
+		t.Fatalf("ReconcileFields: %v", err)
+	}
+	var doneErr error
+	var changed, refetched int
+	for p := range ch {
+		if p.Done {
+			doneErr = p.Err
+			changed = p.Changed
+			refetched = p.Refetched
+		}
+	}
+	if doneErr == nil {
+		t.Error("expected reconcile Done event to carry the refetch error")
+	}
+	if changed != 1 || refetched != 0 {
+		t.Errorf("changed=%d refetched=%d, want 1 and 0", changed, refetched)
+	}
+}
+
+func TestReconcileFields_UnknownFieldSkipped(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("no Jira request expected for an unknown field, got %s", r.URL.Path)
+	}))
+	defer srv.Close()
+
+	database, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer database.Close()
+
+	cfg := &config.Config{SyncSources: []config.SyncSource{{Name: "TEST", Projects: []string{"TEST"}}}}
+	e := New(database, jira.New(srv.URL, "t@t.com", "tok", 100), cfg)
+
+	ch, err := e.ReconcileFields(context.Background(), "", []string{"does_not_exist"})
+	if err != nil {
+		t.Fatalf("ReconcileFields: %v", err)
+	}
+	for p := range ch {
+		t.Errorf("expected no progress events for an unknown field, got %+v", p)
+	}
+}
+
+func TestFullSyncOverdue(t *testing.T) {
+	database, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer database.Close()
+
+	old := time.Now().Add(-48 * time.Hour).UTC().Format(time.RFC3339)
+	recent := time.Now().Add(-1 * time.Hour).UTC().Format(time.RFC3339)
+	if _, err := database.Exec(
+		`INSERT INTO sync_metadata (project, last_full_sync) VALUES ('STALE', ?), ('FRESH', ?), ('NEVER', NULL)`,
+		old, recent); err != nil {
+		t.Fatalf("seeding sync_metadata: %v", err)
+	}
+
+	cfg := &config.Config{Sync: config.SyncConfig{FullSyncWarningAge: "24h"}}
+	e := New(database, nil, cfg)
+
+	stale := e.FullSyncOverdue("")
+	got := map[string]bool{}
+	for _, s := range stale {
+		got[s] = true
+	}
+	if !got["STALE"] || !got["NEVER"] {
+		t.Errorf("expected STALE and NEVER overdue, got %v", stale)
+	}
+	if got["FRESH"] {
+		t.Errorf("FRESH should not be overdue, got %v", stale)
+	}
+
+	// Source filter restricts the check.
+	if filtered := e.FullSyncOverdue("FRESH"); len(filtered) != 0 {
+		t.Errorf("FullSyncOverdue(FRESH) = %v, want empty", filtered)
 	}
 }

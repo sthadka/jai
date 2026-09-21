@@ -30,7 +30,8 @@ type ReconcileProgress struct {
 // re-fetch in one run. A LexoRank rebalance can re-rank thousands of issues at
 // once; re-fetching all of them defeats the point of a cheap pass, so above
 // this threshold we bail and let the caller recommend a full sync instead.
-const maxReconcileRefetch = 500
+// A var (not const) so tests can exercise the cap without seeding 500 issues.
+var maxReconcileRefetch = 500
 
 // ReconcileFields re-checks the configured fields for every issue in scope,
 // bypassing the "updated" high-water-mark gate that normal incremental sync
@@ -160,16 +161,19 @@ func (e *Engine) reconcileSource(ctx context.Context, src config.SyncSource, res
 		return
 	}
 
-	refetched := e.refetchAndUpsert(ctx, changedKeys, fieldMap)
-	ch <- ReconcileProgress{Source: src.Name, Fields: cols, Scanned: scanned, Changed: len(changedKeys), Refetched: refetched, Done: true}
+	refetched, err := e.refetchAndUpsert(ctx, changedKeys, fieldMap)
+	ch <- ReconcileProgress{Source: src.Name, Fields: cols, Scanned: scanned, Changed: len(changedKeys), Refetched: refetched, Err: err, Done: true}
 }
 
 // refetchAndUpsert re-fetches the given issues in full and upserts them,
 // refreshing every column plus changelog, links, and comments. Returns the
-// number of issues successfully upserted.
-func (e *Engine) refetchAndUpsert(ctx context.Context, keys []string, fieldMap map[string]*db.FieldMapping) int {
+// number of issues successfully upserted, and the first error encountered while
+// re-fetching (if any) so the caller can surface partial reconciliation instead
+// of silently leaving known-drifted issues uncorrected.
+func (e *Engine) refetchAndUpsert(ctx context.Context, keys []string, fieldMap map[string]*db.FieldMapping) (int, error) {
 	fields := e.expandFields(fieldMap)
 	refetched := 0
+	var firstErr error
 	const batchSize = 100
 	for i := 0; i < len(keys); i += batchSize {
 		end := i + batchSize
@@ -182,6 +186,9 @@ func (e *Engine) refetchAndUpsert(ctx context.Context, keys []string, fieldMap m
 		var upserted []string
 		for page, err := range e.client.SearchAll(ctx, jql, fields) {
 			if err != nil {
+				if firstErr == nil {
+					firstErr = fmt.Errorf("re-fetching drifted issues: %w", err)
+				}
 				break
 			}
 			for _, apiIssue := range page {
@@ -195,7 +202,7 @@ func (e *Engine) refetchAndUpsert(ctx context.Context, keys []string, fieldMap m
 			e.syncChangelogsForKeys(ctx, upserted)
 		}
 	}
-	return refetched
+	return refetched, firstErr
 }
 
 // upsertAPIIssue denormalizes and upserts a single API issue along with its
@@ -254,20 +261,33 @@ func rawFieldEqual(a, b json.RawMessage) bool {
 	return bytes.Equal(an, bn)
 }
 
-// normalizeRaw compacts a raw JSON value and collapses missing/null to nil so
-// that "field absent" and "field: null" compare equal.
+// normalizeRaw canonicalizes a raw JSON value so that semantically-equal values
+// compare equal: missing and JSON null both collapse to nil, and object keys are
+// sorted (Go's json.Marshal emits map keys in sorted order). Canonicalizing key
+// order matters because reconcile is reused for arbitrary object-valued fields
+// (e.g. user/option fields), where Jira may serialize keys in a different order
+// between responses without the value actually changing.
 func normalizeRaw(r json.RawMessage) []byte {
 	if len(r) == 0 {
 		return nil
 	}
-	var buf bytes.Buffer
-	if err := json.Compact(&buf, r); err != nil {
-		return r
+	var v interface{}
+	if err := json.Unmarshal(r, &v); err != nil {
+		// Not valid JSON on its own — fall back to a compacted byte compare.
+		var buf bytes.Buffer
+		if err := json.Compact(&buf, r); err != nil {
+			return r
+		}
+		return buf.Bytes()
 	}
-	if buf.String() == "null" {
+	if v == nil { // JSON null
 		return nil
 	}
-	return buf.Bytes()
+	canonical, err := json.Marshal(v)
+	if err != nil {
+		return r
+	}
+	return canonical
 }
 
 func quoteKeys(keys []string) []string {

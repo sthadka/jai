@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -34,6 +33,11 @@ func registerSyncTools(s *Server, srv *server.MCPServer) {
 				"source": map[string]string{
 					"type":        "string",
 					"description": "Sync only a specific named source",
+				},
+				"force": map[string]interface{}{
+					"type":        "boolean",
+					"description": "Re-fetch all changelog history from scratch (resets incremental changelog state)",
+					"default":     false,
 				},
 			},
 		},
@@ -90,6 +94,7 @@ func registerSyncTools(s *Server, srv *server.MCPServer) {
 func handleJaiSync(s *Server, ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	full := req.GetBool("full", false)
 	source := req.GetString("source", "")
+	force := req.GetBool("force", false)
 
 	if err := s.sync.VerifyAuth(ctx); err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("authentication failed: %v", err)), nil
@@ -141,19 +146,27 @@ func handleJaiSync(s *Server, ctx context.Context, req mcp.CallToolRequest) (*mc
 
 	// Reconcile silently-changed fields (rank etc.) on incremental syncs — the
 	// "updated" gate misses these. A full sync already re-fetches everything.
-	var reconcileRefetched int
+	var reconcileRefetched, reconcileDrifted int
+	var reconcileErr error
 	if !full && len(s.cfg.Sync.ReconcileFields) > 0 {
 		if rcCh, err := s.sync.ReconcileFields(ctx, source, s.cfg.Sync.ReconcileFields); err == nil {
 			for p := range rcCh {
 				if p.Done {
 					reconcileRefetched += p.Refetched
+					reconcileDrifted += p.Changed
+					if p.Err != nil && reconcileErr == nil {
+						reconcileErr = p.Err
+					}
 				}
 			}
+		} else {
+			reconcileErr = err
 		}
 	}
 
-	// Sync changelog history on every run (matches CLI behavior).
-	if clCh, err := s.sync.SyncChangelogs(ctx, source, false); err == nil {
+	// Sync changelog history on every run (matches CLI behavior). force resets
+	// incremental changelog state for a full re-fetch.
+	if clCh, err := s.sync.SyncChangelogs(ctx, source, force); err == nil {
 		for range clCh {
 		}
 	}
@@ -167,40 +180,19 @@ func handleJaiSync(s *Server, ctx context.Context, req mcp.CallToolRequest) (*mc
 	if reconcileRefetched > 0 {
 		result["reconciled"] = reconcileRefetched
 	}
-	if !full && s.cfg.Sync.FullSyncWarning && s.fullSyncOverdue(source) {
+	// Surface incomplete reconciliation so an agent knows drift was left
+	// uncorrected rather than assuming a clean sync.
+	if reconcileErr != nil {
+		result["reconcile_error"] = reconcileErr.Error()
+	}
+	if reconcileDrifted > reconcileRefetched {
+		result["reconcile_incomplete"] = true
+	}
+	if !full && s.cfg.Sync.FullSyncWarning && len(s.sync.FullSyncOverdue(source)) > 0 {
 		result["full_sync_overdue"] = true
 	}
 
 	return mcp.NewToolResultText(string(output.OK(stripNulls(result)))), nil
-}
-
-// fullSyncOverdue reports whether any (optionally filtered) source's last full
-// sync is missing or older than the configured warning threshold.
-func (s *Server) fullSyncOverdue(sourceFilter string) bool {
-	age := 24 * time.Hour
-	if s.cfg.Sync.FullSyncWarningAge != "" {
-		if d, err := time.ParseDuration(s.cfg.Sync.FullSyncWarningAge); err == nil {
-			age = d
-		}
-	}
-	metas, err := s.db.AllSyncMeta()
-	if err != nil {
-		return false
-	}
-	cutoff := time.Now().Add(-age)
-	for _, m := range metas {
-		if sourceFilter != "" && m.Project != sourceFilter {
-			continue
-		}
-		if !m.LastFullSync.Valid || m.LastFullSync.String == "" {
-			return true
-		}
-		t, err := time.Parse(time.RFC3339, m.LastFullSync.String)
-		if err != nil || t.Before(cutoff) {
-			return true
-		}
-	}
-	return false
 }
 
 // handleJaiStatus handles the jai_status tool call.
