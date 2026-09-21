@@ -138,23 +138,43 @@ type BulkChangelogRequest struct {
 	IssueIdsOrKeys []string `json:"issueIdsOrKeys"`
 }
 
-// BulkChangelogResponse is the paginated response from the bulk changelog endpoint.
+// BulkChangelogResponse is the response from POST /rest/api/3/changelog/bulkfetch.
+// The API groups change histories under each issue and paginates with an opaque
+// nextPageToken (it is NOT offset/total based).
 type BulkChangelogResponse struct {
-	StartAt    int                  `json:"startAt"`
-	MaxResults int                  `json:"maxResults"`
-	Total      int                  `json:"total"`
-	Values     []BulkChangelogEntry `json:"values"`
+	IssueChangeLogs []IssueChangeLog `json:"issueChangeLogs"`
+	NextPageToken   string           `json:"nextPageToken"`
 }
 
-// BulkChangelogEntry is a single changelog history from the bulk response.
-type BulkChangelogEntry struct {
-	ID      string `json:"id"`
-	IssueID string `json:"issueId"`
-	Author  *struct {
+// IssueChangeLog holds the change histories for a single issue in a bulk response.
+type IssueChangeLog struct {
+	IssueID         string              `json:"issueId"`
+	ChangeHistories []BulkChangeHistory `json:"changeHistories"`
+}
+
+// BulkChangeHistory is one change history (a user action at one timestamp) from
+// the bulk endpoint. Created is epoch milliseconds here, unlike the ISO-8601
+// string returned by the per-issue ?expand=changelog endpoint.
+type BulkChangeHistory struct {
+	ID     string `json:"id"`
+	Author *struct {
 		DisplayName string `json:"displayName"`
 	} `json:"author"`
-	Created string          `json:"created"`
+	Created int64           `json:"created"`
 	Items   []ChangelogItem `json:"items"`
+}
+
+// BulkChangelogEntry is a single change history flattened with its issue ID.
+// BulkFetchChangelogs produces these from the nested API response; Created is
+// normalised to RFC3339 so downstream extraction matches the per-issue path.
+type BulkChangelogEntry struct {
+	ID      string
+	IssueID string
+	Author  *struct {
+		DisplayName string `json:"displayName"`
+	}
+	Created string
+	Items   []ChangelogItem
 }
 
 // Field is a Jira field from /rest/api/3/field.

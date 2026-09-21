@@ -245,32 +245,53 @@ func (c *Client) GetIssueChangelog(ctx context.Context, key string) (*ChangelogR
 	return &resp, nil
 }
 
-// BulkFetchChangelogs fetches changelogs for up to 100 issues in one API call.
-// Handles pagination internally — accumulates all values across pages.
+// BulkFetchChangelogs fetches changelogs for the given issues and flattens the
+// nested API response into per-history entries. The bulk endpoint groups change
+// histories under each issue and paginates with an opaque nextPageToken; this
+// handles pagination internally, accumulating all entries across pages.
 func (c *Client) BulkFetchChangelogs(ctx context.Context, keys []string) ([]BulkChangelogEntry, error) {
 	var all []BulkChangelogEntry
-	startAt := 0
+	nextPageToken := ""
 
 	for {
-		req := map[string]any{
-			"issueIdsOrKeys": keys,
+		req := map[string]any{"issueIdsOrKeys": keys}
+		if nextPageToken != "" {
+			req["nextPageToken"] = nextPageToken
 		}
-		path := fmt.Sprintf("/rest/api/3/changelog/bulkfetch?startAt=%d", startAt)
 
 		var resp BulkChangelogResponse
-		if err := c.postDecode(ctx, path, req, &resp); err != nil {
+		if err := c.postDecode(ctx, "/rest/api/3/changelog/bulkfetch", req, &resp); err != nil {
 			return nil, err
 		}
 
-		all = append(all, resp.Values...)
+		for _, icl := range resp.IssueChangeLogs {
+			for _, h := range icl.ChangeHistories {
+				all = append(all, BulkChangelogEntry{
+					ID:      h.ID,
+					IssueID: icl.IssueID,
+					Author:  h.Author,
+					Created: epochMillisToRFC3339(h.Created),
+					Items:   h.Items,
+				})
+			}
+		}
 
-		if startAt+len(resp.Values) >= resp.Total || len(resp.Values) == 0 {
+		if resp.NextPageToken == "" {
 			break
 		}
-		startAt += len(resp.Values)
+		nextPageToken = resp.NextPageToken
 	}
 
 	return all, nil
+}
+
+// epochMillisToRFC3339 converts Jira's epoch-millisecond changelog timestamps to
+// an RFC3339 UTC string. Returns "" for a zero/absent value.
+func epochMillisToRFC3339(ms int64) string {
+	if ms == 0 {
+		return ""
+	}
+	return time.Unix(0, ms*int64(time.Millisecond)).UTC().Format(time.RFC3339)
 }
 
 // Fields fetches all field definitions.

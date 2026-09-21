@@ -211,36 +211,40 @@ func TestBulkFetchChangelogs(t *testing.T) {
 		}
 
 		resp := BulkChangelogResponse{
-			StartAt:    0,
-			MaxResults: 1000,
-			Total:      3,
-			Values: []BulkChangelogEntry{
+			IssueChangeLogs: []IssueChangeLog{
 				{
-					ID:      "100",
 					IssueID: "10042",
-					Author: &struct {
-						DisplayName string `json:"displayName"`
-					}{"Jane"},
-					Created: "2026-06-10T14:30:00.000+0000",
-					Items:   []ChangelogItem{{Field: "status", FieldType: "jira", ToString: "Done"}},
+					ChangeHistories: []BulkChangeHistory{
+						{
+							ID: "100",
+							Author: &struct {
+								DisplayName string `json:"displayName"`
+							}{"Jane"},
+							Created: 1781101800000, // 2026-06-10T14:30:00Z
+							Items:   []ChangelogItem{{Field: "status", FieldType: "jira", ToString: "Done"}},
+						},
+						{
+							ID: "101",
+							Author: &struct {
+								DisplayName string `json:"displayName"`
+							}{"Bob"},
+							Created: 1748772000000, // 2026-06-01T10:00:00Z
+							Items:   []ChangelogItem{{Field: "status", FieldType: "jira", ToString: "In Progress"}},
+						},
+					},
 				},
 				{
-					ID:      "101",
-					IssueID: "10042",
-					Author: &struct {
-						DisplayName string `json:"displayName"`
-					}{"Bob"},
-					Created: "2026-06-01T10:00:00.000+0000",
-					Items:   []ChangelogItem{{Field: "status", FieldType: "jira", ToString: "In Progress"}},
-				},
-				{
-					ID:      "102",
 					IssueID: "10043",
-					Author: &struct {
-						DisplayName string `json:"displayName"`
-					}{"Jane"},
-					Created: "2026-06-05T08:00:00.000+0000",
-					Items:   []ChangelogItem{{Field: "priority", FieldType: "jira", ToString: "High"}},
+					ChangeHistories: []BulkChangeHistory{
+						{
+							ID: "102",
+							Author: &struct {
+								DisplayName string `json:"displayName"`
+							}{"Jane"},
+							Created: 1749110400000,
+							Items:   []ChangelogItem{{Field: "priority", FieldType: "jira", ToString: "High"}},
+						},
+					},
 				},
 			},
 		}
@@ -254,13 +258,16 @@ func TestBulkFetchChangelogs(t *testing.T) {
 		t.Fatalf("BulkFetchChangelogs: %v", err)
 	}
 	if len(entries) != 3 {
-		t.Fatalf("expected 3 entries, got %d", len(entries))
+		t.Fatalf("expected 3 flattened entries, got %d", len(entries))
 	}
 	if entries[0].IssueID != "10042" {
 		t.Errorf("expected issueId 10042, got %q", entries[0].IssueID)
 	}
-	if entries[2].Items[0].ToString != "High" {
-		t.Errorf("expected 'High', got %q", entries[2].Items[0].ToString)
+	if entries[0].Created != "2026-06-10T14:30:00Z" {
+		t.Errorf("expected RFC3339 created, got %q", entries[0].Created)
+	}
+	if entries[2].IssueID != "10043" || entries[2].Items[0].ToString != "High" {
+		t.Errorf("unexpected last entry: %+v", entries[2])
 	}
 }
 
@@ -268,31 +275,39 @@ func TestBulkFetchChangelogs_Pagination(t *testing.T) {
 	page := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		page++
-		startAt := 0
-		if page == 2 {
-			startAt = 3
-		}
+
+		var reqMap map[string]any
+		json.NewDecoder(r.Body).Decode(&reqMap)
 
 		var resp BulkChangelogResponse
 		if page == 1 {
+			if _, ok := reqMap["nextPageToken"]; ok {
+				t.Errorf("first page must not send nextPageToken")
+			}
 			resp = BulkChangelogResponse{
-				StartAt:    0,
-				MaxResults: 3,
-				Total:      5,
-				Values: []BulkChangelogEntry{
-					{ID: "100", IssueID: "10042", Items: []ChangelogItem{{Field: "status"}}},
-					{ID: "101", IssueID: "10042", Items: []ChangelogItem{{Field: "priority"}}},
-					{ID: "102", IssueID: "10043", Items: []ChangelogItem{{Field: "status"}}},
+				NextPageToken: "PAGE2",
+				IssueChangeLogs: []IssueChangeLog{
+					{IssueID: "10042", ChangeHistories: []BulkChangeHistory{
+						{ID: "100", Items: []ChangelogItem{{Field: "status"}}},
+						{ID: "101", Items: []ChangelogItem{{Field: "priority"}}},
+					}},
+					{IssueID: "10043", ChangeHistories: []BulkChangeHistory{
+						{ID: "102", Items: []ChangelogItem{{Field: "status"}}},
+					}},
 				},
 			}
 		} else {
+			if reqMap["nextPageToken"] != "PAGE2" {
+				t.Errorf("second page must echo nextPageToken, got %v", reqMap["nextPageToken"])
+			}
 			resp = BulkChangelogResponse{
-				StartAt:    startAt,
-				MaxResults: 3,
-				Total:      5,
-				Values: []BulkChangelogEntry{
-					{ID: "103", IssueID: "10043", Items: []ChangelogItem{{Field: "assignee"}}},
-					{ID: "104", IssueID: "10044", Items: []ChangelogItem{{Field: "status"}}},
+				IssueChangeLogs: []IssueChangeLog{
+					{IssueID: "10043", ChangeHistories: []BulkChangeHistory{
+						{ID: "103", Items: []ChangelogItem{{Field: "assignee"}}},
+					}},
+					{IssueID: "10044", ChangeHistories: []BulkChangeHistory{
+						{ID: "104", Items: []ChangelogItem{{Field: "status"}}},
+					}},
 				},
 			}
 		}
@@ -315,7 +330,7 @@ func TestBulkFetchChangelogs_Pagination(t *testing.T) {
 
 func TestBulkFetchChangelogs_Empty(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(BulkChangelogResponse{Total: 0})
+		json.NewEncoder(w).Encode(BulkChangelogResponse{})
 	}))
 	defer srv.Close()
 

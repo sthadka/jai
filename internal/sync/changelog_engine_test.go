@@ -20,17 +20,20 @@ func TestSyncChangelogsForKeys(t *testing.T) {
 			t.Fatalf("unexpected request to %s", r.URL.Path)
 		}
 		resp := jira.BulkChangelogResponse{
-			Values: []jira.BulkChangelogEntry{
+			IssueChangeLogs: []jira.IssueChangeLog{
 				{
-					ID:      "500",
 					IssueID: "10042",
-					Created: "2026-06-10T14:30:00.000+0000",
-					Items: []jira.ChangelogItem{
-						{Field: "status", FieldType: "jira", FromString: "New", ToString: "Done"},
+					ChangeHistories: []jira.BulkChangeHistory{
+						{
+							ID:      "500",
+							Created: 1781101800000, // 2026-06-10T14:30:00Z
+							Items: []jira.ChangelogItem{
+								{Field: "status", FieldType: "jira", FromString: "New", ToString: "Done"},
+							},
+						},
 					},
 				},
 			},
-			Total: 1,
 		}
 		json.NewEncoder(w).Encode(resp)
 	}))
@@ -77,17 +80,20 @@ func TestSyncChangelogs_Incremental(t *testing.T) {
 		}
 		bulkCalls++
 		resp := jira.BulkChangelogResponse{
-			Values: []jira.BulkChangelogEntry{
+			IssueChangeLogs: []jira.IssueChangeLog{
 				{
-					ID:      "500",
 					IssueID: "10042",
-					Created: "2026-06-10T14:30:00.000+0000",
-					Items: []jira.ChangelogItem{
-						{Field: "status", FieldType: "jira", FromString: "New", ToString: "Done"},
+					ChangeHistories: []jira.BulkChangeHistory{
+						{
+							ID:      "500",
+							Created: 1781101800000, // 2026-06-10T14:30:00Z
+							Items: []jira.ChangelogItem{
+								{Field: "status", FieldType: "jira", FromString: "New", ToString: "Done"},
+							},
+						},
 					},
 				},
 			},
-			Total: 1,
 		}
 		json.NewEncoder(w).Encode(resp)
 	}))
@@ -177,17 +183,20 @@ func TestSyncSource_IncludesChangelogs(t *testing.T) {
 			json.NewEncoder(w).Encode(resp)
 		case strings.HasPrefix(r.URL.Path, "/rest/api/3/changelog/bulkfetch"):
 			resp := jira.BulkChangelogResponse{
-				Values: []jira.BulkChangelogEntry{
+				IssueChangeLogs: []jira.IssueChangeLog{
 					{
-						ID:      "500",
 						IssueID: "10042",
-						Created: "2026-06-10T14:30:00.000+0000",
-						Items: []jira.ChangelogItem{
-							{Field: "status", FieldType: "jira", FromString: "New", ToString: "Done"},
+						ChangeHistories: []jira.BulkChangeHistory{
+							{
+								ID:      "500",
+								Created: 1781101800000, // 2026-06-10T14:30:00Z
+								Items: []jira.ChangelogItem{
+									{Field: "status", FieldType: "jira", FromString: "New", ToString: "Done"},
+								},
+							},
 						},
 					},
 				},
-				Total: 1,
 			}
 			json.NewEncoder(w).Encode(resp)
 		default:
