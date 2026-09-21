@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -138,12 +139,68 @@ func handleJaiSync(s *Server, ctx context.Context, req mcp.CallToolRequest) (*mc
 		return mcp.NewToolResultError(fmt.Sprintf("sync completed with errors: %v", lastError)), nil
 	}
 
-	return mcp.NewToolResultText(string(output.OK(stripNulls(map[string]interface{}{
+	// Reconcile silently-changed fields (rank etc.) on incremental syncs — the
+	// "updated" gate misses these. A full sync already re-fetches everything.
+	var reconcileRefetched int
+	if !full && len(s.cfg.Sync.ReconcileFields) > 0 {
+		if rcCh, err := s.sync.ReconcileFields(ctx, source, s.cfg.Sync.ReconcileFields); err == nil {
+			for p := range rcCh {
+				if p.Done {
+					reconcileRefetched += p.Refetched
+				}
+			}
+		}
+	}
+
+	// Sync changelog history on every run (matches CLI behavior).
+	if clCh, err := s.sync.SyncChangelogs(ctx, source, false); err == nil {
+		for range clCh {
+		}
+	}
+
+	result := map[string]interface{}{
 		"total_synced": totalSynced,
 		"new":          totalNew,
 		"updated":      totalUpdated,
 		"sources":      sources,
-	})))), nil
+	}
+	if reconcileRefetched > 0 {
+		result["reconciled"] = reconcileRefetched
+	}
+	if !full && s.cfg.Sync.FullSyncWarning && s.fullSyncOverdue(source) {
+		result["full_sync_overdue"] = true
+	}
+
+	return mcp.NewToolResultText(string(output.OK(stripNulls(result)))), nil
+}
+
+// fullSyncOverdue reports whether any (optionally filtered) source's last full
+// sync is missing or older than the configured warning threshold.
+func (s *Server) fullSyncOverdue(sourceFilter string) bool {
+	age := 24 * time.Hour
+	if s.cfg.Sync.FullSyncWarningAge != "" {
+		if d, err := time.ParseDuration(s.cfg.Sync.FullSyncWarningAge); err == nil {
+			age = d
+		}
+	}
+	metas, err := s.db.AllSyncMeta()
+	if err != nil {
+		return false
+	}
+	cutoff := time.Now().Add(-age)
+	for _, m := range metas {
+		if sourceFilter != "" && m.Project != sourceFilter {
+			continue
+		}
+		if !m.LastFullSync.Valid || m.LastFullSync.String == "" {
+			return true
+		}
+		t, err := time.Parse(time.RFC3339, m.LastFullSync.String)
+		if err != nil || t.Before(cutoff) {
+			return true
+		}
+	}
+	return false
 }
 
 // handleJaiStatus handles the jai_status tool call.

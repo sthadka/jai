@@ -108,7 +108,7 @@ jai changelog ROX-123 --field status   # filter to specific field
 jai changelog ROX-123 --json           # structured output
 ```
 
-Requires `jai sync --changelogs` to fetch changelog data first.
+Changelog data is fetched automatically on every `jai sync`.
 
 ### Data export formats
 
@@ -356,10 +356,16 @@ Detects unsynced projects referenced in links.
 ## Sync
 
 ```sh
-jai sync                # incremental sync
-jai sync --full         # full resync with deletion detection
-jai sync --changelogs   # sync status transition history
+jai sync                # incremental sync (reconciles rank + syncs changelogs)
+jai sync --full         # full resync with deletion detection (reconciles all fields)
+jai sync --force        # re-fetch all changelog history from scratch
 ```
+
+Every incremental sync also runs a **reconcile pass** for `sync.reconcile_fields`
+(default `[rank]`) to catch changes Jira makes without bumping the issue
+`updated` timestamp — notably rank/LexoRank reorders — and syncs changelog
+history. A periodic `jai sync --full` reconciles all other fields; sync warns
+when one is overdue (configurable via `sync.full_sync_warning`).
 
 By default, sync runs in the background — commands return immediately with cached data. JSON output includes `sync_age_seconds`. Human output shows "(data from N minutes ago)" when stale.
 

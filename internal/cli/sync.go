@@ -15,7 +15,6 @@ var syncFull bool
 var syncResume bool
 var syncSourceFlag string
 var syncVerbose bool
-var syncChangelogs bool
 var syncChangelogsForce bool
 
 var syncCmd = &cobra.Command{
@@ -47,15 +46,32 @@ var syncCmd = &cobra.Command{
 		total := displaySyncProgress(ch, syncVerbose)
 		fmt.Printf("Done. %d issues synced.\n", total)
 
-		if syncChangelogs {
-			// Incremental by default: only issues whose changelog was never
-			// synced (or that were updated since) are re-fetched. --force resets
-			// all changelog_synced_at timestamps first for a full re-fetch.
-			clCh, err := g.sync.SyncChangelogs(ctx, syncSourceFlag, syncChangelogsForce)
+		// Reconcile silently-changed fields (rank etc.) that the "updated" gate
+		// misses. Only meaningful for incremental syncs — a full sync already
+		// re-fetches every issue. Skipped when reconcile_fields is empty.
+		if !syncFull && len(g.cfg.Sync.ReconcileFields) > 0 {
+			rcCh, err := g.sync.ReconcileFields(ctx, syncSourceFlag, g.cfg.Sync.ReconcileFields)
 			if err != nil {
-				return fmt.Errorf("changelog sync: %w", err)
+				return fmt.Errorf("reconcile: %w", err)
 			}
-			displayChangelogProgress(clCh)
+			displayReconcileProgress(rcCh)
+		}
+
+		// Changelog history is now synced on every run (previously behind
+		// --changelogs). Incremental by default: only issues whose changelog was
+		// never synced or that were updated since are re-fetched. --force resets
+		// all changelog_synced_at timestamps first for a full re-fetch.
+		clCh, err := g.sync.SyncChangelogs(ctx, syncSourceFlag, syncChangelogsForce)
+		if err != nil {
+			return fmt.Errorf("changelog sync: %w", err)
+		}
+		displayChangelogProgress(clCh)
+
+		// Remind the user if a full sync is overdue: the reconcile pass only
+		// covers configured fields, so arbitrary silently-changed fields still
+		// need a periodic full sync to reconcile.
+		if !syncFull && g.cfg.Sync.FullSyncWarning {
+			warnIfFullSyncOverdue(g, syncSourceFlag)
 		}
 
 		return nil
@@ -208,14 +224,70 @@ func displayChangelogProgress(ch <-chan synce.ChangelogProgress) {
 	}
 }
 
+// displayReconcileProgress consumes the reconcile progress channel and prints
+// a one-line summary per source once it finishes.
+func displayReconcileProgress(ch <-chan synce.ReconcileProgress) {
+	for p := range ch {
+		if !p.Done {
+			continue
+		}
+		switch {
+		case p.Err != nil:
+			fmt.Fprintf(os.Stderr, "  ✗ reconcile %-16s ERROR: %v\n", p.Source, p.Err)
+		case p.Skipped:
+			fmt.Fprintf(os.Stderr, "  ⚠ reconcile %-16s %d issues drifted (> cap) — run 'jai sync --full'\n", p.Source, p.Changed)
+		case p.Refetched > 0:
+			fmt.Fprintf(os.Stderr, "  ✓ reconcile %-16s %d re-synced (%v)\n", p.Source, p.Refetched, p.Fields)
+		}
+	}
+}
+
+// warnIfFullSyncOverdue prints a reminder when a source's last full sync is
+// missing or older than the configured threshold. Only configured fields are
+// reconciled incrementally, so arbitrary silently-changed fields still rely on
+// a periodic full sync.
+func warnIfFullSyncOverdue(g globals, sourceFilter string) {
+	age := 24 * time.Hour
+	if g.cfg.Sync.FullSyncWarningAge != "" {
+		if d, err := time.ParseDuration(g.cfg.Sync.FullSyncWarningAge); err == nil {
+			age = d
+		}
+	}
+
+	metas, err := g.db.AllSyncMeta()
+	if err != nil {
+		return
+	}
+	cutoff := time.Now().Add(-age)
+	var stale []string
+	for _, m := range metas {
+		if sourceFilter != "" && m.Project != sourceFilter {
+			continue
+		}
+		if !m.LastFullSync.Valid || m.LastFullSync.String == "" {
+			stale = append(stale, m.Project)
+			continue
+		}
+		t, err := time.Parse(time.RFC3339, m.LastFullSync.String)
+		if err != nil || t.Before(cutoff) {
+			stale = append(stale, m.Project)
+		}
+	}
+
+	if len(stale) > 0 {
+		fmt.Fprintf(os.Stderr,
+			"  ⚠ full sync overdue for: %v — run 'jai sync --full' to reconcile all fields\n"+
+				"    (disable via sync.full_sync_warning: false)\n",
+			stale)
+	}
+}
+
 func init() {
 	syncCmd.Flags().BoolVar(&syncFull, "full", false, "full resync (re-fetch all issues)")
 	syncCmd.Flags().BoolVar(&syncResume, "resume", false, "continue a previously interrupted --full sync (requires --full)")
 	syncCmd.Flags().StringVar(&syncSourceFlag, "source", "", "sync only this named source (from sync_sources in config)")
 	syncCmd.Flags().BoolVar(&syncVerbose, "verbose", false, "print effective JQL for each source")
-	syncCmd.Flags().BoolVar(&syncChangelogs, "changelogs", false,
-		"backfill changelog history (incremental; only fetches issues whose changelog is missing or stale)")
 	syncCmd.Flags().BoolVar(&syncChangelogsForce, "force", false,
-		"with --changelogs, re-fetch all changelog history from scratch (resets incremental state)")
+		"re-fetch all changelog history from scratch (resets incremental changelog state)")
 	rootCmd.AddCommand(syncCmd)
 }

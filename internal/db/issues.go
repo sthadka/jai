@@ -131,6 +131,39 @@ func (db *DB) GetIssueUpdated(key string) (string, error) {
 	return updated.String, nil
 }
 
+// GetIssuesRawJSON returns a map of issue key → stored raw_json for the given
+// keys. Keys with no stored row (or NULL raw_json) are omitted. Used by the
+// reconcile pass to diff live field values against what is stored locally.
+func (db *DB) GetIssuesRawJSON(keys []string) (map[string]string, error) {
+	result := make(map[string]string, len(keys))
+	if len(keys) == 0 {
+		return result, nil
+	}
+	placeholders := make([]string, len(keys))
+	args := make([]any, len(keys))
+	for i, k := range keys {
+		placeholders[i] = "?"
+		args[i] = k
+	}
+	q := "SELECT key, raw_json FROM issues WHERE key IN (" + strings.Join(placeholders, ", ") + ")"
+	rows, err := db.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var key string
+		var raw sql.NullString
+		if err := rows.Scan(&key, &raw); err != nil {
+			return nil, err
+		}
+		if raw.Valid {
+			result[key] = raw.String
+		}
+	}
+	return result, rows.Err()
+}
+
 // GetIssue retrieves a single issue by key.
 func (db *DB) GetIssue(key string) (map[string]interface{}, error) {
 	rows, err := db.Query("SELECT * FROM issues WHERE key = ?", key)

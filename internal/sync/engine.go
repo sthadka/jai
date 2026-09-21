@@ -410,6 +410,13 @@ func (e *Engine) syncSource(ctx context.Context, src config.SyncSource, full, re
 				_ = err // non-fatal
 			}
 		}
+	}
+
+	// Record the full-sync timestamp for every source (JQL sources included) so
+	// the "full sync overdue" reminder can reason about staleness. Previously
+	// this only ran for project-keyed sources, leaving last_full_sync NULL for
+	// JQL-based configs.
+	if full {
 		_ = e.db.UpdateFullSyncMeta(src.Name)
 	}
 

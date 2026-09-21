@@ -170,14 +170,14 @@ Snippets can reference other snippets and built-in variables. Circular reference
 
 ## Status transition history
 
-`jai sync --changelogs` fetches the full changelog for each issue from the Jira API and stores status transitions in a `changelog` table. This enables time-series analysis of when features moved between statuses.
+`jai sync` fetches the full changelog for each issue from the Jira API and stores status transitions in a `changelog` table. This enables time-series analysis of when features moved between statuses. Changelog history is synced automatically on every `jai sync` (no flag required).
 
 ```sh
-jai sync --changelogs                                    # sync changelogs for all sources
-jai sync --changelogs --source "project = OCPSTRAT"      # sync changelogs for one source
+jai sync                       # syncs issues, reconciles rank, and syncs changelogs
+jai sync --force               # re-fetch all changelog history from scratch
 ```
 
-The changelog sync is incremental — it only fetches issues that are missing changelog data or have been updated since the last sync. It uses per-issue API calls (`?expand=changelog`), so it's slower than the regular issue sync.
+The changelog sync is incremental — it only fetches issues that are missing changelog data or have been updated since the last sync. Use `--force` to reset incremental state and re-fetch everything.
 
 ```sql
 -- When did each 5.0 feature enter Release Pending?
@@ -191,6 +191,20 @@ jai query "SELECT substr(changed_at, 1, 7) as month, COUNT(*) as completed
   WHERE c.field='status' AND c.to_string='Release Pending'
   AND i.target_version LIKE '%4.22%'
   GROUP BY month ORDER BY month"
+```
+
+---
+
+## Keeping rank (and other silent fields) fresh
+
+Incremental sync is gated on each issue's `updated` timestamp, but Jira does **not** bump `updated` when an issue is re-ranked (drag-reorder / LexoRank). So a rank-only change is invisible to incremental sync and the local `rank` column silently drifts.
+
+To fix this, every `jai sync` runs a cheap **reconcile pass**: it re-fetches just `key` + the configured `reconcile_fields` (default `[rank]`) for the working set — with no `updated` filter — and re-syncs only the issues whose values actually changed. Configure or disable it under `sync.reconcile_fields`.
+
+The reconcile pass only covers the fields you list. Other fields that can change without bumping `updated` (some integration-written custom fields, occasional issue-link edits) are only fully reconciled by a periodic **full sync**. `jai sync` warns when a full sync is overdue (`sync.full_sync_warning`, default 24h):
+
+```sh
+jai sync --full     # reconciles every field; run periodically (e.g. nightly)
 ```
 
 ---
@@ -431,6 +445,11 @@ sync:
   rate_limit: 10             # requests/second (Jira Cloud limit)
   sprints: true              # sync sprint/board data (default: true)
   dev_info: false            # sync PR/branch dev info (default: false, opt-in)
+  reconcile_fields: [rank]   # fields re-checked every sync regardless of the
+                             # issue "updated" timestamp (Jira doesn't bump
+                             # "updated" on rank reorders). Set to [] to disable.
+  full_sync_warning: true    # warn when a full sync is overdue (default: true)
+  full_sync_warning_age: 24h # how stale before the warning fires (default: 24h)
 
 me: me@company.com           # used in {{me}} template variable
 
@@ -501,8 +520,8 @@ alias jai-client='jai --config ~/.config/jai/client.yaml'
 |---------|-------------|
 | `jai init` | Interactive setup wizard |
 | `jai sync` | Incremental sync from Jira |
-| `jai sync --full` | Full resync with deletion detection |
-| `jai sync --changelogs` | Sync status transition history from Jira changelogs |
+| `jai sync --full` | Full resync with deletion detection (reconciles all fields) |
+| `jai sync --force` | Re-fetch all changelog history from scratch |
 | `jai query <sql>` | Execute SQL against local DB |
 | `jai get <key>` | Fetch a single issue |
 | `jai search <text>` | FTS5 full-text search |

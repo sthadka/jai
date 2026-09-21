@@ -87,6 +87,22 @@ type SyncConfig struct {
 	Sprints        bool     `yaml:"sprints"`         // sync sprint and board data
 	DevInfo        bool     `yaml:"dev_info"`        // sync development info (requires extra API permissions)
 	LookbackWindow string   `yaml:"lookback_window"` // incremental re-scan overlap below the high-water mark, e.g. "1h" (default 1h)
+
+	// ReconcileFields lists column names whose values are re-checked on every
+	// incremental sync, regardless of the issue "updated" timestamp. Jira does
+	// not bump "updated" for some changes (notably rank/LexoRank reorders), so
+	// those changes are invisible to updated-gated incremental sync. The
+	// reconcile pass does a cheap key+fields scan and re-fetches only issues
+	// whose listed fields drifted. Defaults to ["rank"]; set to [] to disable.
+	ReconcileFields []string `yaml:"reconcile_fields"`
+
+	// FullSyncWarning, when true, prints a reminder after an incremental sync if
+	// a full sync has not completed within FullSyncWarningAge. A periodic full
+	// sync is the only way to reconcile arbitrary silently-changed fields.
+	FullSyncWarning bool `yaml:"full_sync_warning"`
+	// FullSyncWarningAge is the max age before the full-sync reminder fires,
+	// e.g. "24h" (default 24h).
+	FullSyncWarningAge string `yaml:"full_sync_warning_age"`
 }
 
 // DBConfig holds database settings.
@@ -168,10 +184,13 @@ func Load(path string) (*Config, error) {
 func defaults() *Config {
 	return &Config{
 		Sync: SyncConfig{
-			Interval:       "15m",
-			RateLimit:      10,
-			Sprints:        true,
-			LookbackWindow: "1h",
+			Interval:           "15m",
+			RateLimit:          10,
+			Sprints:            true,
+			LookbackWindow:     "1h",
+			ReconcileFields:    []string{"rank"},
+			FullSyncWarning:    true,
+			FullSyncWarningAge: "24h",
 		},
 		DB: DBConfig{
 			Path: DefaultDBPath(),

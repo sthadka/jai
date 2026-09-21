@@ -435,8 +435,34 @@ Store plaintext in `description` and `comments.body` columns. Raw ADF is preserv
       - Upsert changelog entries (if sync.history: true)
       - Concatenate comments into comments_text for FTS
    d. Update sync_metadata
-4. Release sync lock
+4. Reconcile silently-changed fields (see below)
+5. Sync changelog history for missing/stale issues
+6. Release sync lock
 ```
+
+### Field Reconciliation (rank and other silent fields)
+
+Incremental sync is gated on the issue `updated` timestamp, but Jira does **not**
+bump `updated` for some changes — most notably rank/LexoRank reorders. Such a
+change is invisible to the `updated >=` gate and the local value drifts until the
+issue is touched for another reason.
+
+Every incremental sync therefore runs a reconcile pass over the columns listed in
+`sync.reconcile_fields` (default `[rank]`):
+
+```
+1. For each source, JQL: "{source scope}"  ← no "updated >=" filter
+2. Fetch only key + reconcile fields (tiny payload)
+3. Diff each reconcile field against the stored raw_json value
+4. Re-fetch (in full) and upsert ONLY the issues that actually drifted
+   - Capped at 500 changed issues per run; above that, recommend `jai sync --full`
+```
+
+The pass only covers the configured fields. Arbitrary fields that can change
+without bumping `updated` (some integration-written custom fields, occasional
+issue-link edits) are only fully reconciled by a periodic **full sync**. Sync
+records `last_full_sync` per source and warns when it is older than
+`sync.full_sync_warning_age` (default 24h); disable via `sync.full_sync_warning`.
 
 ### Denormalization
 
