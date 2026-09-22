@@ -1,5 +1,29 @@
 # Changelog
 
+## [5.0.0](https://github.com/sthadka/jai/compare/v4.1.0...v5.0.0) (2026-09-22)
+
+
+### ⚠ BREAKING CHANGES
+
+* the `jai sync --changelogs` flag has been removed. Changelog history is now synced automatically on every `jai sync`; use `jai sync --force` to force a full changelog re-fetch.
+
+### Features
+
+* reconcile rank and other silently-changed fields on every sync ([d155879](https://github.com/sthadka/jai/commit/d15587957164b49779029eeb698a6487ebb7eeb6))
+
+
+### Bug Fixes
+
+* address PR [#32](https://github.com/sthadka/jai/issues/32) review — reconcile error visibility, dedup, tests ([a824cae](https://github.com/sthadka/jai/commit/a824caef12a233e373df9f521fa6bfa1b80116dd))
+* reconcile silent-field drift on jai sync --full ([d4e3629](https://github.com/sthadka/jai/commit/d4e3629506825fe569009237da9e35d3e48cff55))
+* **sync:** apply reconcile drift directly above the refetch cap ([ad80150](https://github.com/sthadka/jai/commit/ad80150f4656cfd4509d17890465dc16383916a5))
+* **sync:** discover custom fields in background sync and extract user arrays ([e04c0cd](https://github.com/sthadka/jai/commit/e04c0cdbb0bcc2e2306a9b00cdc8a6228bf8b57c))
+
+
+### Performance
+
+* **sync:** parallelize changelog + sources, decouple inline fetch ([eb7ab04](https://github.com/sthadka/jai/commit/eb7ab043b9e2ee67e612612008bf80461175b046))
+
 ## [4.1.0](https://github.com/sthadka/jai/compare/v4.0.1...v4.1.0) (2026-09-21)
 
 
