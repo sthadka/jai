@@ -39,11 +39,21 @@ type Engine struct {
 	cfg      *config.Config
 	jiraTZMu sync.RWMutex
 	jiraTZ   *time.Location
+	colMu    sync.Mutex // serializes ensureCustomColumns ALTER TABLEs across concurrent sources
 }
 
 // New creates a new sync Engine.
 func New(database *db.DB, client *jira.Client, cfg *config.Config) *Engine {
 	return &Engine{db: database, client: client, cfg: cfg}
+}
+
+// concurrency returns the configured parallel-fetch worker count, defaulting to
+// 8 when unset. The client's shared rate limiter still caps total request rate.
+func (e *Engine) concurrency() int {
+	if e.cfg.Sync.Concurrency < 1 {
+		return 8
+	}
+	return e.cfg.Sync.Concurrency
 }
 
 // VerifyAuth confirms the configured credentials actually authenticate against
@@ -267,9 +277,22 @@ func (e *Engine) Sync(ctx context.Context, full, resume bool, sourceFilter strin
 	ch := make(chan Progress, 64)
 	go func() {
 		defer close(ch)
+		// Sources are independent (separate cursors, separate JQL); run them
+		// concurrently, bounded by the configured worker count. The client's
+		// shared rate limiter still caps total request rate, and DB writes
+		// serialize on the single connection.
+		sem := make(chan struct{}, e.concurrency())
+		var wg sync.WaitGroup
 		for _, src := range sources {
-			e.syncSource(ctx, src, full, resume, jiraTZ, ch)
+			wg.Add(1)
+			sem <- struct{}{}
+			go func(src config.SyncSource) {
+				defer wg.Done()
+				defer func() { <-sem }()
+				e.syncSource(ctx, src, full, resume, jiraTZ, ch)
+			}(src)
 		}
+		wg.Wait()
 	}()
 	return ch, nil
 }
@@ -283,8 +306,13 @@ func (e *Engine) syncSource(ctx context.Context, src config.SyncSource, full, re
 		return
 	}
 
-	// Ensure custom field columns exist.
-	if err := e.ensureCustomColumns(fieldMap); err != nil {
+	// Ensure custom field columns exist. Guard the check-then-ALTER against
+	// concurrent sources: two goroutines could otherwise both add the same
+	// column, and the second ALTER would fail with a duplicate-column error.
+	e.colMu.Lock()
+	err = e.ensureCustomColumns(fieldMap)
+	e.colMu.Unlock()
+	if err != nil {
 		ch <- Progress{Project: src.Name, Error: err, Done: true}
 		return
 	}
@@ -340,7 +368,6 @@ func (e *Engine) syncSource(ctx context.Context, src config.SyncSource, full, re
 	fields := e.expandFields(fieldMap)
 	var newCount, updatedCount, total int
 	var lastUpdated string // max updated timestamp seen this run (for cursor)
-	var pageUpsertedKeys []string
 
 	// Emit an initial event so the display knows we're resuming and carries the JQL.
 	ch <- Progress{Project: src.Name, ResumedFrom: resumedFrom, JQL: jql}
@@ -406,7 +433,6 @@ func (e *Engine) syncSource(ctx context.Context, src config.SyncSource, full, re
 			if err := e.db.UpsertIssue(issue, extra); err != nil {
 				continue
 			}
-			pageUpsertedKeys = append(pageUpsertedKeys, apiIssue.Key)
 
 			comments, err := ExtractComments(apiIssue.Key, rawBytes)
 			if err == nil {
@@ -425,12 +451,6 @@ func (e *Engine) syncSource(ctx context.Context, src config.SyncSource, full, re
 			if err == nil && attachments != nil {
 				_ = e.db.UpsertAttachments(apiIssue.Key, attachments)
 			}
-		}
-
-		// Sync changelogs for the issues we just upserted in this page.
-		if len(pageUpsertedKeys) > 0 {
-			e.syncChangelogsForKeys(ctx, pageUpsertedKeys)
-			pageUpsertedKeys = pageUpsertedKeys[:0]
 		}
 
 		// Save cursor after each completed page so a restart can skip ahead.
@@ -556,47 +576,93 @@ func (e *Engine) SyncChangelogs(ctx context.Context, sourceFilter string, force 
 			}
 		}
 
-		// Bulk fetch in batches of 100.
+		// Bulk fetch in batches of 100, parallelized across workers. The client's
+		// shared rate limiter still bounds total API throughput; concurrency only
+		// hides per-request latency up to that ceiling. DB writes serialize on the
+		// single connection, so the counters are the only shared state needing a
+		// lock.
 		bulkFailed := false
 		const batchSize = 100
-		for i := 0; i < len(bulkKeys); i += batchSize {
-			select {
-			case <-ctx.Done():
-				ch <- ChangelogProgress{Total: total, Synced: synced, Skipped: skipped, Error: ctx.Err(), Done: true}
-				return
-			default:
-			}
-
-			end := i + batchSize
-			if end > len(bulkKeys) {
-				end = len(bulkKeys)
-			}
-			batch := bulkKeys[i:end]
-
-			entries, err := e.client.BulkFetchChangelogs(ctx, batch)
-			if err != nil {
-				if i == 0 {
-					bulkFailed = true
-					fallbackKeys = append(fallbackKeys, bulkKeys...)
-					break
+		if len(bulkKeys) > 0 {
+			var batches [][]string
+			for i := 0; i < len(bulkKeys); i += batchSize {
+				end := i + batchSize
+				if end > len(bulkKeys) {
+					end = len(bulkKeys)
 				}
-				skipped += len(batch)
-				ch <- ChangelogProgress{Total: total, Synced: synced, Skipped: skipped}
-				continue
+				batches = append(batches, bulkKeys[i:end])
 			}
 
-			dbEntries := ExtractBulkChangelog(entries, idToKey)
-			if err := e.db.InsertChangelogBatch(dbEntries); err != nil {
-				skipped += len(batch)
-				ch <- ChangelogProgress{Total: total, Synced: synced, Skipped: skipped}
-				continue
+			var mu sync.Mutex
+			emit := func() { ch <- ChangelogProgress{Total: total, Synced: synced, Skipped: skipped} }
+			// store persists an already-fetched batch. DB writes serialize on the
+			// single connection; mu guards only the shared counters.
+			store := func(batch []string, entries []jira.BulkChangelogEntry) {
+				dbEntries := ExtractBulkChangelog(entries, idToKey)
+				if err := e.db.InsertChangelogBatch(dbEntries); err != nil {
+					mu.Lock()
+					skipped += len(batch)
+					emit()
+					mu.Unlock()
+					return
+				}
+				_ = e.db.MarkChangelogSynced(batch)
+				mu.Lock()
+				synced += len(batch)
+				emit()
+				mu.Unlock()
+			}
+			process := func(batch []string) {
+				entries, err := e.client.BulkFetchChangelogs(ctx, batch)
+				if err != nil {
+					mu.Lock()
+					skipped += len(batch)
+					emit()
+					mu.Unlock()
+					return
+				}
+				store(batch, entries)
 			}
 
-			// Mark these issues as changelog-synced (even if they had 0 entries).
-			_ = e.db.MarkChangelogSynced(batch)
+			// Fetch the first batch synchronously: a failure here means the bulk
+			// endpoint is unavailable, so fall back to per-issue for everything
+			// rather than firing every batch at a doomed call. On success its
+			// result is stored directly — no redundant re-fetch.
+			entries, err := e.client.BulkFetchChangelogs(ctx, batches[0])
+			if err != nil {
+				bulkFailed = true
+				fallbackKeys = append(fallbackKeys, bulkKeys...)
+			} else {
+				store(batches[0], entries)
 
-			synced += len(batch)
-			ch <- ChangelogProgress{Total: total, Synced: synced, Skipped: skipped}
+				// Fan the remaining batches across a bounded worker pool.
+				jobs := make(chan []string)
+				var wg sync.WaitGroup
+				for range e.concurrency() {
+					wg.Add(1)
+					go func() {
+						defer wg.Done()
+						for batch := range jobs {
+							process(batch)
+						}
+					}()
+				}
+			feed:
+				for _, batch := range batches[1:] {
+					select {
+					case <-ctx.Done():
+						break feed
+					case jobs <- batch:
+					}
+				}
+				close(jobs)
+				wg.Wait()
+			}
+		}
+
+		if ctx.Err() != nil {
+			ch <- ChangelogProgress{Total: total, Synced: synced, Skipped: skipped, Error: ctx.Err(), Done: true}
+			return
 		}
 
 		if bulkFailed {

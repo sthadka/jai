@@ -88,6 +88,12 @@ type SyncConfig struct {
 	DevInfo        bool     `yaml:"dev_info"`        // sync development info (requires extra API permissions)
 	LookbackWindow string   `yaml:"lookback_window"` // incremental re-scan overlap below the high-water mark, e.g. "1h" (default 1h)
 
+	// Concurrency bounds parallel Jira fetches — changelog batches and, when
+	// multiple sync_sources are configured, the sources themselves. The shared
+	// rate limiter still caps total request rate; concurrency only hides
+	// per-request latency up to that ceiling. Default 8.
+	Concurrency int `yaml:"concurrency"`
+
 	// ReconcileFields lists column names whose values are re-checked on every
 	// incremental sync, regardless of the issue "updated" timestamp. Jira does
 	// not bump "updated" for some changes (notably rank/LexoRank reorders), so
@@ -188,6 +194,7 @@ func defaults() *Config {
 			RateLimit:          10,
 			Sprints:            true,
 			LookbackWindow:     "1h",
+			Concurrency:        8,
 			ReconcileFields:    []string{"rank"},
 			FullSyncWarning:    true,
 			FullSyncWarningAge: "24h",

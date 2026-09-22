@@ -79,19 +79,18 @@ var syncCmd = &cobra.Command{
 }
 
 // displaySyncProgress consumes the sync progress channel, rendering a live
-// spinner line per source. The spinner runs on its own 80ms ticker so it
-// keeps moving even between Jira page responses. Rate is computed from
-// deltas so it stabilises quickly instead of averaging from t=0.
+// aggregate spinner while one or more sources sync concurrently. Each source's
+// final summary line is printed as it completes. Per-source rate is computed
+// from deltas so it stabilises quickly instead of averaging from t=0.
 // Returns total issues synced across all sources.
 func displaySyncProgress(ch <-chan synce.Progress, verbose bool) int {
 	spinners := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 	spinIdx := 0
 	total := 0
 
-	// curSource holds the state of the currently-syncing source.
-	// Done sources are printed immediately by the drain goroutine.
+	// curSource holds the live state of one syncing source. Sources run
+	// concurrently, so several may be active at once.
 	type curSource struct {
-		name      string
 		total     int
 		rate      float64 // issues/sec (delta-based, not cumulative)
 		lastTotal int
@@ -100,7 +99,7 @@ func displaySyncProgress(ch <-chan synce.Progress, verbose bool) int {
 	}
 
 	var mu sync.Mutex
-	var cur *curSource
+	active := make(map[string]*curSource)
 	allDone := make(chan struct{})
 
 	// Drain goroutine: receives progress events and updates shared state.
@@ -111,18 +110,19 @@ func displaySyncProgress(ch <-chan synce.Progress, verbose bool) int {
 		for p := range ch {
 			mu.Lock()
 
-			// New source started (sources are sequential).
-			if cur == nil || cur.name != p.Project {
+			cur := active[p.Project]
+			if cur == nil {
 				now := time.Now()
-				cur = &curSource{name: p.Project, start: now, lastT: now}
+				cur = &curSource{start: now, lastT: now}
+				active[p.Project] = cur
 			}
 
 			// Print a one-time note when a resumed sync starts.
 			if p.ResumedFrom != "" {
-				fmt.Fprintf(os.Stderr, "  ↻ %-25s resuming from %s\n", p.Project, p.ResumedFrom[:10])
+				fmt.Fprintf(os.Stderr, "\r  ↻ %-25s resuming from %s\033[K\n", p.Project, p.ResumedFrom[:10])
 			}
 			if verbose && p.JQL != "" {
-				fmt.Fprintf(os.Stderr, "  ⋯ JQL: %s\n", p.JQL)
+				fmt.Fprintf(os.Stderr, "\r  ⋯ %-25s JQL: %s\033[K\n", p.Project, p.JQL)
 			}
 
 			// Delta rate: only update when ≥500ms have elapsed and count grew.
@@ -135,14 +135,13 @@ func displaySyncProgress(ch <-chan synce.Progress, verbose bool) int {
 			cur.total = p.Total
 
 			if p.Done {
-				c := cur
-				cur = nil
-				elapsed := time.Since(c.start).Round(100 * time.Millisecond)
+				elapsed := time.Since(cur.start).Round(100 * time.Millisecond)
+				delete(active, p.Project)
 				if p.Error != nil {
-					fmt.Fprintf(os.Stderr, "\r  ✗ %-25s ERROR: %v\033[K\n", c.name, p.Error)
+					fmt.Fprintf(os.Stderr, "\r  ✗ %-25s ERROR: %v\033[K\n", p.Project, p.Error)
 				} else {
 					fmt.Fprintf(os.Stderr, "\r  ✓ %-25s %d issues (%d new, %d updated) in %s\033[K\n",
-						c.name, p.Total, p.New, p.Updated, elapsed)
+						p.Project, p.Total, p.New, p.Updated, elapsed)
 					total += p.New + p.Updated
 				}
 			}
@@ -158,14 +157,24 @@ func displaySyncProgress(ch <-chan synce.Progress, verbose bool) int {
 		select {
 		case <-ticker.C:
 			mu.Lock()
-			if cur != nil {
+			if n := len(active); n > 0 {
+				var sumTotal int
+				var sumRate float64
+				for _, c := range active {
+					sumTotal += c.total
+					sumRate += c.rate
+				}
 				spin := spinners[spinIdx%len(spinners)]
 				rateStr := ""
-				if cur.rate > 0 {
-					rateStr = fmt.Sprintf("  %.0f/s", cur.rate)
+				if sumRate > 0 {
+					rateStr = fmt.Sprintf("  %.0f/s", sumRate)
 				}
-				fmt.Fprintf(os.Stderr, "\r  %s %-25s %d issues%s\033[K",
-					spin, cur.name, cur.total, rateStr)
+				srcStr := "source"
+				if n > 1 {
+					srcStr = fmt.Sprintf("%d sources", n)
+				}
+				fmt.Fprintf(os.Stderr, "\r  %s syncing %-18s %d issues%s\033[K",
+					spin, srcStr, sumTotal, rateStr)
 				spinIdx++
 			}
 			mu.Unlock()

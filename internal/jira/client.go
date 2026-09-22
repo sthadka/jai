@@ -55,6 +55,13 @@ func New(baseURL, email, token string, ratePerSec float64) *Client {
 	if ratePerSec <= 0 {
 		ratePerSec = 10
 	}
+	// Burst must be at least 1: int() truncation of a sub-1 rate (e.g. 0.5)
+	// would yield a zero burst, which blocks every request forever. Round up so
+	// the burst never starves and fractional rates still admit one request.
+	burst := int(math.Ceil(ratePerSec))
+	if burst < 1 {
+		burst = 1
+	}
 	return &Client{
 		baseURL: strings.TrimRight(baseURL, "/"),
 		email:   email,
@@ -62,7 +69,7 @@ func New(baseURL, email, token string, ratePerSec float64) *Client {
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
-		limiter: rate.NewLimiter(rate.Limit(ratePerSec), int(ratePerSec)),
+		limiter: rate.NewLimiter(rate.Limit(ratePerSec), burst),
 	}
 }
 

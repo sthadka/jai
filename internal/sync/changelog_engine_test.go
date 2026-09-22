@@ -160,7 +160,10 @@ func TestSyncChangelogs_Incremental(t *testing.T) {
 	}
 }
 
-func TestSyncSource_IncludesChangelogs(t *testing.T) {
+// TestSync_ChangelogsSyncedBySeparatePass proves the decoupled contract: issue
+// sync (Sync) no longer fetches changelog inline; the dedicated SyncChangelogs
+// pass does. The end-to-end flow still populates changelog for synced issues.
+func TestSync_ChangelogsSyncedBySeparatePass(t *testing.T) {
 	myselfCalls := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -232,12 +235,29 @@ func TestSyncSource_IncludesChangelogs(t *testing.T) {
 		t.Errorf("expected one /myself request, got %d", myselfCalls)
 	}
 
+	// Changelog is no longer fetched inline during issue sync; after Sync alone
+	// no changelog rows exist.
 	var count int
 	if err := database.QueryRow(`SELECT count(*) FROM changelog WHERE issue_key = 'TEST-1'`).Scan(&count); err != nil {
 		t.Fatalf("counting changelog rows: %v", err)
 	}
+	if count != 0 {
+		t.Errorf("expected no changelog rows after issue sync alone, got %d", count)
+	}
+
+	// The dedicated pass fetches and stamps changelog for the synced issues.
+	clCh, err := e.SyncChangelogs(context.Background(), "", false)
+	if err != nil {
+		t.Fatalf("SyncChangelogs: %v", err)
+	}
+	for range clCh {
+	}
+
+	if err := database.QueryRow(`SELECT count(*) FROM changelog WHERE issue_key = 'TEST-1'`).Scan(&count); err != nil {
+		t.Fatalf("counting changelog rows: %v", err)
+	}
 	if count != 1 {
-		t.Errorf("expected changelog to be synced inline for TEST-1, got %d rows", count)
+		t.Errorf("expected changelog synced by pass for TEST-1, got %d rows", count)
 	}
 
 	var syncedAt *string
@@ -245,7 +265,7 @@ func TestSyncSource_IncludesChangelogs(t *testing.T) {
 		t.Fatalf("querying changelog_synced_at: %v", err)
 	}
 	if syncedAt == nil || *syncedAt == "" {
-		t.Error("expected changelog_synced_at to be stamped after sync")
+		t.Error("expected changelog_synced_at to be stamped after changelog pass")
 	}
 }
 

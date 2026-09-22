@@ -5,7 +5,8 @@ jira:
 
 sync:
   interval: 15m
-  rate_limit: 10
+  rate_limit: 10      # Jira API requests/sec; raise for a faster sync if your tenant tolerates it
+  concurrency: 8      # parallel fetches (changelog batches + sources); raise alongside rate_limit
   history: false
   fts_fields:
     - summary
