@@ -2,6 +2,8 @@ package sync
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"sync"
 	"time"
 )
@@ -77,6 +79,15 @@ func (w *BackgroundWorker) runSync(ctx context.Context) {
 	err := w.engine.VerifyAuth(ctx)
 	var ch <-chan Progress
 	if err == nil {
+		// Refresh field definitions on every run. Without this, a jai instance
+		// started via `jai serve` whose one-shot startup discovery failed (or
+		// predated fields being added in Jira) would stay stuck with only the
+		// seeded system fields forever — expandFields never requests the custom
+		// fields and Denormalize never stores them. This is the promised
+		// "retry in background" that serve.go references.
+		if derr := w.engine.DiscoverFields(ctx, w.engine.cfg.Fields.Overrides); derr != nil {
+			fmt.Fprintf(os.Stderr, "warning: background field discovery failed: %v\n", derr)
+		}
 		ch, err = w.engine.Sync(ctx, false, false, "")
 	}
 	if err == nil {

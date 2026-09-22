@@ -203,18 +203,37 @@ func extractFieldValue(raw json.RawMessage, fieldType string) interface{} {
 		}
 
 	case "array":
-		// Try array of options.
-		var opts []struct {
-			Value string `json:"value"`
-			Name  string `json:"name"`
+		// Try array of objects (options, users, versions, components). Jira
+		// returns heterogeneous shapes here: options carry value/name,
+		// versions/components carry name, users carry emailAddress/displayName/
+		// accountId. Contributors is an array of user objects, so those user
+		// keys MUST be covered or the column silently stays empty despite data
+		// being present in the raw JSON.
+		//
+		// For user elements prefer emailAddress: it is the stable identity
+		// consumers key on (e.g. team-map maps engineers by email). Fall back
+		// to displayName then accountId when Jira hides the email.
+		var objs []struct {
+			Value        string `json:"value"`
+			Name         string `json:"name"`
+			EmailAddress string `json:"emailAddress"`
+			DisplayName  string `json:"displayName"`
+			AccountID    string `json:"accountId"`
 		}
-		if err := json.Unmarshal(raw, &opts); err == nil {
-			names := make([]string, 0, len(opts))
-			for _, o := range opts {
-				if o.Value != "" {
+		if err := json.Unmarshal(raw, &objs); err == nil {
+			names := make([]string, 0, len(objs))
+			for _, o := range objs {
+				switch {
+				case o.Value != "":
 					names = append(names, o.Value)
-				} else if o.Name != "" {
+				case o.Name != "":
 					names = append(names, o.Name)
+				case o.EmailAddress != "":
+					names = append(names, o.EmailAddress)
+				case o.DisplayName != "":
+					names = append(names, o.DisplayName)
+				case o.AccountID != "":
+					names = append(names, o.AccountID)
 				}
 			}
 			if len(names) > 0 {

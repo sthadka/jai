@@ -115,6 +115,42 @@ func TestDenormalize_CustomArrayField(t *testing.T) {
 	}
 }
 
+// TestDenormalize_ArrayOfUsers guards the Contributors bug: the field is an
+// array of user objects ({accountId, emailAddress, displayName, ...}) with no
+// value/name key. Before the fix, extractFieldValue's array case fell through
+// to nil, leaving the column empty even though the raw JSON carried the data.
+// Consumers key on emailAddress, so it must win; displayName/accountId are
+// fallbacks for when Jira hides the email.
+func TestDenormalize_ArrayOfUsers(t *testing.T) {
+	raw := []byte(`{
+		"key": "ROX-1",
+		"fields": {
+			"summary": "Contributors test",
+			"project": {"key": "ROX"},
+			"customfield_10466": [
+				{"accountId":"1","emailAddress":"a@example.com","displayName":"Anna S"},
+				{"accountId":"2","displayName":"Bob T"},
+				{"accountId":"3"}
+			]
+		}
+	}`)
+
+	fieldMap := map[string]*db.FieldMapping{
+		"customfield_10466": {JiraID: "customfield_10466", Name: "contributors", Type: "array", IsCustom: true, IsColumn: true},
+	}
+
+	_, extra, err := Denormalize(raw, fieldMap)
+	if err != nil {
+		t.Fatalf("Denormalize: %v", err)
+	}
+
+	// email preferred; displayName then accountId as fallbacks.
+	want := `["a@example.com","Bob T","3"]`
+	if extra["contributors"] != want {
+		t.Errorf("expected %s, got %v", want, extra["contributors"])
+	}
+}
+
 func TestDenormalize_ObjectFieldFallback(t *testing.T) {
 	tests := []struct {
 		name      string
