@@ -20,17 +20,20 @@ type ReconcileProgress struct {
 	Fields    []string // column names being reconciled
 	Scanned   int      // issues scanned in the cheap key+fields pass
 	Changed   int      // issues whose reconciled fields drifted
-	Refetched int      // issues re-fetched in full and upserted
-	Skipped   bool     // true when the change set exceeded MaxRefetch (recommend --full)
+	Refetched int      // issues corrected: full re-fetch, or direct value apply above the cap
+	Skipped   bool     // Deprecated: no longer set; large change sets are applied directly now
 	Err       error
 	Done      bool
 }
 
 // maxReconcileRefetch caps how many drifted issues the reconcile pass will
-// re-fetch in one run. A LexoRank rebalance can re-rank thousands of issues at
-// once; re-fetching all of them defeats the point of a cheap pass, so above
-// this threshold we bail and let the caller recommend a full sync instead.
-// A var (not const) so tests can exercise the cap without seeding 500 issues.
+// re-fetch in FULL in one run. At or below the cap, drifted issues are
+// re-fetched whole (also refreshing changelog, links, and comments). Above it
+// — e.g. a LexoRank rebalance that re-ranks tens of thousands of issues at
+// once — a full re-fetch would defeat the point of the cheap pass, so the
+// fresh reconcile-field values captured during the scan are applied directly
+// instead (see applyReconcileValues). A var (not const) so tests can exercise
+// the cap without seeding 500 issues.
 var maxReconcileRefetch = 500
 
 // ReconcileFields re-checks the configured fields for every issue in scope,
@@ -41,8 +44,10 @@ var maxReconcileRefetch = 500
 //
 // The pass is two-phase: a cheap scan fetches only key + the reconcile fields
 // and diffs each against the stored value; only issues that actually drifted
-// are re-fetched in full and upserted (refreshing all columns, changelog,
-// links, and comments). fields is the list of column names to reconcile; an
+// are corrected. Change sets at or below maxReconcileRefetch are re-fetched in
+// full (refreshing all columns, changelog, links, and comments); larger sets
+// apply the scanned field values directly (see applyReconcileValues). fields
+// is the list of column names to reconcile; an
 // empty list is a no-op.
 func (e *Engine) ReconcileFields(ctx context.Context, sourceFilter string, fields []string) (<-chan ReconcileProgress, error) {
 	if len(fields) == 0 {
@@ -113,6 +118,10 @@ func (e *Engine) reconcileSource(ctx context.Context, src config.SyncSource, res
 	jql := sourceJQL(src) // no "updated >=" filter — that gate is exactly what misses rank changes
 	var scanned int
 	var changedKeys []string
+	// Fresh reconcile-field values captured during the scan, keyed by issue key
+	// then Jira field id. Retained so the direct-apply path can write them
+	// without a second network round-trip when the change set exceeds the cap.
+	changedVals := make(map[string]map[string]json.RawMessage)
 
 	for page, err := range e.client.SearchAll(ctx, jql, scanFields) {
 		if err != nil {
@@ -140,12 +149,22 @@ func (e *Engine) reconcileSource(ctx context.Context, src config.SyncSource, res
 
 		for _, key := range keys {
 			storedFields := parseIssueFields(stored[key])
+			var drifted bool
 			for _, rf := range resolved {
 				if !rawFieldEqual(fresh[key][rf.jiraID], storedFields[rf.jiraID]) {
-					changedKeys = append(changedKeys, key)
+					drifted = true
 					break
 				}
 			}
+			if !drifted {
+				continue
+			}
+			changedKeys = append(changedKeys, key)
+			vals := make(map[string]json.RawMessage, len(resolved))
+			for _, rf := range resolved {
+				vals[rf.jiraID] = fresh[key][rf.jiraID]
+			}
+			changedVals[key] = vals
 		}
 
 		ch <- ReconcileProgress{Source: src.Name, Fields: cols, Scanned: scanned, Changed: len(changedKeys)}
@@ -156,13 +175,21 @@ func (e *Engine) reconcileSource(ctx context.Context, src config.SyncSource, res
 		return
 	}
 
+	// At or below the cap, re-fetch drifted issues in full (also refreshes
+	// changelog, links, and comments in case they changed too). Above the cap —
+	// e.g. a whole-project LexoRank rebalance re-ranks tens of thousands of
+	// issues at once — a full re-fetch would defeat the cheap pass, so apply the
+	// fresh reconcile-field values captured during the scan directly. No extra
+	// API calls, and a silent reconcile-field change (rank) does not touch
+	// changelog/links/comments.
+	var applied int
+	var err error
 	if len(changedKeys) > maxReconcileRefetch {
-		ch <- ReconcileProgress{Source: src.Name, Fields: cols, Scanned: scanned, Changed: len(changedKeys), Skipped: true, Done: true}
-		return
+		applied, err = e.applyReconcileValues(changedKeys, changedVals, fieldMap)
+	} else {
+		applied, err = e.refetchAndUpsert(ctx, changedKeys, fieldMap)
 	}
-
-	refetched, err := e.refetchAndUpsert(ctx, changedKeys, fieldMap)
-	ch <- ReconcileProgress{Source: src.Name, Fields: cols, Scanned: scanned, Changed: len(changedKeys), Refetched: refetched, Err: err, Done: true}
+	ch <- ReconcileProgress{Source: src.Name, Fields: cols, Scanned: scanned, Changed: len(changedKeys), Refetched: applied, Err: err, Done: true}
 }
 
 // refetchAndUpsert re-fetches the given issues in full and upserts them,
@@ -203,6 +230,101 @@ func (e *Engine) refetchAndUpsert(ctx context.Context, keys []string, fieldMap m
 		}
 	}
 	return refetched, firstErr
+}
+
+// applyReconcileValues writes the fresh reconcile-field values captured during
+// the scan directly into each drifted issue's raw_json and columns, without a
+// full API re-fetch. It handles change sets larger than maxReconcileRefetch —
+// most notably a whole-project LexoRank rebalance, which re-ranks tens of
+// thousands of issues at once. Re-fetching them all would defeat the cheap
+// pass; since the scan already carries the new values, patch them into the
+// stored raw_json and re-denormalize so the affected columns and raw_json
+// refresh. Changelog, links, and comments are intentionally left untouched: a
+// silent reconcile-field change does not affect them. Returns the number of
+// issues updated and the first error encountered.
+func (e *Engine) applyReconcileValues(keys []string, vals map[string]map[string]json.RawMessage, fieldMap map[string]*db.FieldMapping) (int, error) {
+	applied := 0
+	var firstErr error
+	const batchSize = 500
+	for i := 0; i < len(keys); i += batchSize {
+		end := i + batchSize
+		if end > len(keys) {
+			end = len(keys)
+		}
+		batch := keys[i:end]
+		stored, err := e.db.GetIssuesRawJSON(batch)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("loading stored issues for reconcile apply: %w", err)
+			}
+			continue
+		}
+		for _, key := range batch {
+			raw, ok := stored[key]
+			if !ok || raw == "" {
+				continue // nothing stored to patch; a full sync will create it
+			}
+			patched, err := patchRawFields(raw, vals[key])
+			if err != nil {
+				if firstErr == nil {
+					firstErr = err
+				}
+				continue
+			}
+			issue, extra, err := Denormalize([]byte(patched), fieldMap)
+			if err != nil {
+				if firstErr == nil {
+					firstErr = err
+				}
+				continue
+			}
+			if err := e.db.UpsertIssue(issue, extra); err != nil {
+				if firstErr == nil {
+					firstErr = err
+				}
+				continue
+			}
+			applied++
+		}
+	}
+	return applied, firstErr
+}
+
+// patchRawFields returns rawJSON with each fields[id] replaced by the given raw
+// value; a nil/absent/JSON-null value removes the field (Jira cleared it).
+// Every other field is preserved untouched so re-denormalizing reproduces the
+// stored row with only the reconciled fields changed.
+func patchRawFields(rawJSON string, updates map[string]json.RawMessage) (string, error) {
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(rawJSON), &envelope); err != nil {
+		return "", fmt.Errorf("parsing stored raw_json: %w", err)
+	}
+	var fields map[string]json.RawMessage
+	if raw, ok := envelope["fields"]; ok && len(raw) > 0 {
+		if err := json.Unmarshal(raw, &fields); err != nil {
+			return "", fmt.Errorf("parsing stored fields: %w", err)
+		}
+	}
+	if fields == nil {
+		fields = make(map[string]json.RawMessage, len(updates))
+	}
+	for id, val := range updates {
+		if len(normalizeRaw(val)) == 0 { // absent or JSON null → field cleared
+			delete(fields, id)
+		} else {
+			fields[id] = val
+		}
+	}
+	fieldsBytes, err := json.Marshal(fields)
+	if err != nil {
+		return "", err
+	}
+	envelope["fields"] = fieldsBytes
+	out, err := json.Marshal(envelope)
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
 }
 
 // upsertAPIIssue denormalizes and upserts a single API issue along with its

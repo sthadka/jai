@@ -249,7 +249,11 @@ func seedRankIssue(t *testing.T, database *db.DB, key, storedRank string) {
 	}
 }
 
-func TestReconcileFields_CapExceededSkipsRefetch(t *testing.T) {
+// Above the full-refetch cap the pass no longer bails: it applies the fresh
+// field values captured during the scan directly to each drifted issue, with no
+// extra API round-trip. This is what lets a whole-project LexoRank rebalance
+// self-heal on a plain incremental sync instead of demanding a full sync.
+func TestReconcileFields_CapExceededAppliesDirectly(t *testing.T) {
 	orig := maxReconcileRefetch
 	maxReconcileRefetch = 1
 	defer func() { maxReconcileRefetch = orig }()
@@ -263,9 +267,10 @@ func TestReconcileFields_CapExceededSkipsRefetch(t *testing.T) {
 		var body map[string]interface{}
 		json.NewDecoder(r.Body).Decode(&body)
 		if jql, _ := body["jql"].(string); strings.Contains(jql, "key in") {
-			refetchRequests++
+			refetchRequests++ // a full re-fetch would use "key in (...)"
 		}
-		// Two issues, both drifted (fresh rank differs from any stored value).
+		// Two issues, both drifted (fresh rank differs from stored). With the cap
+		// at 1, this 2-issue change set exceeds it and must be applied directly.
 		mk := func(key string) *jira.Issue {
 			f, _ := json.Marshal(map[string]interface{}{"summary": "x", "customfield_10019": "1|fresh:"})
 			return &jira.Issue{ID: key, Key: key, Fields: f}
@@ -289,20 +294,38 @@ func TestReconcileFields_CapExceededSkipsRefetch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReconcileFields: %v", err)
 	}
-	var sawSkip bool
+	var changed, refetched int
+	var skipped bool
+	var doneErr error
 	for p := range ch {
 		if p.Done {
-			sawSkip = p.Skipped
-			if p.Refetched != 0 {
-				t.Errorf("refetched = %d, want 0 when cap exceeded", p.Refetched)
-			}
+			changed, refetched, skipped, doneErr = p.Changed, p.Refetched, p.Skipped, p.Err
 		}
 	}
-	if !sawSkip {
-		t.Error("expected Skipped=true when change set exceeds cap")
+	if doneErr != nil {
+		t.Fatalf("reconcile error: %v", doneErr)
+	}
+	if skipped {
+		t.Error("Skipped must not be set: large change sets are now applied directly")
+	}
+	if changed != 2 || refetched != 2 {
+		t.Errorf("changed=%d refetched=%d, want 2 and 2 (both applied directly)", changed, refetched)
 	}
 	if refetchRequests != 0 {
-		t.Errorf("refetch requests = %d, want 0 when cap exceeded", refetchRequests)
+		t.Errorf("refetch API requests = %d, want 0 (direct apply must not re-fetch)", refetchRequests)
+	}
+	// Both the rank column and raw_json must carry the fresh scan value.
+	for _, key := range []string{"TEST-1", "TEST-2"} {
+		var col, raw string
+		if err := database.QueryRow(`SELECT rank, raw_json FROM issues WHERE key = '`+key+`'`).Scan(&col, &raw); err != nil {
+			t.Fatalf("querying %s: %v", key, err)
+		}
+		if col != "1|fresh:" {
+			t.Errorf("%s rank column = %q, want %q", key, col, "1|fresh:")
+		}
+		if got := string(parseIssueFields(raw)["customfield_10019"]); got != `"1|fresh:"` {
+			t.Errorf("%s raw_json rank = %s, want \"1|fresh:\"", key, got)
+		}
 	}
 }
 
