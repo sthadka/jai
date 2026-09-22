@@ -388,8 +388,17 @@ func (e *Engine) syncSource(ctx context.Context, src config.SyncSource, full, re
 			if existingUpdated == "" {
 				newCount++
 			} else if existingUpdated == issue.Updated {
-				// Issue unchanged since last sync — skip upsert.
-				continue
+				// Incremental sync: unchanged since last sync — skip the upsert.
+				// A full sync must NOT skip here: Jira does not bump "updated"
+				// for some changes (rank/LexoRank rebalances most notably), so
+				// skipping unchanged-"updated" issues would leave that drift
+				// uncorrected forever — and the incremental reconcile pass bails
+				// above its cap on a whole-project rebalance, recommending
+				// exactly this full sync. Re-upserting every issue is what makes
+				// "jai sync --full" actually reconcile all fields.
+				if !full {
+					continue
+				}
 			} else {
 				updatedCount++
 			}

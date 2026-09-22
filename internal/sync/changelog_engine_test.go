@@ -248,3 +248,104 @@ func TestSyncSource_IncludesChangelogs(t *testing.T) {
 		t.Error("expected changelog_synced_at to be stamped after sync")
 	}
 }
+
+// TestFullSync_ReupsertsUnchangedUpdated proves that "jai sync --full"
+// re-upserts issues whose "updated" timestamp is unchanged, while an
+// incremental sync skips them. This is the reconcile-of-last-resort: Jira does
+// not bump "updated" on a rank/LexoRank rebalance, so a full sync must rewrite
+// unchanged-"updated" issues or the drift (e.g. a whole-project rebalance that
+// exceeds the incremental reconcile cap) is never corrected.
+func TestFullSync_ReupsertsUnchangedUpdated(t *testing.T) {
+	const sameUpdated = "2026-06-01T00:00:00.000+0000"
+	const newRank = "1|newrank:"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/rest/api/3/myself":
+			json.NewEncoder(w).Encode(jira.MySelf{DisplayName: "Test User", TimeZone: "UTC"})
+		case strings.HasPrefix(r.URL.Path, "/rest/api/3/search/jql"):
+			// Same "updated" as stored, but a NEW rank (rebalance).
+			resp := jira.SearchResponse{
+				Issues: []*jira.Issue{
+					{ID: "10001", Key: "TEST-1", Fields: json.RawMessage(`{
+						"summary": "An issue",
+						"project": {"key": "TEST"},
+						"updated": "` + sameUpdated + `",
+						"customfield_10019": "` + newRank + `"
+					}`)},
+				},
+			}
+			json.NewEncoder(w).Encode(resp)
+		case strings.HasPrefix(r.URL.Path, "/rest/api/3/changelog/bulkfetch"):
+			json.NewEncoder(w).Encode(jira.BulkChangelogResponse{})
+		default:
+			// project lookups, etc. — non-fatal side effects.
+			w.Write([]byte(`{}`))
+		}
+	}))
+	defer srv.Close()
+
+	database, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer database.Close()
+
+	// Register rank as a custom column.
+	if err := database.UpsertFieldMapping(&db.FieldMapping{
+		JiraID: "customfield_10019", JiraName: "Rank", Name: "rank",
+		Type: "text", IsCustom: true, IsColumn: false,
+	}); err != nil {
+		t.Fatalf("UpsertFieldMapping: %v", err)
+	}
+	if err := database.EnsureColumn("rank", "TEXT"); err != nil {
+		t.Fatalf("EnsureColumn: %v", err)
+	}
+	if err := database.MarkFieldAsColumn("customfield_10019"); err != nil {
+		t.Fatalf("MarkFieldAsColumn: %v", err)
+	}
+
+	// Seed the issue with the OLD rank and the exact "updated" the API returns.
+	oldRaw := `{"id":"10001","key":"TEST-1","fields":{"summary":"An issue","updated":"` + sameUpdated + `","customfield_10019":"1|oldrank:"}}`
+	seed := &db.Issue{ID: "10001", Key: "TEST-1", Project: "TEST", Summary: "An issue",
+		Updated: "2026-06-01T00:00:00Z", RawJSON: oldRaw}
+	if err := database.UpsertIssue(seed, map[string]interface{}{"rank": "1|oldrank:"}); err != nil {
+		t.Fatalf("UpsertIssue: %v", err)
+	}
+
+	client := jira.New(srv.URL, "test@test.com", "token", 100)
+	cfg := &config.Config{SyncSources: []config.SyncSource{{Name: "test", JQL: "project = TEST"}}}
+	e := New(database, client, cfg)
+	if err := e.VerifyAuth(context.Background()); err != nil {
+		t.Fatalf("VerifyAuth: %v", err)
+	}
+
+	rankOf := func() string {
+		var r string
+		if err := database.QueryRow(`SELECT rank FROM issues WHERE key = 'TEST-1'`).Scan(&r); err != nil {
+			t.Fatalf("querying rank: %v", err)
+		}
+		return r
+	}
+
+	// Incremental sync must SKIP the unchanged-"updated" issue: rank stays old.
+	ch, err := e.Sync(context.Background(), false, false, "")
+	if err != nil {
+		t.Fatalf("incremental Sync: %v", err)
+	}
+	for range ch {
+	}
+	if got := rankOf(); got != "1|oldrank:" {
+		t.Fatalf("after incremental sync rank = %q, want unchanged %q", got, "1|oldrank:")
+	}
+
+	// Full sync must RE-UPSERT it despite the unchanged "updated": rank refreshed.
+	ch, err = e.Sync(context.Background(), true, false, "")
+	if err != nil {
+		t.Fatalf("full Sync: %v", err)
+	}
+	for range ch {
+	}
+	if got := rankOf(); got != newRank {
+		t.Errorf("after full sync rank = %q, want %q", got, newRank)
+	}
+}
