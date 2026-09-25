@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/sthadka/jai/internal/db"
+	"github.com/sthadka/jai/internal/fieldwrap"
 	"github.com/sthadka/jai/internal/jira"
 	"github.com/sthadka/jai/internal/output"
 	synce "github.com/sthadka/jai/internal/sync"
@@ -161,10 +162,12 @@ func updateSetFields(cmd *cobra.Command, issueKey string, result *updateResult) 
 
 		var jiraID string
 		var fieldType string
+		var itemType string
 		for id, f := range fieldMap {
 			if f.Name == fieldName {
 				jiraID = id
 				fieldType = f.Type
+				itemType = f.ItemType
 				break
 			}
 		}
@@ -177,14 +180,14 @@ func updateSetFields(cmd *cobra.Command, issueKey string, result *updateResult) 
 		localVal := value
 
 		if fieldType == "array" {
-			items := parseArrayValue(value)
-			wrapped := make([]interface{}, len(items))
-			for i, item := range items {
-				if w, ok := wrapArrayItemValue(jiraID, item); ok {
-					wrapped[i] = w
-				} else {
-					wrapped[i] = item
-				}
+			resolveAccountID := func(v string) (string, error) {
+				return g.jira.ResolveAccountID(cmd.Context(), v)
+			}
+			items := fieldwrap.ParseArrayInput(value)
+			wrapped, wrapErr := fieldwrap.WrapArrayItems(jiraID, itemType, items, resolveAccountID)
+			if wrapErr != nil {
+				result.FieldsFailed = append(result.FieldsFailed, fmt.Sprintf("%s (%v)", fieldName, wrapErr))
+				continue
 			}
 			payloadVal = wrapped
 			j, _ := json.Marshal(items)
@@ -193,7 +196,7 @@ func updateSetFields(cmd *cobra.Command, issueKey string, result *updateResult) 
 			resolveAccountID := func(v string) (string, error) {
 				return g.jira.ResolveAccountID(cmd.Context(), v)
 			}
-			if wrapped, ok, wrapErr := wrapScalarFieldValue(jiraID, value, resolveAccountID); ok {
+			if wrapped, ok, wrapErr := fieldwrap.WrapScalarFieldValue(jiraID, value, resolveAccountID); ok {
 				if wrapErr != nil {
 					result.FieldsFailed = append(result.FieldsFailed, fmt.Sprintf("%s (%v)", fieldName, wrapErr))
 					continue

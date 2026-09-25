@@ -11,6 +11,7 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/sthadka/jai/internal/db"
+	"github.com/sthadka/jai/internal/fieldwrap"
 	"github.com/sthadka/jai/internal/jira"
 	"github.com/sthadka/jai/internal/output"
 	synce "github.com/sthadka/jai/internal/sync"
@@ -45,7 +46,7 @@ func registerWriteTools(s *Server, srv *server.MCPServer) {
 				},
 				"value": map[string]string{
 					"type":        "string",
-					"description": "Value to set. For arrays with add/remove operation, this is the item to add/remove.",
+					"description": "Value to set. Array fields accept either a JSON array string (e.g. '[\"a@x\",\"b@x\"]', the same shape the read column emits) or a comma-separated string ('a@x,b@x'). User fields/arrays (assignee, reporter, Contributors) accept emails or accountIds; jai resolves emails to Jira accountIds automatically. For add/remove operation, this is the single item to add/remove.",
 				},
 				"operation": map[string]interface{}{
 					"type":        "string",
@@ -366,10 +367,12 @@ func (s *Server) handleJaiSet(ctx context.Context, req mcp.CallToolRequest) (*mc
 
 	var jiraID string
 	var fieldType string
+	var itemType string
 	for id, f := range fieldMap {
 		if f.Name == fieldName {
 			jiraID = id
 			fieldType = f.Type
+			itemType = f.ItemType
 			break
 		}
 	}
@@ -390,7 +393,7 @@ func (s *Server) handleJaiSet(ctx context.Context, req mcp.CallToolRequest) (*mc
 
 	// Handle single vs bulk
 	if len(keys) == 1 {
-		result, err := s.setField(ctx, keys[0], fieldName, jiraID, value, fieldType, operation, queue)
+		result, err := s.setField(ctx, keys[0], fieldName, jiraID, value, fieldType, itemType, operation, queue)
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
@@ -398,7 +401,7 @@ func (s *Server) handleJaiSet(ctx context.Context, req mcp.CallToolRequest) (*mc
 	}
 
 	// Bulk operation
-	result, err := s.setBulk(ctx, keys, fieldName, jiraID, value, fieldType, operation, queue)
+	result, err := s.setBulk(ctx, keys, fieldName, jiraID, value, fieldType, itemType, operation, queue)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -406,26 +409,24 @@ func (s *Server) handleJaiSet(ctx context.Context, req mcp.CallToolRequest) (*mc
 }
 
 // setField sets a field on a single issue.
-func (s *Server) setField(ctx context.Context, issueKey, fieldName, jiraID, value, fieldType, operation string, queue bool) ([]byte, error) {
+func (s *Server) setField(ctx context.Context, issueKey, fieldName, jiraID, value, fieldType, itemType, operation string, queue bool) ([]byte, error) {
 	var payloadVal interface{} = value
 	localVal := value
 
+	resolve := func(v string) (string, error) { return s.jira.ResolveAccountID(ctx, v) }
+
 	if operation == "set" {
 		if fieldType == "array" {
-			items := parseArrayValue(value)
-			wrapped := make([]interface{}, len(items))
-			for i, item := range items {
-				if w, ok := wrapArrayItemValue(jiraID, item); ok {
-					wrapped[i] = w
-				} else {
-					wrapped[i] = item
-				}
+			items := fieldwrap.ParseArrayInput(value)
+			wrapped, err := fieldwrap.WrapArrayItems(jiraID, itemType, items, resolve)
+			if err != nil {
+				return nil, fmt.Errorf("setting %s on %s: %v", fieldName, issueKey, err)
 			}
 			payloadVal = wrapped
 			j, _ := json.Marshal(items)
 			localVal = string(j)
 		} else {
-			if wrapped, ok, err := wrapScalarFieldValue(jiraID, value, s.jira, ctx); ok {
+			if wrapped, ok, err := fieldwrap.WrapScalarFieldValue(jiraID, value, resolve); ok {
 				if err != nil {
 					return nil, fmt.Errorf("resolving %s: %v", fieldName, err)
 				}
@@ -436,9 +437,11 @@ func (s *Server) setField(ctx context.Context, issueKey, fieldName, jiraID, valu
 		}
 	} else {
 		// add/remove operation on array field
-		if w, ok := wrapArrayItemValue(jiraID, value); ok {
-			payloadVal = w
+		w, err := fieldwrap.WrapArrayItem(jiraID, itemType, value, resolve)
+		if err != nil {
+			return nil, fmt.Errorf("%s %v on %s: %v", operation, value, issueKey, err)
 		}
+		payloadVal = w
 	}
 
 	status := "synced"
@@ -502,28 +505,26 @@ func (s *Server) setField(ctx context.Context, issueKey, fieldName, jiraID, valu
 }
 
 // setBulk sets a field on multiple issues.
-func (s *Server) setBulk(ctx context.Context, keys []string, fieldName, jiraID, value, fieldType, operation string, queue bool) ([]byte, error) {
+func (s *Server) setBulk(ctx context.Context, keys []string, fieldName, jiraID, value, fieldType, itemType, operation string, queue bool) ([]byte, error) {
 	var scalarPayloadVal interface{}
 	var scalarLocalVal string
+
+	resolve := func(v string) (string, error) { return s.jira.ResolveAccountID(ctx, v) }
 
 	if operation == "set" {
 		scalarPayloadVal = value
 		scalarLocalVal = value
 		if fieldType == "array" {
-			items := parseArrayValue(value)
-			wrapped := make([]interface{}, len(items))
-			for i, item := range items {
-				if w, ok := wrapArrayItemValue(jiraID, item); ok {
-					wrapped[i] = w
-				} else {
-					wrapped[i] = item
-				}
+			items := fieldwrap.ParseArrayInput(value)
+			wrapped, err := fieldwrap.WrapArrayItems(jiraID, itemType, items, resolve)
+			if err != nil {
+				return nil, fmt.Errorf("setting %s: %v", fieldName, err)
 			}
 			scalarPayloadVal = wrapped
 			j, _ := json.Marshal(items)
 			scalarLocalVal = string(j)
 		} else {
-			if wrapped, ok, err := wrapScalarFieldValue(jiraID, value, s.jira, ctx); ok {
+			if wrapped, ok, err := fieldwrap.WrapScalarFieldValue(jiraID, value, resolve); ok {
 				if err != nil {
 					return nil, fmt.Errorf("resolving %s: %v", fieldName, err)
 				}
@@ -537,9 +538,10 @@ func (s *Server) setBulk(ctx context.Context, keys []string, fieldName, jiraID, 
 	var succeeded, failed int
 	for _, key := range keys {
 		if operation != "set" {
-			var val interface{} = value
-			if w, ok := wrapArrayItemValue(jiraID, value); ok {
-				val = w
+			val, werr := fieldwrap.WrapArrayItem(jiraID, itemType, value, resolve)
+			if werr != nil {
+				failed++
+				continue
 			}
 			if queue {
 				payload, _ := json.Marshal(map[string]interface{}{"field": jiraID, "op": operation, "value": val})
@@ -619,39 +621,6 @@ func extractKeys(columns []string, rows [][]interface{}) ([]string, error) {
 		}
 	}
 	return keys, nil
-}
-
-func parseArrayValue(value string) []string {
-	parts := strings.Split(value, ",")
-	result := make([]string, 0, len(parts))
-	for _, p := range parts {
-		if v := strings.TrimSpace(p); v != "" {
-			result = append(result, v)
-		}
-	}
-	return result
-}
-
-func wrapScalarFieldValue(jiraID, value string, jiraClient *jira.Client, ctx context.Context) (result interface{}, ok bool, err error) {
-	switch jiraID {
-	case "priority":
-		return map[string]string{"name": value}, true, nil
-	case "assignee", "reporter":
-		accountID, rerr := jiraClient.ResolveAccountID(ctx, value)
-		if rerr != nil {
-			return nil, true, rerr
-		}
-		return map[string]string{"accountId": accountID}, true, nil
-	}
-	return nil, false, nil
-}
-
-func wrapArrayItemValue(jiraID, value string) (result interface{}, ok bool) {
-	switch jiraID {
-	case "components", "fixVersions":
-		return map[string]string{"name": value}, true
-	}
-	return nil, false
 }
 
 func (s *Server) readCurrentArray(issueKey, fieldName string) []string {
@@ -1230,10 +1199,10 @@ func applyFieldOverride(fields map[string]interface{}, fieldMap map[string]*db.F
 		fields["assignee"] = map[string]string{"accountId": accountID}
 		return nil
 	case "labels":
-		fields["labels"] = parseArrayValue(value)
+		fields["labels"] = fieldwrap.ParseArrayInput(value)
 		return nil
 	case "components":
-		items := parseArrayValue(value)
+		items := fieldwrap.ParseArrayInput(value)
 		comps := make([]map[string]string, len(items))
 		for i, c := range items {
 			comps[i] = map[string]string{"name": c}

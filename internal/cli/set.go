@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/sthadka/jai/internal/fieldwrap"
 	"github.com/sthadka/jai/internal/jira"
 	"github.com/sthadka/jai/internal/output"
 )
@@ -157,10 +158,12 @@ Bulk operations with a SQL query:
 
 		var jiraID string
 		var fieldType string
+		var itemType string
 		for id, f := range fieldMap {
 			if f.Name == fieldName {
 				jiraID = id
 				fieldType = f.Type
+				itemType = f.ItemType
 				break
 			}
 		}
@@ -183,65 +186,34 @@ Bulk operations with a SQL query:
 		}
 
 		if len(keys) > 1 {
-			return setBulk(cmd, keys, fieldName, jiraID, scalarValue, fieldType)
+			return setBulk(cmd, keys, fieldName, jiraID, scalarValue, fieldType, itemType)
 		}
 
 		issueKey := keys[0]
 		if hasAdd || hasRemove {
-			return setArrayField(cmd, issueKey, fieldName, jiraID)
+			return setArrayField(cmd, issueKey, fieldName, jiraID, itemType)
 		}
-		return setScalarField(cmd, issueKey, fieldName, jiraID, scalarValue, fieldType)
+		return setScalarField(cmd, issueKey, fieldName, jiraID, scalarValue, fieldType, itemType)
 	},
 }
 
-// wrapScalarFieldValue converts a scalar string value into the object shape
-// Jira's write API requires for reference fields (priority, assignee, reporter).
-// ok is false for fields that accept a bare string/number/date as-is, in which
-// case the caller should use the raw value. resolveAccountID resolves an
-// assignee/reporter identifier to an account ID; pass nil to use the raw value
-// unresolved (e.g. in tests).
-func wrapScalarFieldValue(jiraID, value string, resolveAccountID func(string) (string, error)) (result interface{}, ok bool, err error) {
-	switch jiraID {
-	case "priority":
-		return map[string]string{"name": value}, true, nil
-	case "assignee", "reporter":
-		accountID := value
-		if resolveAccountID != nil {
-			resolved, rerr := resolveAccountID(value)
-			if rerr != nil {
-				return nil, true, rerr
-			}
-			accountID = resolved
-		}
-		return map[string]string{"accountId": accountID}, true, nil
-	}
-	return nil, false, nil
-}
-
-// wrapArrayItemValue converts a single array-item string into the object shape
-// Jira's write API requires for reference-array fields (components, fixVersions).
-// ok is false for plain string arrays (e.g. labels), where the raw string is used.
-func wrapArrayItemValue(jiraID, value string) (result interface{}, ok bool) {
-	switch jiraID {
-	case "components", "fixVersions":
-		return map[string]string{"name": value}, true
-	}
-	return nil, false
-}
-
-func setScalarField(cmd *cobra.Command, issueKey, fieldName, jiraID, value, fieldType string) error {
+func setScalarField(cmd *cobra.Command, issueKey, fieldName, jiraID, value, fieldType, itemType string) error {
 	var payloadVal interface{} = value
 	localVal := value
 
 	if fieldType == "array" {
-		items := parseArrayValue(value)
-		wrapped := make([]interface{}, len(items))
-		for i, item := range items {
-			if w, ok := wrapArrayItemValue(jiraID, item); ok {
-				wrapped[i] = w
-			} else {
-				wrapped[i] = item
+		resolveAccountID := func(v string) (string, error) {
+			return g.jira.ResolveAccountID(cmd.Context(), v)
+		}
+		items := fieldwrap.ParseArrayInput(value)
+		wrapped, werr := fieldwrap.WrapArrayItems(jiraID, itemType, items, resolveAccountID)
+		if werr != nil {
+			msg := fmt.Sprintf("resolving %s: %v", fieldName, werr)
+			if g.jsonOut {
+				fmt.Println(string(output.Err("JiraError", msg)))
+				return nil
 			}
+			return fmt.Errorf("%s", msg)
 		}
 		payloadVal = wrapped
 		j, _ := json.Marshal(items)
@@ -250,7 +222,7 @@ func setScalarField(cmd *cobra.Command, issueKey, fieldName, jiraID, value, fiel
 		resolveAccountID := func(v string) (string, error) {
 			return g.jira.ResolveAccountID(cmd.Context(), v)
 		}
-		if wrapped, ok, err := wrapScalarFieldValue(jiraID, value, resolveAccountID); ok {
+		if wrapped, ok, err := fieldwrap.WrapScalarFieldValue(jiraID, value, resolveAccountID); ok {
 			if err != nil {
 				msg := fmt.Sprintf("resolving %s: %v", fieldName, err)
 				if g.jsonOut {
@@ -308,17 +280,6 @@ func setScalarField(cmd *cobra.Command, issueKey, fieldName, jiraID, value, fiel
 	return nil
 }
 
-func parseArrayValue(value string) []string {
-	parts := strings.Split(value, ",")
-	result := make([]string, 0, len(parts))
-	for _, p := range parts {
-		if v := strings.TrimSpace(p); v != "" {
-			result = append(result, v)
-		}
-	}
-	return result
-}
-
 func expandKeys(keyArg string) []string {
 	parts := strings.Split(keyArg, ",")
 	keys := make([]string, 0, len(parts))
@@ -350,7 +311,7 @@ func extractKeys(columns []string, rows [][]interface{}) ([]string, error) {
 	return keys, nil
 }
 
-func setBulk(cmd *cobra.Command, keys []string, fieldName, jiraID, value, fieldType string) error {
+func setBulk(cmd *cobra.Command, keys []string, fieldName, jiraID, value, fieldType, itemType string) error {
 	hasAdd := len(setAddValues) > 0
 	hasRemove := len(setRemoveValues) > 0
 
@@ -360,14 +321,18 @@ func setBulk(cmd *cobra.Command, keys []string, fieldName, jiraID, value, fieldT
 		scalarPayloadVal = value
 		scalarLocalVal = value
 		if fieldType == "array" {
-			items := parseArrayValue(value)
-			wrapped := make([]interface{}, len(items))
-			for i, item := range items {
-				if w, ok := wrapArrayItemValue(jiraID, item); ok {
-					wrapped[i] = w
-				} else {
-					wrapped[i] = item
+			resolveAccountID := func(v string) (string, error) {
+				return g.jira.ResolveAccountID(cmd.Context(), v)
+			}
+			items := fieldwrap.ParseArrayInput(value)
+			wrapped, werr := fieldwrap.WrapArrayItems(jiraID, itemType, items, resolveAccountID)
+			if werr != nil {
+				msg := fmt.Sprintf("resolving %s: %v", fieldName, werr)
+				if g.jsonOut {
+					fmt.Println(string(output.Err("JiraError", msg)))
+					return nil
 				}
+				return fmt.Errorf("%s", msg)
 			}
 			scalarPayloadVal = wrapped
 			j, _ := json.Marshal(items)
@@ -376,7 +341,7 @@ func setBulk(cmd *cobra.Command, keys []string, fieldName, jiraID, value, fieldT
 			resolveAccountID := func(v string) (string, error) {
 				return g.jira.ResolveAccountID(cmd.Context(), v)
 			}
-			if wrapped, ok, err := wrapScalarFieldValue(jiraID, value, resolveAccountID); ok {
+			if wrapped, ok, err := fieldwrap.WrapScalarFieldValue(jiraID, value, resolveAccountID); ok {
 				if err != nil {
 					msg := fmt.Sprintf("resolving %s: %v", fieldName, err)
 					if g.jsonOut {
@@ -397,9 +362,13 @@ func setBulk(cmd *cobra.Command, keys []string, fieldName, jiraID, value, fieldT
 		if hasAdd || hasRemove {
 			var keyErr error
 			for _, v := range setAddValues {
-				var val interface{} = v
-				if w, ok := wrapArrayItemValue(jiraID, v); ok {
-					val = w
+				val, werr := fieldwrap.WrapArrayItem(jiraID, itemType, v, func(s string) (string, error) {
+					return g.jira.ResolveAccountID(cmd.Context(), s)
+				})
+				if werr != nil {
+					keyErr = werr
+					fmt.Fprintf(cmd.ErrOrStderr(), "  ✗ %s: add %v (%v)\n", key, v, werr)
+					continue
 				}
 				if setQueue {
 					payload, _ := json.Marshal(map[string]interface{}{"field": jiraID, "op": "add", "value": val})
@@ -414,9 +383,13 @@ func setBulk(cmd *cobra.Command, keys []string, fieldName, jiraID, value, fieldT
 				}
 			}
 			for _, v := range setRemoveValues {
-				var val interface{} = v
-				if w, ok := wrapArrayItemValue(jiraID, v); ok {
-					val = w
+				val, werr := fieldwrap.WrapArrayItem(jiraID, itemType, v, func(s string) (string, error) {
+					return g.jira.ResolveAccountID(cmd.Context(), s)
+				})
+				if werr != nil {
+					keyErr = werr
+					fmt.Fprintf(cmd.ErrOrStderr(), "  ✗ %s: remove %v (%v)\n", key, v, werr)
+					continue
 				}
 				if setQueue {
 					payload, _ := json.Marshal(map[string]interface{}{"field": jiraID, "op": "remove", "value": val})
@@ -495,11 +468,18 @@ func setBulk(cmd *cobra.Command, keys []string, fieldName, jiraID, value, fieldT
 	return nil
 }
 
-func setArrayField(cmd *cobra.Command, issueKey, fieldName, jiraID string) error {
+func setArrayField(cmd *cobra.Command, issueKey, fieldName, jiraID, itemType string) error {
 	for _, v := range setAddValues {
-		var val interface{} = v
-		if w, ok := wrapArrayItemValue(jiraID, v); ok {
-			val = w
+		val, werr := fieldwrap.WrapArrayItem(jiraID, itemType, v, func(s string) (string, error) {
+			return g.jira.ResolveAccountID(cmd.Context(), s)
+		})
+		if werr != nil {
+			msg := fmt.Sprintf("adding %v to %s on %s: %v", v, fieldName, issueKey, werr)
+			if g.jsonOut {
+				fmt.Println(string(output.Err("JiraError", msg)))
+				return nil
+			}
+			return fmt.Errorf("%s", msg)
 		}
 		if setQueue {
 			payload, _ := json.Marshal(map[string]interface{}{"field": jiraID, "op": "add", "value": val})
@@ -518,9 +498,16 @@ func setArrayField(cmd *cobra.Command, issueKey, fieldName, jiraID string) error
 		}
 	}
 	for _, v := range setRemoveValues {
-		var val interface{} = v
-		if w, ok := wrapArrayItemValue(jiraID, v); ok {
-			val = w
+		val, werr := fieldwrap.WrapArrayItem(jiraID, itemType, v, func(s string) (string, error) {
+			return g.jira.ResolveAccountID(cmd.Context(), s)
+		})
+		if werr != nil {
+			msg := fmt.Sprintf("removing %v from %s on %s: %v", v, fieldName, issueKey, werr)
+			if g.jsonOut {
+				fmt.Println(string(output.Err("JiraError", msg)))
+				return nil
+			}
+			return fmt.Errorf("%s", msg)
 		}
 		if setQueue {
 			payload, _ := json.Marshal(map[string]interface{}{"field": jiraID, "op": "remove", "value": val})

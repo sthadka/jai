@@ -75,7 +75,7 @@ var commandSchemas = []CommandSchema{
 		Params: map[string]ParamSchema{
 			"key":   {Type: "string", Required: true, Description: "Issue key"},
 			"field": {Type: "string", Required: true, Description: "Field name"},
-			"value": {Type: "string", Required: true, Description: "New value"},
+			"value": {Type: "string", Required: true, Description: "New value. Array fields accept a JSON array ('[\"a@x\",\"b@x\"]') or comma-separated string; user fields/arrays resolve emails to Jira accountIds"},
 		},
 	},
 	{
