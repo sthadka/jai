@@ -1,6 +1,6 @@
 # Changelog
 
-## [5.0.0](https://github.com/sthadka/jai/compare/v4.1.0...v5.0.0) (2026-09-22)
+## [5.0.0](https://github.com/sthadka/jai/compare/v4.1.0...v5.0.0) (2026-09-25)
 
 
 ### ⚠ BREAKING CHANGES
@@ -23,6 +23,11 @@
 ### Performance
 
 * **sync:** parallelize changelog + sources, decouple inline fetch ([eb7ab04](https://github.com/sthadka/jai/commit/eb7ab043b9e2ee67e612612008bf80461175b046))
+
+
+### Documentation
+
+* document JSON-array and user-array formats for jai set ([fe16f9c](https://github.com/sthadka/jai/commit/fe16f9c8325d605fbcfd7b3c5d1849b73e7606d7))
 
 ## [4.1.0](https://github.com/sthadka/jai/compare/v4.0.1...v4.1.0) (2026-09-21)
 
