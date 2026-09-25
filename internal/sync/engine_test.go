@@ -275,3 +275,22 @@ func TestJiraSchemaToType(t *testing.T) {
 		}
 	}
 }
+
+func TestJiraSchemaItemType(t *testing.T) {
+	cases := []struct {
+		name   string
+		schema *jira.FieldSchema
+		want   string
+	}{
+		{"user array (contributors)", &jira.FieldSchema{Type: "array", Items: "user"}, "user"},
+		{"component array", &jira.FieldSchema{Type: "array", Items: "component"}, "component"},
+		{"string array (labels)", &jira.FieldSchema{Type: "array", Items: "string"}, "string"},
+		{"non-array has no item type", &jira.FieldSchema{Type: "user"}, ""},
+		{"nil schema", nil, ""},
+	}
+	for _, c := range cases {
+		if got := jiraSchemaItemType(c.schema); got != c.want {
+			t.Errorf("jiraSchemaItemType(%s) = %q, want %q", c.name, got, c.want)
+		}
+	}
+}

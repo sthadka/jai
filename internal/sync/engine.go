@@ -172,6 +172,7 @@ func (e *Engine) DiscoverFields(ctx context.Context, overrides map[string]string
 			JiraName:   f.Name,
 			Name:       name,
 			Type:       fieldType,
+			ItemType:   jiraSchemaItemType(f.Schema),
 			IsCustom:   f.Custom,
 			IsColumn:   false,
 			Searchable: fieldType == "text" || fieldType == "array",
@@ -876,6 +877,17 @@ func jiraSchemaToType(schema *jira.FieldSchema) string {
 	default:
 		return "text"
 	}
+}
+
+// jiraSchemaItemType returns the array element sub-type (schema.items) for array
+// fields, e.g. "user" for Contributors. It is empty for non-array fields. The
+// write path (jai set / jai_set) uses this to wrap array elements in the object
+// shape Jira requires (user → {"accountId":…}, component/version → {"name":…}).
+func jiraSchemaItemType(schema *jira.FieldSchema) string {
+	if schema == nil || schema.Type != "array" {
+		return ""
+	}
+	return schema.Items
 }
 
 // sqliteType maps our type name to an SQLite column type.

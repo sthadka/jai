@@ -313,6 +313,32 @@ var migrations = []migration{
 			return err
 		},
 	},
+	{
+		version:     12,
+		description: "add item_type (array element sub-type) to field_map and backfill built-ins",
+		up: func(tx *sql.Tx) error {
+			if err := addColumnIfNotExists(tx, "field_map", "item_type", "TEXT"); err != nil {
+				return err
+			}
+			// Backfill built-in array fields. Custom user arrays (e.g.
+			// Contributors) are populated on the next schema sync, which reads
+			// schema.items from the Jira field API.
+			backfill := map[string]string{
+				"components":  "component",
+				"fixVersions": "version",
+				"labels":      "string",
+			}
+			for jiraID, itemType := range backfill {
+				if _, err := tx.Exec(
+					`UPDATE field_map SET item_type = ? WHERE jira_id = ? AND (item_type IS NULL OR item_type = '')`,
+					itemType, jiraID,
+				); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	},
 }
 
 func addColumnIfNotExists(tx *sql.Tx, table, column, columnType string) error {

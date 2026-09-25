@@ -10,6 +10,7 @@ type FieldMapping struct {
 	JiraName     string
 	Name         string
 	Type         string
+	ItemType     string // element sub-type for array fields (user/component/version/option/string)
 	IsCustom     bool
 	IsColumn     bool
 	UserOverride bool
@@ -19,15 +20,16 @@ type FieldMapping struct {
 // UpsertFieldMapping inserts or replaces a field mapping.
 func (db *DB) UpsertFieldMapping(f *FieldMapping) error {
 	_, err := db.Exec(`
-		INSERT INTO field_map (jira_id, jira_name, name, type, is_custom, is_column, user_override, searchable)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO field_map (jira_id, jira_name, name, type, item_type, is_custom, is_column, user_override, searchable)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(jira_id) DO UPDATE SET
 			jira_name = excluded.jira_name,
 			name = CASE WHEN field_map.user_override THEN field_map.name ELSE excluded.name END,
 			type = excluded.type,
+			item_type = excluded.item_type,
 			is_custom = excluded.is_custom,
 			is_column = excluded.is_column`,
-		f.JiraID, f.JiraName, f.Name, f.Type, f.IsCustom, f.IsColumn, f.UserOverride, f.Searchable,
+		f.JiraID, f.JiraName, f.Name, f.Type, f.ItemType, f.IsCustom, f.IsColumn, f.UserOverride, f.Searchable,
 	)
 	return err
 }
@@ -41,7 +43,7 @@ func (db *DB) MarkFieldAsColumn(jiraID string) error {
 // AllFieldMappings returns all field mappings.
 func (db *DB) AllFieldMappings() ([]*FieldMapping, error) {
 	rows, err := db.Query(`
-		SELECT jira_id, jira_name, name, type, is_custom, is_column, user_override, searchable
+		SELECT jira_id, jira_name, name, type, COALESCE(item_type, ''), is_custom, is_column, user_override, searchable
 		FROM field_map ORDER BY name`,
 	)
 	if err != nil {
@@ -52,7 +54,7 @@ func (db *DB) AllFieldMappings() ([]*FieldMapping, error) {
 	var fields []*FieldMapping
 	for rows.Next() {
 		f := &FieldMapping{}
-		if err := rows.Scan(&f.JiraID, &f.JiraName, &f.Name, &f.Type, &f.IsCustom, &f.IsColumn, &f.UserOverride, &f.Searchable); err != nil {
+		if err := rows.Scan(&f.JiraID, &f.JiraName, &f.Name, &f.Type, &f.ItemType, &f.IsCustom, &f.IsColumn, &f.UserOverride, &f.Searchable); err != nil {
 			return nil, err
 		}
 		fields = append(fields, f)
