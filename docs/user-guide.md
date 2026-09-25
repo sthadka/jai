@@ -156,10 +156,23 @@ jai set ROX-123 labels --add security --add urgent
 jai set ROX-123 labels --remove backend
 ```
 
-Replace all values at once with comma-separated syntax:
+Replace all values at once with either a comma-separated string or a JSON array
+(the same shape the read column emits, so a value read back can be written
+straight back):
 
 ```sh
 jai set ROX-123 labels "bug,security,backend"
+jai set ROX-123 labels '["bug","security","backend"]'
+```
+
+**User arrays (e.g. Contributors).** For array fields whose elements are Jira
+users, pass emails or accountIds; jai resolves emails to accountIds and sends
+the objects Jira requires. The read column stores these as a JSON array of
+emails, so it round-trips:
+
+```sh
+jai set ROX-123 contributors "jvmartin@redhat.com,ksanchet@redhat.com"
+jai set ROX-123 contributors '["jvmartin@redhat.com","ksanchet@redhat.com"]'
 ```
 
 Using `--add`/`--remove` on a non-array field produces an error:
