@@ -207,6 +207,21 @@ The reconcile pass only covers the fields you list. Other fields that can change
 jai sync --full     # reconciles every field; run periodically (e.g. nightly)
 ```
 
+### Removing projects you no longer track
+
+Deleting a source from `sync_sources` stops future syncs but leaves its issues,
+changelog, comments, and sync metadata in the local DB — so the stale source
+keeps appearing in the "full sync overdue" reminder. Reclaim that data with:
+
+```sh
+jai sync prune         # dry run: list orphaned projects/sources
+jai sync prune --yes   # delete data for projects/sources no longer in config
+```
+
+Issue pruning is skipped for safety when a `jql:` source has no parseable
+project key (coverage can't be determined); orphaned sync-metadata rows are
+still removed by name.
+
 ---
 
 ## Agent mode
@@ -522,6 +537,7 @@ alias jai-client='jai --config ~/.config/jai/client.yaml'
 | `jai sync` | Incremental sync from Jira |
 | `jai sync --full` | Full resync with deletion detection (reconciles all fields) |
 | `jai sync --force` | Re-fetch all changelog history from scratch |
+| `jai sync prune` | Delete local data for projects/sources removed from config |
 | `jai query <sql>` | Execute SQL against local DB |
 | `jai get <key>` | Fetch a single issue |
 | `jai search <text>` | FTS5 full-text search |

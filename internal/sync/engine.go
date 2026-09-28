@@ -219,6 +219,14 @@ func (e *Engine) FullSyncOverdue(sourceFilter string) []string {
 		}
 	}
 
+	// Only currently-configured sources can be "overdue". A source removed from
+	// config leaves its sync_metadata row behind; that orphan must never keep
+	// warning forever (run 'jai sync prune' to delete it).
+	configured := make(map[string]bool, len(e.cfg.SyncSources))
+	for _, s := range e.cfg.SyncSources {
+		configured[s.Name] = true
+	}
+
 	metas, err := e.db.AllSyncMeta()
 	if err != nil {
 		return nil
@@ -226,6 +234,9 @@ func (e *Engine) FullSyncOverdue(sourceFilter string) []string {
 	cutoff := time.Now().Add(-age)
 	var stale []string
 	for _, m := range metas {
+		if !configured[m.Project] {
+			continue
+		}
 		if sourceFilter != "" && m.Project != sourceFilter {
 			continue
 		}

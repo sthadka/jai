@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"strings"
 	"time"
 )
 
@@ -156,4 +157,68 @@ func (db *DB) AllSyncMeta() ([]*SyncMeta, error) {
 		metas = append(metas, m)
 	}
 	return metas, rows.Err()
+}
+
+// DeleteSyncMetadata removes sync_metadata rows for the given source names,
+// returning the number of rows deleted. Names not present are ignored.
+func (db *DB) DeleteSyncMetadata(sources []string) (int64, error) {
+	if len(sources) == 0 {
+		return 0, nil
+	}
+	placeholders := make([]string, len(sources))
+	args := make([]any, len(sources))
+	for i, s := range sources {
+		placeholders[i] = "?"
+		args[i] = s
+	}
+	res, err := db.Exec(
+		`DELETE FROM sync_metadata WHERE project IN (`+strings.Join(placeholders, ",")+`)`,
+		args...,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// PruneProjects deletes all issues, changelog entries, and comments for the
+// given Jira project keys in a single transaction, returning the number of
+// issues removed. The issues_fts index is maintained by the delete trigger.
+func (db *DB) PruneProjects(projects []string) (int64, error) {
+	if len(projects) == 0 {
+		return 0, nil
+	}
+	placeholders := make([]string, len(projects))
+	args := make([]any, len(projects))
+	for i, p := range projects {
+		placeholders[i] = "?"
+		args[i] = p
+	}
+	in := strings.Join(placeholders, ",")
+	sub := `SELECT key FROM issues WHERE project IN (` + in + `)`
+
+	tx, err := db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`DELETE FROM changelog WHERE issue_key IN (`+sub+`)`, args...); err != nil {
+		return 0, err
+	}
+	if _, err := tx.Exec(`DELETE FROM comments WHERE issue_key IN (`+sub+`)`, args...); err != nil {
+		return 0, err
+	}
+	res, err := tx.Exec(`DELETE FROM issues WHERE project IN (`+in+`)`, args...)
+	if err != nil {
+		return 0, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return n, nil
 }

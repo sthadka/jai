@@ -372,6 +372,8 @@ Detects unsynced projects referenced in links.
 jai sync                # incremental sync (reconciles rank + syncs changelogs)
 jai sync --full         # full resync with deletion detection (reconciles all fields)
 jai sync --force        # re-fetch all changelog history from scratch
+jai sync prune          # dry run: list local data no longer covered by config
+jai sync prune --yes    # delete issues/changelog/comments/metadata for removed sources
 ```
 
 Every incremental sync also runs a **reconcile pass** for `sync.reconcile_fields`
@@ -379,6 +381,12 @@ Every incremental sync also runs a **reconcile pass** for `sync.reconcile_fields
 `updated` timestamp — notably rank/LexoRank reorders — and syncs changelog
 history. A periodic `jai sync --full` reconciles all other fields; sync warns
 when one is overdue (configurable via `sync.full_sync_warning`).
+
+Removing a source from `sync_sources` stops future syncs but leaves its data in
+the local DB, so it keeps showing in the overdue reminder. `jai sync prune`
+deletes issues, changelog, comments, and sync metadata for any project or source
+no longer in config (dry run by default; `--yes` applies). Issue deletion is
+skipped when a `jql:` source has no parseable project key.
 
 By default, sync runs in the background — commands return immediately with cached data. JSON output includes `sync_age_seconds`. Human output shows "(data from N minutes ago)" when stale.
 

@@ -414,13 +414,20 @@ func TestFullSyncOverdue(t *testing.T) {
 
 	old := time.Now().Add(-48 * time.Hour).UTC().Format(time.RFC3339)
 	recent := time.Now().Add(-1 * time.Hour).UTC().Format(time.RFC3339)
+	// ORPHAN has no configured source; it must never be reported even though its
+	// last_full_sync is stale — a source removed from config must stop warning.
 	if _, err := database.Exec(
-		`INSERT INTO sync_metadata (project, last_full_sync) VALUES ('STALE', ?), ('FRESH', ?), ('NEVER', NULL)`,
-		old, recent); err != nil {
+		`INSERT INTO sync_metadata (project, last_full_sync) VALUES ('STALE', ?), ('FRESH', ?), ('NEVER', NULL), ('ORPHAN', ?)`,
+		old, recent, old); err != nil {
 		t.Fatalf("seeding sync_metadata: %v", err)
 	}
 
-	cfg := &config.Config{Sync: config.SyncConfig{FullSyncWarningAge: "24h"}}
+	cfg := &config.Config{
+		Sync: config.SyncConfig{FullSyncWarningAge: "24h"},
+		SyncSources: []config.SyncSource{
+			{Name: "STALE"}, {Name: "FRESH"}, {Name: "NEVER"},
+		},
+	}
 	e := New(database, nil, cfg)
 
 	stale := e.FullSyncOverdue("")
@@ -433,6 +440,9 @@ func TestFullSyncOverdue(t *testing.T) {
 	}
 	if got["FRESH"] {
 		t.Errorf("FRESH should not be overdue, got %v", stale)
+	}
+	if got["ORPHAN"] {
+		t.Errorf("ORPHAN is not a configured source; must not be overdue, got %v", stale)
 	}
 
 	// Source filter restricts the check.
