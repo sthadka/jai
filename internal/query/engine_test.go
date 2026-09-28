@@ -328,6 +328,55 @@ func TestResolveTemplates_Projects(t *testing.T) {
 	}
 }
 
+func TestConfiguredProjectKeys(t *testing.T) {
+	tests := []struct {
+		name          string
+		cfg           *config.Config
+		wantKeys      []string
+		wantAmbiguous bool
+	}{
+		{
+			"explicit projects",
+			&config.Config{SyncSources: []config.SyncSource{{Projects: []string{"A", "B"}}}},
+			[]string{"A", "B"}, false,
+		},
+		{
+			"parseable jql",
+			&config.Config{SyncSources: []config.SyncSource{{JQL: "project = ROX AND status != Done"}}},
+			[]string{"ROX"}, false,
+		},
+		{
+			"unparseable jql marks ambiguous",
+			&config.Config{SyncSources: []config.SyncSource{{JQL: "assignee = currentUser()"}}},
+			nil, true,
+		},
+		{
+			"ambiguous even when other sources resolve",
+			&config.Config{SyncSources: []config.SyncSource{
+				{Projects: []string{"A"}},
+				{JQL: "labels = foo"},
+			}},
+			[]string{"A"}, true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			keys, ambiguous := ConfiguredProjectKeys(tc.cfg)
+			if ambiguous != tc.wantAmbiguous {
+				t.Errorf("ambiguous = %v, want %v", ambiguous, tc.wantAmbiguous)
+			}
+			if len(keys) != len(tc.wantKeys) {
+				t.Fatalf("keys = %v, want %v", keys, tc.wantKeys)
+			}
+			for i, k := range tc.wantKeys {
+				if keys[i] != k {
+					t.Errorf("keys[%d] = %q, want %q", i, keys[i], k)
+				}
+			}
+		})
+	}
+}
+
 func TestResolveTemplates_MultipleVarsInQuery(t *testing.T) {
 	now := time.Date(2024, 7, 17, 12, 0, 0, 0, time.UTC)
 	cfg := &config.Config{

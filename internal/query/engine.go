@@ -139,6 +139,31 @@ func projectKeys(cfg *config.Config) string {
 	return strings.Join(keys, ",")
 }
 
+// ConfiguredProjectKeys returns the deduped Jira project keys covered by all
+// sync sources: explicit 'projects:' lists plus best-effort extraction from
+// 'jql:' sources. ambiguous is true when at least one JQL source's projects
+// can't be determined, meaning the key set is incomplete — callers MUST NOT
+// treat a project's absence from keys as proof it is unconfigured.
+func ConfiguredProjectKeys(cfg *config.Config) (keys []string, ambiguous bool) {
+	seen := map[string]bool{}
+	for _, src := range cfg.SyncSources {
+		projects := src.Projects
+		if len(projects) == 0 && src.JQL != "" {
+			projects = projectKeysFromJQL(src.JQL)
+			if len(projects) == 0 {
+				ambiguous = true
+			}
+		}
+		for _, p := range projects {
+			if !seen[p] {
+				seen[p] = true
+				keys = append(keys, p)
+			}
+		}
+	}
+	return keys, ambiguous
+}
+
 // projectClauseRe matches a 'project = KEY' or 'project in (KEY1, KEY2)' clause
 // within a JQL string, stopping at a following AND/OR or the end of the string.
 var projectClauseRe = regexp.MustCompile(`(?i)project\s*(?:=|in)\s*\(?\s*([A-Za-z0-9_,\s"']+?)\s*\)?(?:\s+and\b|\s+or\b|$)`)
