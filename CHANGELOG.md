@@ -1,5 +1,12 @@
 # Changelog
 
+## [5.1.0](https://github.com/sthadka/jai/compare/v5.0.0...v5.1.0) (2026-09-28)
+
+
+### Features
+
+* **sync:** add `jai sync prune` and stop warning for removed sources ([c52ed71](https://github.com/sthadka/jai/commit/c52ed710f08222a3d4888c2597ebf45f153e8841))
+
 ## [5.0.0](https://github.com/sthadka/jai/compare/v4.1.0...v5.0.0) (2026-09-25)
 
 
