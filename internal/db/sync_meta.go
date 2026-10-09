@@ -81,6 +81,32 @@ func (db *DB) UpdateFullSyncMeta(project string) error {
 	return err
 }
 
+// GetLastReconcile returns the RFC3339 timestamp of the last reconcile pass for
+// a source, or "" if it has never been reconciled.
+func (db *DB) GetLastReconcile(source string) (string, error) {
+	var ts sql.NullString
+	err := db.QueryRow(`SELECT last_reconcile FROM sync_metadata WHERE project = ?`, source).Scan(&ts)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return ts.String, nil
+}
+
+// UpdateReconcileMeta records that a reconcile pass just completed for a source.
+func (db *DB) UpdateReconcileMeta(source string) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := db.Exec(`
+		INSERT INTO sync_metadata (project, last_reconcile)
+		VALUES (?, ?)
+		ON CONFLICT(project) DO UPDATE SET last_reconcile = excluded.last_reconcile`,
+		source, now,
+	)
+	return err
+}
+
 // GetResumeCursor returns the stored resume cursor for a sync source (empty if none).
 func (db *DB) GetResumeCursor(source string) (string, error) {
 	var cursor sql.NullString

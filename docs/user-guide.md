@@ -376,11 +376,14 @@ jai sync prune          # dry run: list local data no longer covered by config
 jai sync prune --yes    # delete issues/changelog/comments/metadata for removed sources
 ```
 
-Every incremental sync also runs a **reconcile pass** for `sync.reconcile_fields`
+`jai sync` also runs a **reconcile pass** for `sync.reconcile_fields`
 (default `[rank]`) to catch changes Jira makes without bumping the issue
-`updated` timestamp — notably rank/LexoRank reorders — and syncs changelog
-history. A periodic `jai sync --full` reconciles all other fields; sync warns
-when one is overdue (configurable via `sync.full_sync_warning`).
+`updated` timestamp — notably rank/LexoRank reorders. To keep it cheap the scan
+is limited by `sync.reconcile_scope` (default `statusCategory != Done`, since
+closed issues can't be re-ranked) and runs at most once per source per
+`sync.reconcile_interval` (default `24h`; set `"0"` to run every sync). A
+periodic `jai sync --full` reconciles all other fields; sync warns when one is
+overdue (configurable via `sync.full_sync_warning`).
 
 Removing a source from `sync_sources` stops future syncs but leaves its data in
 the local DB, so it keeps showing in the overdue reminder. `jai sync prune`

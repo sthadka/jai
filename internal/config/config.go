@@ -102,6 +102,21 @@ type SyncConfig struct {
 	// whose listed fields drifted. Defaults to ["rank"]; set to [] to disable.
 	ReconcileFields []string `yaml:"reconcile_fields"`
 
+	// ReconcileScope is an optional JQL fragment ANDed onto the reconcile scan
+	// so it only checks issues that can actually drift silently. Rank/LexoRank
+	// reorders only affect rankable, active issues, so the default excludes Done
+	// issues — on a mature project that shrinks the scan from the whole backlog
+	// to the active subset. Set to "" to scan every issue in the source.
+	ReconcileScope string `yaml:"reconcile_scope"`
+
+	// ReconcileInterval is the minimum time between reconcile passes for a
+	// source. The pass enumerates every in-scope issue (same request count as a
+	// full scan), so running it after every incremental sync is wasteful and
+	// rank drift is not urgent. A source is reconciled only when this much time
+	// has elapsed since its last pass. Default "24h"; set to "0" to run on every
+	// sync.
+	ReconcileInterval string `yaml:"reconcile_interval"`
+
 	// FullSyncWarning, when true, prints a reminder after an incremental sync if
 	// a full sync has not completed within FullSyncWarningAge. A periodic full
 	// sync is the only way to reconcile arbitrary silently-changed fields.
@@ -196,6 +211,8 @@ func defaults() *Config {
 			LookbackWindow:     "1h",
 			Concurrency:        8,
 			ReconcileFields:    []string{"rank"},
+			ReconcileScope:     "statusCategory != Done",
+			ReconcileInterval:  "24h",
 			FullSyncWarning:    true,
 			FullSyncWarningAge: "24h",
 		},

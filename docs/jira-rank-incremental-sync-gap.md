@@ -11,12 +11,17 @@
 ## Resolution
 
 Implemented a **field reconcile pass** (`internal/sync/reconcile.go`) that runs on
-every incremental `jai sync`:
+`jai sync`:
 
 - Re-fetches only `key` + `sync.reconcile_fields` (default `[rank]`) for the
-  working set, **with no `updated >=` filter**, and diffs each field against the
+  in-scope set, **with no `updated >=` filter**, and diffs each field against the
   stored `raw_json`. Only issues that actually drifted are re-fetched in full and
-  upserted (capped at 500/run; above that it recommends `--full`).
+  upserted (capped at 500/run; above that scanned values are applied directly).
+- The scan is bounded by `sync.reconcile_scope` (default `statusCategory != Done`
+  — closed issues can't be re-ranked) and `sync.reconcile_interval` (default
+  `24h`, tracked per source via `sync_metadata.last_reconcile`; `"0"` runs every
+  sync). The scan's request count equals a full scan, so these two knobs bound
+  *what* and *how often* it enumerates.
 - Changelog history is now synced on **every** sync (the `--changelogs` flag was
   removed; `--force` still forces a full changelog re-fetch).
 - `last_full_sync` is now recorded for **all** sources (previously only

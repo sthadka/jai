@@ -295,18 +295,14 @@ func TestReconcileFields_CapExceededAppliesDirectly(t *testing.T) {
 		t.Fatalf("ReconcileFields: %v", err)
 	}
 	var changed, refetched int
-	var skipped bool
 	var doneErr error
 	for p := range ch {
 		if p.Done {
-			changed, refetched, skipped, doneErr = p.Changed, p.Refetched, p.Skipped, p.Err
+			changed, refetched, doneErr = p.Changed, p.Refetched, p.Err
 		}
 	}
 	if doneErr != nil {
 		t.Fatalf("reconcile error: %v", doneErr)
-	}
-	if skipped {
-		t.Error("Skipped must not be set: large change sets are now applied directly")
 	}
 	if changed != 2 || refetched != 2 {
 		t.Errorf("changed=%d refetched=%d, want 2 and 2 (both applied directly)", changed, refetched)
@@ -448,5 +444,112 @@ func TestFullSyncOverdue(t *testing.T) {
 	// Source filter restricts the check.
 	if filtered := e.FullSyncOverdue("FRESH"); len(filtered) != 0 {
 		t.Errorf("FullSyncOverdue(FRESH) = %v, want empty", filtered)
+	}
+}
+
+// registerRankColumn registers "rank" (customfield_10019) as a custom column so
+// ReconcileFields can resolve it. Shared by the scope/cadence tests.
+func registerRankColumn(t *testing.T, database *db.DB) {
+	t.Helper()
+	if err := database.UpsertFieldMapping(&db.FieldMapping{
+		JiraID: "customfield_10019", JiraName: "Rank", Name: "rank",
+		Type: "text", IsCustom: true, IsColumn: false,
+	}); err != nil {
+		t.Fatalf("UpsertFieldMapping: %v", err)
+	}
+	if err := database.EnsureColumn("rank", "TEXT"); err != nil {
+		t.Fatalf("EnsureColumn: %v", err)
+	}
+	if err := database.MarkFieldAsColumn("customfield_10019"); err != nil {
+		t.Fatalf("MarkFieldAsColumn: %v", err)
+	}
+}
+
+func TestReconcileFields_ScopeAppliedToJQL(t *testing.T) {
+	var gotJQL string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasPrefix(r.URL.Path, "/rest/api/3/search/jql") {
+			t.Errorf("unexpected request to %s", r.URL.Path)
+			return
+		}
+		var body struct {
+			JQL string `json:"jql"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		gotJQL = body.JQL
+		json.NewEncoder(w).Encode(jira.SearchResponse{}) // empty page ends the scan
+	}))
+	defer srv.Close()
+
+	database, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer database.Close()
+	registerRankColumn(t, database)
+
+	cfg := &config.Config{
+		Sync:        config.SyncConfig{ReconcileScope: "statusCategory != Done"},
+		SyncSources: []config.SyncSource{{Name: "TEST", Projects: []string{"TEST"}}},
+	}
+	e := New(database, jira.New(srv.URL, "t@t.com", "tok", 100), cfg)
+
+	ch, err := e.ReconcileFields(context.Background(), "", []string{"rank"})
+	if err != nil {
+		t.Fatalf("ReconcileFields: %v", err)
+	}
+	for range ch {
+	}
+	if !strings.Contains(gotJQL, "statusCategory != Done") {
+		t.Errorf("scan JQL = %q, want it to include the configured scope", gotJQL)
+	}
+	if !strings.Contains(gotJQL, `project in ("TEST")`) {
+		t.Errorf("scan JQL = %q, want it to retain the source scope", gotJQL)
+	}
+}
+
+func TestReconcileFields_CadenceSkipsRecent(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("no Jira request expected: source reconciled within interval, got %s", r.URL.Path)
+	}))
+	defer srv.Close()
+
+	database, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer database.Close()
+	registerRankColumn(t, database)
+
+	// Stamp a reconcile that just happened: the cadence gate must skip the scan.
+	if err := database.UpdateReconcileMeta("TEST"); err != nil {
+		t.Fatalf("UpdateReconcileMeta: %v", err)
+	}
+
+	cfg := &config.Config{
+		Sync:        config.SyncConfig{ReconcileInterval: "24h"},
+		SyncSources: []config.SyncSource{{Name: "TEST", Projects: []string{"TEST"}}},
+	}
+	e := New(database, jira.New(srv.URL, "t@t.com", "tok", 100), cfg)
+
+	ch, err := e.ReconcileFields(context.Background(), "", []string{"rank"})
+	if err != nil {
+		t.Fatalf("ReconcileFields: %v", err)
+	}
+	var skipped, scanned int
+	for p := range ch {
+		if p.Done {
+			if !p.CadenceSkipped {
+				t.Errorf("expected CadenceSkipped on Done event, got %+v", p)
+			}
+			skipped++
+		}
+		scanned += p.Scanned
+	}
+	if skipped != 1 {
+		t.Errorf("expected 1 skipped Done event, got %d", skipped)
+	}
+	if scanned != 0 {
+		t.Errorf("expected 0 issues scanned when skipped, got %d", scanned)
 	}
 }

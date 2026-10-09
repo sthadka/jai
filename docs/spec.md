@@ -299,6 +299,7 @@ Operations payload format:
 | `issues_synced` | INTEGER | Issues in local DB |
 | `last_sync_duration` | REAL | Seconds taken |
 | `last_sync_error` | TEXT | Error from last sync (NULL = success) |
+| `last_reconcile` | DATETIME | Last reconcile pass (drives `reconcile_interval` gate) |
 
 #### `field_map` Table
 
@@ -447,15 +448,20 @@ bump `updated` for some changes — most notably rank/LexoRank reorders. Such a
 change is invisible to the `updated >=` gate and the local value drifts until the
 issue is touched for another reason.
 
-Every incremental sync therefore runs a reconcile pass over the columns listed in
+`jai sync` therefore runs a reconcile pass over the columns listed in
 `sync.reconcile_fields` (default `[rank]`):
 
 ```
-1. For each source, JQL: "{source scope}"  ← no "updated >=" filter
+0. Cadence gate: skip the source if it was reconciled within
+   sync.reconcile_interval (default 24h; "0" = every sync). Tracked per source
+   via sync_metadata.last_reconcile.
+1. For each due source, JQL: "({source scope}) AND ({reconcile_scope})"
+   ← no "updated >=" filter; reconcile_scope default "statusCategory != Done"
 2. Fetch only key + reconcile fields (tiny payload)
 3. Diff each reconcile field against the stored raw_json value
 4. Re-fetch (in full) and upsert ONLY the issues that actually drifted
-   - Capped at 500 changed issues per run; above that, recommend `jai sync --full`
+   - Capped at 500 changed issues per run; above that, apply scanned values directly
+5. On a clean/complete pass, stamp last_reconcile so the gate can skip next time
 ```
 
 The pass only covers the configured fields. Arbitrary fields that can change
@@ -464,12 +470,13 @@ issue-link edits) are only fully reconciled by a periodic **full sync**. Sync
 records `last_full_sync` per source and warns when it is older than
 `sync.full_sync_warning_age` (default 24h); disable via `sync.full_sync_warning`.
 
-**Cost trade-off:** the 500-issue cap bounds the *refetch* cost, but the *scan*
-in step 1 is a full, unfiltered pass over every issue in the source on every
-incremental sync (~1 request per 100 issues). Its payload is tiny (key + the
-reconcile fields only), but the request count scales with backlog size, not with
-how much changed — a deliberate trade to avoid missing `updated`-invisible rank
-drift. Set `sync.reconcile_fields: []` to opt out entirely.
+**Cost trade-off:** the scan in step 1 still enumerates every in-scope issue
+(~1 request per 100 issues) — the same request count as a full scan, just a tiny
+payload (key + reconcile fields). Two knobs bound that cost: `reconcile_scope`
+shrinks *what* is enumerated (closed issues can't be re-ranked), and
+`reconcile_interval` bounds *how often*. Set `sync.reconcile_scope: ""` to scan
+everything, `sync.reconcile_interval: "0"` to run every sync, or
+`sync.reconcile_fields: []` to opt out entirely.
 
 ### Denormalization
 
