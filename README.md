@@ -199,7 +199,7 @@ jai query "SELECT substr(changed_at, 1, 7) as month, COUNT(*) as completed
 
 Incremental sync is gated on each issue's `updated` timestamp, but Jira does **not** bump `updated` when an issue is re-ranked (drag-reorder / LexoRank). So a rank-only change is invisible to incremental sync and the local `rank` column silently drifts.
 
-To fix this, every `jai sync` runs a cheap **reconcile pass**: it re-fetches just `key` + the configured `reconcile_fields` (default `[rank]`) for the working set — with no `updated` filter — and re-syncs only the issues whose values actually changed. Configure or disable it under `sync.reconcile_fields`.
+To fix this, `jai sync` runs a cheap **reconcile pass**: it re-fetches just `key` + the configured `reconcile_fields` (default `[rank]`) — with no `updated` filter — and re-syncs only the issues whose values actually changed. Two settings keep it cheap: `sync.reconcile_scope` (default `statusCategory != Done`) limits the scan to issues that can still be re-ranked, and `sync.reconcile_interval` (default `24h`) runs the pass at most once per source per interval instead of on every sync. Set `reconcile_scope: ""` to scan everything, `reconcile_interval: "0"` to run every sync, or `reconcile_fields: []` to disable.
 
 The reconcile pass only covers the fields you list. Other fields that can change without bumping `updated` (some integration-written custom fields, occasional issue-link edits) are only fully reconciled by a periodic **full sync**. `jai sync` warns when a full sync is overdue (`sync.full_sync_warning`, default 24h):
 
@@ -460,9 +460,11 @@ sync:
   rate_limit: 10             # requests/second (Jira Cloud limit)
   sprints: true              # sync sprint/board data (default: true)
   dev_info: false            # sync PR/branch dev info (default: false, opt-in)
-  reconcile_fields: [rank]   # fields re-checked every sync regardless of the
-                             # issue "updated" timestamp (Jira doesn't bump
+  reconcile_fields: [rank]   # fields re-checked by the reconcile pass regardless
+                             # of the issue "updated" timestamp (Jira doesn't bump
                              # "updated" on rank reorders). Set to [] to disable.
+  reconcile_scope: "statusCategory != Done"  # JQL ANDed onto the scan; "" scans all
+  reconcile_interval: 24h    # min time between reconcile passes per source; "0" = every sync
   full_sync_warning: true    # warn when a full sync is overdue (default: true)
   full_sync_warning_age: 24h # how stale before the warning fires (default: 24h)
 

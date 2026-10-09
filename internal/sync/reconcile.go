@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/sthadka/jai/internal/config"
 	"github.com/sthadka/jai/internal/db"
@@ -21,9 +22,11 @@ type ReconcileProgress struct {
 	Scanned   int      // issues scanned in the cheap key+fields pass
 	Changed   int      // issues whose reconciled fields drifted
 	Refetched int      // issues corrected: full re-fetch, or direct value apply above the cap
-	Skipped   bool     // Deprecated: no longer set; large change sets are applied directly now
-	Err       error
-	Done      bool
+	// CadenceSkipped is set when the source was skipped because it was
+	// reconciled within Sync.ReconcileInterval. No scan ran.
+	CadenceSkipped bool
+	Err            error
+	Done           bool
 }
 
 // maxReconcileRefetch caps how many drifted issues the reconcile pass will
@@ -115,7 +118,28 @@ func (e *Engine) reconcileSource(ctx context.Context, src config.SyncSource, res
 		scanFields = append(scanFields, rf.jiraID)
 	}
 
+	// Cadence gate: the pass enumerates every in-scope issue (same request count
+	// as a full scan), so skip a source reconciled within ReconcileInterval.
+	// "0"/empty/unparseable means run every time.
+	if d, err := time.ParseDuration(e.cfg.Sync.ReconcileInterval); err == nil && d > 0 {
+		last, err := e.db.GetLastReconcile(src.Name)
+		if err != nil {
+			ch <- ReconcileProgress{Source: src.Name, Fields: cols, Err: err, Done: true}
+			return
+		}
+		if t, perr := time.Parse(time.RFC3339, last); perr == nil && time.Since(t) < d {
+			ch <- ReconcileProgress{Source: src.Name, Fields: cols, CadenceSkipped: true, Done: true}
+			return
+		}
+	}
+
 	jql := sourceJQL(src) // no "updated >=" filter — that gate is exactly what misses rank changes
+	// Scope the scan to issues that can actually drift silently (default: not
+	// Done). Rank reorders never touch closed issues, so excluding them cuts the
+	// scan without missing corrections.
+	if scope := strings.TrimSpace(e.cfg.Sync.ReconcileScope); scope != "" {
+		jql = fmt.Sprintf("(%s) AND (%s)", jql, scope)
+	}
 	var scanned int
 	var changedKeys []string
 	// Fresh reconcile-field values captured during the scan, keyed by issue key
@@ -171,6 +195,9 @@ func (e *Engine) reconcileSource(ctx context.Context, src config.SyncSource, res
 	}
 
 	if len(changedKeys) == 0 {
+		// Scan completed cleanly — record the pass so the cadence gate can skip
+		// this source until ReconcileInterval elapses.
+		_ = e.db.UpdateReconcileMeta(src.Name)
 		ch <- ReconcileProgress{Source: src.Name, Fields: cols, Scanned: scanned, Done: true}
 		return
 	}
@@ -188,6 +215,12 @@ func (e *Engine) reconcileSource(ctx context.Context, src config.SyncSource, res
 		applied, err = e.applyReconcileValues(changedKeys, changedVals, fieldMap)
 	} else {
 		applied, err = e.refetchAndUpsert(ctx, changedKeys, fieldMap)
+	}
+	if err == nil {
+		// Only stamp the pass as complete when every drifted issue was
+		// corrected; a partial failure leaves the cadence open so the next sync
+		// retries instead of waiting out ReconcileInterval.
+		_ = e.db.UpdateReconcileMeta(src.Name)
 	}
 	ch <- ReconcileProgress{Source: src.Name, Fields: cols, Scanned: scanned, Changed: len(changedKeys), Refetched: applied, Err: err, Done: true}
 }

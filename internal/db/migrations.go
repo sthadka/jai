@@ -339,6 +339,13 @@ var migrations = []migration{
 			return nil
 		},
 	},
+	{
+		version:     13,
+		description: "add last_reconcile to sync_metadata",
+		up: func(tx *sql.Tx) error {
+			return addColumnIfNotExists(tx, "sync_metadata", "last_reconcile", "DATETIME")
+		},
+	},
 }
 
 func addColumnIfNotExists(tx *sql.Tx, table, column, columnType string) error {

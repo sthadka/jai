@@ -250,8 +250,10 @@ func displayReconcileProgress(ch <-chan synce.ReconcileProgress) {
 			// Refetch failed partway: known-drifted issues may be uncorrected.
 			fmt.Fprintf(os.Stderr, "\r  ✗ reconcile %-16s %d drifted, %d fixed — ERROR: %v\033[K\n",
 				p.Source, p.Changed, p.Refetched, p.Err)
-		case p.Skipped:
-			fmt.Fprintf(os.Stderr, "\r  ⚠ reconcile %-16s %d issues drifted (> cap) — run 'jai sync --full'\033[K\n", p.Source, p.Changed)
+		case p.CadenceSkipped:
+			// Reconciled recently (within reconcile_interval) — no scan ran.
+			// Stay quiet; clear the live counter line.
+			fmt.Fprintf(os.Stderr, "\r\033[K")
 		case p.Changed == 0:
 			// Clean run — stay quiet (clear the live counter line).
 			fmt.Fprintf(os.Stderr, "\r\033[K")
