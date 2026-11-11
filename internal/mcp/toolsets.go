@@ -13,10 +13,11 @@ var toolsetMap = map[string][]string{
 	"sync":    {"jai_sync", "jai_status", "jai_push"},
 	"browser": {"jai_open"},
 	"config":  {"jai_config"},
+	"metrics": {"jai_metrics"},
 }
 
 // defaultToolsets defines which toolsets are enabled by default.
-var defaultToolsets = []string{"read", "schema", "write", "sync", "browser"}
+var defaultToolsets = []string{"read", "schema", "write", "sync", "browser", "metrics"}
 
 // ToolsetRegistry manages which toolsets are enabled and enforces read-only mode.
 type ToolsetRegistry struct {
