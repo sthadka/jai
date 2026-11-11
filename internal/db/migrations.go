@@ -351,6 +351,24 @@ var migrations = []migration{
 		description: "add flow-metrics fact store (generations, intervals, flow rollup)",
 		up:          createMetricsSchema,
 	},
+	{
+		version:     15,
+		description: "add partial changelog index for tracked-field count/MIN metrics (idx_cl_tracked)",
+		up: func(tx *sql.Tx) error {
+			// Count-based signals (priority changes, rank volatility, reassignment
+			// counts, triage/first-response latency) are COUNT/MIN over the changelog
+			// and are queried directly — no materialized fact_field_event copy. A
+			// partial index over the tracked fields keeps those per-(field,issue)
+			// scans index-only; the leading `field` column lets each metric seek its
+			// field, then range-scan (issue_key, changed_at). The WHERE clause mirrors
+			// the spec's tracked-field set so the index stays small.
+			_, err := tx.Exec(
+				`CREATE INDEX IF NOT EXISTS idx_cl_tracked
+				   ON changelog(field, issue_key, changed_at)
+				   WHERE field IN ('status','priority','assignee','Team','Rank')`)
+			return err
+		},
+	},
 }
 
 func addColumnIfNotExists(tx *sql.Tx, table, column, columnType string) error {
