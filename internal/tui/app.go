@@ -29,6 +29,7 @@ const (
 	ModeFieldPicker      // field name picker modal (comma key)
 	ModeFieldValue       // value input for chosen field
 	ModeHelp             // help overlay
+	ModeMetrics          // read-only metrics pane
 )
 
 // App is the root bubbletea model.
@@ -66,6 +67,10 @@ type App struct {
 	syncStatus string
 	syncTick   time.Duration
 	lastSync   time.Time
+
+	// Read-only metrics pane (ModeMetrics).
+	metrics       *MetricsPane
+	metricsCancel context.CancelFunc
 
 	err string
 }
@@ -305,6 +310,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.tables[a.activeView] != nil {
 			a.tables[a.activeView].SetSize(a.width, a.tableHeight())
 		}
+		if a.metrics != nil {
+			a.metrics.SetSize(a.width, a.tableHeight())
+		}
 		return a, nil
 
 	case viewLoadedMsg:
@@ -348,6 +356,15 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.err = ""
 		}
 		return a, nil
+
+	case metricsLoadedMsg:
+		if a.metrics != nil {
+			a.metrics.loading = false
+			a.metrics.err = msg.err
+			a.metrics.data = msg.data
+		}
+		return a, nil
+
 	case SyncTickMsg:
 		a.syncing = true
 		a.syncStatus = "syncing..."
@@ -478,6 +495,33 @@ func (a *App) handleKey(msg tea.KeyMsg, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 	if a.mode == ModeDetailLoad {
 		if key.Matches(msg, a.keys.Back) {
 			a.mode = ModeTable
+		}
+		return a, tea.Batch(cmds...)
+	}
+
+	// ── Metrics pane (read-only) ───────────────────────────────────────────────
+	if a.mode == ModeMetrics {
+		switch {
+		case key.Matches(msg, a.keys.Back):
+			a.closeMetrics()
+		case key.Matches(msg, a.keys.Up):
+			if a.metrics != nil {
+				a.metrics.ScrollUp()
+			}
+		case key.Matches(msg, a.keys.Down):
+			if a.metrics != nil {
+				a.metrics.ScrollDown()
+			}
+		case key.Matches(msg, a.keys.HalfUp):
+			for i := 0; a.metrics != nil && i < a.tableHeight()/2; i++ {
+				a.metrics.ScrollUp()
+			}
+		case key.Matches(msg, a.keys.HalfDown):
+			for i := 0; a.metrics != nil && i < a.tableHeight()/2; i++ {
+				a.metrics.ScrollDown()
+			}
+		case key.Matches(msg, a.keys.Refresh):
+			cmds = append(cmds, a.openMetricsCmd())
 		}
 		return a, tea.Batch(cmds...)
 	}
@@ -657,6 +701,9 @@ func (a *App) handleKey(msg tea.KeyMsg, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, a.keys.Refresh):
 		cmds = append(cmds, a.loadView(a.activeView))
 
+	case key.Matches(msg, a.keys.Metrics):
+		cmds = append(cmds, a.openMetricsCmd())
+
 	case key.Matches(msg, a.keys.Open):
 		if t != nil {
 			row := t.Selected()
@@ -671,6 +718,32 @@ func (a *App) handleKey(msg tea.KeyMsg, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 	}
 
 	return a, tea.Batch(cmds...)
+}
+
+// openMetricsCmd enters the read-only metrics pane and returns a command that
+// computes results off the Update loop. Any in-flight computation is cancelled
+// first so a refresh never races a stale result. as_of is taken at compute time
+// inside the command so open-interval ages advance on every refresh.
+func (a *App) openMetricsCmd() tea.Cmd {
+	if a.metricsCancel != nil {
+		a.metricsCancel()
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), metricsComputeTimeout)
+	a.metricsCancel = cancel
+	a.mode = ModeMetrics
+	a.metrics = NewMetricsPane(a.width, a.tableHeight())
+	a.err = ""
+	return a.loadMetricsCmd(ctx)
+}
+
+// closeMetrics cancels any in-flight computation and returns to the table.
+func (a *App) closeMetrics() {
+	if a.metricsCancel != nil {
+		a.metricsCancel()
+		a.metricsCancel = nil
+	}
+	a.metrics = nil
+	a.mode = ModeTable
 }
 
 func (a *App) switchView(i int) {
@@ -743,6 +816,17 @@ func (a *App) View() string {
 		return sb.String()
 	}
 
+	if a.mode == ModeMetrics {
+		if a.metrics != nil {
+			sb.WriteString(a.metrics.Render(a.width, a.tableHeight()))
+		} else {
+			sb.WriteString("Computing metrics…")
+		}
+		sb.WriteString("\n")
+		sb.WriteString(a.renderStatusBar())
+		return sb.String()
+	}
+
 	if a.err != "" {
 		errStyle := lipgloss.NewStyle().Foreground(colorBlocked)
 		sb.WriteString(errStyle.Render("Error: " + a.err))
@@ -800,7 +884,7 @@ func (a *App) renderTabBar() string {
 func (a *App) renderContextualHints() string {
 	switch a.mode {
 	case ModeTable:
-		return "/ filter  s sort  enter detail  ? help  q quit"
+		return "/ filter  s sort  enter detail  m metrics  ? help  q quit"
 	case ModeDetail:
 		return "esc back  o open  , edit  ? help"
 	case ModeFilter:
@@ -811,6 +895,8 @@ func (a *App) renderContextualHints() string {
 		return "type value  ↑↓ suggestion  enter save  esc back"
 	case ModeHelp:
 		return "? or esc to close"
+	case ModeMetrics:
+		return "r refresh  j/k scroll  esc back"
 	default:
 		return "? help  q quit"
 	}

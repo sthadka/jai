@@ -36,6 +36,7 @@ type KeyMap struct {
 	Open        key.Binding
 	Edit        key.Binding
 	Comment     key.Binding
+	Metrics     key.Binding // m: open read-only metrics pane
 	FieldPicker key.Binding // comma: open field editor in detail view
 	Quit        key.Binding
 	Back        key.Binding
@@ -74,6 +75,7 @@ func DefaultKeys() KeyMap {
 		Open:        key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "open in browser")),
 		Edit:        key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "edit field")),
 		Comment:     key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "comment")),
+		Metrics:     key.NewBinding(key.WithKeys("m"), key.WithHelp("m", "metrics")),
 		FieldPicker: key.NewBinding(key.WithKeys(","), key.WithHelp(",", "edit field (detail)")),
 		Quit:        key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
 		Back:        key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back/clear")),
