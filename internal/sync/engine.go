@@ -40,11 +40,12 @@ type Engine struct {
 	jiraTZMu sync.RWMutex
 	jiraTZ   *time.Location
 	colMu    sync.Mutex // serializes ensureCustomColumns ALTER TABLEs across concurrent sources
+	mw       *metricWriter
 }
 
 // New creates a new sync Engine.
 func New(database *db.DB, client *jira.Client, cfg *config.Config) *Engine {
-	return &Engine{db: database, client: client, cfg: cfg}
+	return &Engine{db: database, client: client, cfg: cfg, mw: newMetricWriter(database, cfg)}
 }
 
 // concurrency returns the configured parallel-fetch worker count, defaulting to
@@ -379,7 +380,8 @@ func (e *Engine) syncSource(ctx context.Context, src config.SyncSource, full, re
 
 	fields := e.expandFields(fieldMap)
 	var newCount, updatedCount, total int
-	var lastUpdated string // max updated timestamp seen this run (for cursor)
+	var lastUpdated string   // max updated timestamp seen this run (for cursor)
+	var touchedKeys []string // issue keys upserted this run, for incremental metric refresh
 
 	// Emit an initial event so the display knows we're resuming and carries the JQL.
 	ch <- Progress{Project: src.Name, ResumedFrom: resumedFrom, JQL: jql}
@@ -445,6 +447,7 @@ func (e *Engine) syncSource(ctx context.Context, src config.SyncSource, full, re
 			if err := e.db.UpsertIssue(issue, extra); err != nil {
 				continue
 			}
+			touchedKeys = append(touchedKeys, apiIssue.Key)
 
 			comments, err := ExtractComments(apiIssue.Key, rawBytes)
 			if err == nil {
@@ -480,12 +483,15 @@ func (e *Engine) syncSource(ctx context.Context, src config.SyncSource, full, re
 	}
 
 	// Run deletion detection on full sync for project-keyed sources only.
-	// JQL sources have no reliable scope to diff against.
+	// JQL sources have no reliable scope to diff against. Deleted keys join the
+	// touched set so their derived facts are purged in the same metric refresh.
 	if full && src.JQL == "" {
 		for _, project := range src.Projects {
-			if _, err := DetectDeletions(ctx, e.db, e.client, project); err != nil {
+			deleted, err := DetectDeletedKeys(ctx, e.db, e.client, project)
+			if err != nil {
 				_ = err // non-fatal
 			}
+			touchedKeys = append(touchedKeys, deleted...)
 		}
 	}
 
@@ -510,6 +516,18 @@ func (e *Engine) syncSource(ctx context.Context, src config.SyncSource, full, re
 	// Sync development info if configured.
 	if e.cfg.Sync.DevInfo && full {
 		e.SyncDevInfo(ctx, src)
+	}
+
+	// Advance the flow-metric facts for the issues this source touched (and any
+	// detected as deleted), holding the cross-process lock and keeping facts and
+	// rollup slices in one transaction. Incremental by default; a config/mapping
+	// change forces a full rebuild. Metric publication is separate from source-sync
+	// success: a build failure is logged but does not mark the source sync failed,
+	// so a rejected metric never makes source-only sync unusable, and a prior valid
+	// generation stays published with honest freshness. No-op when metrics are
+	// unconfigured.
+	if err := e.mw.refreshTouched(touchedKeys); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: metric refresh for %s failed: %v\n", src.Name, err)
 	}
 
 	elapsed := time.Since(start).Seconds()
