@@ -50,3 +50,37 @@ views:
         condition: equals
         value: Blocker
         color: "#ff0000"
+
+# Flow metrics taxonomy (optional). All stage/class/resolution mapping lives here so
+# jai works against any Jira without code or SQL changes. Precedence for status -> stage
+# is: status_stage_ids (by Jira status ID) -> status_stages (by name) -> the
+# statusCategory-derived default -> `unknown` (a real, surfaced bucket). A metric with a
+# structural error (duplicate mapping, undefined stage/class reference, bad SLA) is
+# rejected on its own; the rest of the config and unrelated commands keep working.
+# The values below are EXAMPLES — replace them with your tenant's statuses and types.
+metrics:
+  status_stage_ids: {}            # optional: "10001": done  (ID overrides name, survives renames)
+  status_stages:                  # name fallback; names not listed -> category default -> unknown
+    todo:    [New, Backlog, To Do, Refinement, Planning]
+    active:  [In Progress, Review, Dev Complete, Testing, Approved]
+    waiting: [Waiting, Hold]
+    done:    [Closed, Release Pending]
+  wip_stages: [active]            # stages counted as WIP / cycle-time active
+  done_resolutions: [Done, Done-Errata]  # omit to run delivery metrics over ALL resolved issues (labelled)
+  type_classes:                   # types not listed -> `other`
+    bug:      [Bug]
+    feature:  [Story, Feature, "Feature Request"]
+    task:     [Task, Sub-task]
+    security: [Vulnerability, Weakness]
+  ratio:                          # zero denominator is undefined, never 0
+    numerator: bug
+    denominator: feature
+    cohort: completed             # created | completed
+  tracked_fields: [status, priority, assignee, Team, Rank]  # must appear in changelog.field
+  blocker_link_types: [is blocked by, depends on]
+  sla:                            # optional; drives security/SLA metrics
+    security:
+      severity_field: priority    # categorical field with per-value deadlines
+      deadlines_days: { Critical: 7, Major: 30, Minor: 90 }
+      clock_start: created
+      on_missing_severity: exclude  # exclude | treat_as:<label>
