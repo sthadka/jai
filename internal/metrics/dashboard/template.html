@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Flow Metrics Dashboard</title>
+<style>
+{{.StyleCSS}}
+</style>
+</head>
+<body>
+<header id="dash-header">
+  <h1 id="dash-title">Flow Metrics</h1>
+  <div id="dash-meta" class="meta"></div>
+  <div id="dash-disclosure" class="disclosure" role="note"></div>
+</header>
+<main id="dash-sections"></main>
+<footer id="dash-footer">
+  <p>Generated offline by <code>jai metrics dashboard</code>. Self-contained: no network, CDN, or file-fetch dependency.</p>
+</footer>
+
+<!-- Embedded data: HTML-escaped JSON, parsed and rendered via textContent only (no innerHTML). -->
+<script id="dashboard-data" type="application/json">
+{{.DataJSON}}
+</script>
+
+<!-- Embedded renderer: hand-rolled pure-SVG charts, no external library. -->
+<script>
+{{.ChartJS}}
+</script>
+</body>
+</html>
