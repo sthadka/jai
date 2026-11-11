@@ -51,6 +51,7 @@ func (s *Server) buildServer() *server.MCPServer {
 	registerWriteTools(s, srv)
 	registerSyncTools(s, srv)
 	registerConfigTools(s, srv)
+	registerMetricsTools(s, srv)
 
 	// Register resources and prompts (stubs for now)
 	s.registerResources(srv)
