@@ -92,7 +92,17 @@ func (a *App) renderHelp() string {
 	keyLine("s", "sort")
 	keyLine("o", "open in browser")
 	keyLine("r", "refresh")
+	keyLine("m", "metrics pane (read-only)")
 	keyLine("q", "quit")
+	emptyLine()
+
+	// Metrics pane section
+	line(headingStyle.Render("Metrics Pane (read-only)"))
+	line(strings.Repeat("─", inner))
+	keyLine("m", "open metrics")
+	keyLine("r", "refresh (advances open ages)")
+	keyLine("j/k ↑↓", "scroll")
+	keyLine("Esc", "back to issues")
 	emptyLine()
 
 	// Detail View section
