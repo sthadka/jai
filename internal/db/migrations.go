@@ -346,6 +346,11 @@ var migrations = []migration{
 			return addColumnIfNotExists(tx, "sync_metadata", "last_reconcile", "DATETIME")
 		},
 	},
+	{
+		version:     14,
+		description: "add flow-metrics fact store (generations, intervals, flow rollup)",
+		up:          createMetricsSchema,
+	},
 }
 
 func addColumnIfNotExists(tx *sql.Tx, table, column, columnType string) error {
