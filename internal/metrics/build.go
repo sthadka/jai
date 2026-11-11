@@ -45,12 +45,15 @@ type BuildResult struct {
 }
 
 // issueSource is one issue's replay input plus the snapshot fields the flow rollup needs
-// (resolution/type live on issues, not in the replay history).
+// (resolution/type live on issues, not in the replay history). scalar holds one replay
+// input per configured scalar tracked field (keyed by field name); status is replayed
+// separately via hist.
 type issueSource struct {
 	hist       IssueHistory
 	resolved   *time.Time
 	resolution string
 	itype      string
+	scalar     map[string]*ScalarHistory
 }
 
 // BuildAll performs a full restatement: it reads every in-scope issue's status history,
@@ -209,7 +212,7 @@ func (b *Builder) writeFacts(tx *sql.Tx, gen int64, sources []issueSource, asOf 
 	ivStmt, err := tx.Prepare(
 		`INSERT INTO fact_field_interval
 		   (generation, issue_key, project, field, seq, value_id, value, stage, provenance, entered_at, exited_at, is_open)
-		 VALUES (?, ?, ?, 'status', ?, ?, ?, ?, ?, ?, ?, ?)`)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return 0, err
 	}
@@ -224,18 +227,43 @@ func (b *Builder) writeFacts(tx *sql.Tx, gen int64, sources []issueSource, asOf 
 	}
 	defer flowStmt.Close()
 
+	scalarFields := ScalarTrackedFields(b.pol)
 	intervalCount := 0
 	for _, src := range sources {
 		result := ReplayStatus(src.hist, b.pol, asOf)
 		for seq, iv := range result.Intervals {
 			if _, err := ivStmt.Exec(
-				gen, src.hist.Key, src.hist.Project, seq,
+				gen, src.hist.Key, src.hist.Project, "status", seq,
 				nullStr(iv.ValueID), nullStr(iv.Value), nullStr(iv.Stage), nullStr(iv.Provenance),
 				dbTime(iv.EnteredAt), dbTimePtr(iv.ExitedAt), iv.Open,
 			); err != nil {
 				return 0, err
 			}
 			intervalCount++
+		}
+
+		// Scalar tracked fields (priority, assignee, Team, Rank, ...). Set-valued fields
+		// are excluded by ScalarTrackedFields and modeled as membership intervals instead;
+		// scalar replay never has a stage, so the stage column is NULL.
+		for _, field := range scalarFields {
+			sh := src.scalar[field]
+			if sh == nil {
+				continue
+			}
+			sr, err := ReplayScalar(*sh, b.pol, asOf)
+			if err != nil {
+				return 0, fmt.Errorf("replay scalar %q for %s: %w", field, src.hist.Key, err)
+			}
+			for seq, iv := range sr.Intervals {
+				if _, err := ivStmt.Exec(
+					gen, src.hist.Key, src.hist.Project, field, seq,
+					nullStr(iv.ValueID), nullStr(iv.Value), nil, nullStr(iv.Provenance),
+					dbTime(iv.EnteredAt), dbTimePtr(iv.ExitedAt), iv.Open,
+				); err != nil {
+					return 0, err
+				}
+				intervalCount++
+			}
 		}
 
 		flow := deriveFlow(result, src, b.pol)
@@ -328,6 +356,7 @@ func (b *Builder) loadSources(projects, keys []string) ([]issueSource, *time.Tim
 	index := map[string]int{}
 	var sources []issueSource
 	var watermark time.Time
+	scalarFields := ScalarTrackedFields(b.pol)
 	for rows.Next() {
 		var (
 			key, project                      string
@@ -355,6 +384,18 @@ func (b *Builder) loadSources(projects, keys []string) ([]issueSource, *time.Tim
 		if t := nullTime(updated); t != nil && t.After(watermark) {
 			watermark = *t
 		}
+		if len(scalarFields) > 0 {
+			src.scalar = make(map[string]*ScalarHistory, len(scalarFields))
+			for _, f := range scalarFields {
+				src.scalar[f] = &ScalarHistory{
+					Key:             key,
+					Project:         project,
+					Field:           f,
+					CreatedAt:       src.hist.CreatedAt,
+					HistoryComplete: src.hist.HistoryComplete,
+				}
+			}
+		}
 		index[key] = len(sources)
 		sources = append(sources, src)
 	}
@@ -364,6 +405,15 @@ func (b *Builder) loadSources(projects, keys []string) ([]issueSource, *time.Tim
 
 	if err := b.loadStatusEvents(projects, keys, index, sources, &watermark); err != nil {
 		return nil, nil, err
+	}
+
+	if len(scalarFields) > 0 {
+		if err := b.loadScalarCurrent(projects, keys, scalarFields, index, sources); err != nil {
+			return nil, nil, err
+		}
+		if err := b.loadScalarEvents(projects, keys, scalarFields, index, sources, &watermark); err != nil {
+			return nil, nil, err
+		}
 	}
 
 	var wm *time.Time
@@ -426,6 +476,198 @@ func (b *Builder) loadStatusEvents(projects, keys []string, index map[string]int
 		sources[i].hist.Events = append(sources[i].hist.Events, ev)
 	}
 	return crows.Err()
+}
+
+// loadScalarEvents appends changelog transitions for the scalar tracked fields to the
+// per-field replay inputs already attached to each source. One query covers all scalar
+// fields; rows are grouped by (issue, field).
+func (b *Builder) loadScalarEvents(projects, keys, fields []string, index map[string]int, sources []issueSource, watermark *time.Time) error {
+	fph := make([]string, len(fields))
+	cargs := make([]any, 0, len(fields)+len(keys)+len(projects))
+	for i, f := range fields {
+		fph[i] = "?"
+		cargs = append(cargs, f)
+	}
+	cq := `SELECT id, issue_key, field, from_value, from_string, to_value, to_string, changed_at
+	         FROM changelog WHERE field IN (` + strings.Join(fph, ", ") + `)`
+	switch {
+	case len(keys) > 0:
+		args, in := keyFilter(keys, nil)
+		cq += " AND issue_key IN " + in
+		cargs = append(cargs, args...)
+	case len(projects) > 0:
+		ph := make([]string, len(projects))
+		for i, p := range projects {
+			ph[i] = "?"
+			cargs = append(cargs, p)
+		}
+		cq += " AND issue_key IN (SELECT key FROM issues WHERE project IN (" + strings.Join(ph, ", ") + "))"
+	}
+	cq += " ORDER BY issue_key, field, changed_at"
+
+	crows, err := b.store.db.Query(cq, cargs...)
+	if err != nil {
+		return fmt.Errorf("load scalar events: %w", err)
+	}
+	defer crows.Close()
+	for crows.Next() {
+		var (
+			id, issueKey, field             string
+			fromV, fromS, toV, toS, changed sql.NullString
+		)
+		if err := crows.Scan(&id, &issueKey, &field, &fromV, &fromS, &toV, &toS, &changed); err != nil {
+			return err
+		}
+		i, ok := index[issueKey]
+		if !ok {
+			continue
+		}
+		sh := sources[i].scalar[field]
+		if sh == nil {
+			continue
+		}
+		ev := ScalarEvent{
+			ID:         id,
+			FromValue:  fromV.String,
+			FromString: fromS.String,
+			ToValue:    toV.String,
+			ToString:   toS.String,
+		}
+		if changed.Valid && strings.TrimSpace(changed.String) != "" {
+			ev.ChangedAt = parseDBTime(changed.String)
+			if ev.ChangedAt.After(*watermark) {
+				*watermark = ev.ChangedAt
+			}
+		}
+		sh.Events = append(sh.Events, ev)
+	}
+	return crows.Err()
+}
+
+// loadScalarCurrent fills each scalar field's current snapshot value from the issues row,
+// but only for fields that map to an existing issues column. A field with no column keeps
+// CurrentKnown == false, so a never-changed issue surfaces as an explicit unknown period
+// rather than fabricating a value (field availability is a coverage diagnostic).
+func (b *Builder) loadScalarCurrent(projects, keys, fields []string, index map[string]int, sources []issueSource) error {
+	cols, err := b.scalarColumns(fields)
+	if err != nil {
+		return err
+	}
+	if len(cols) == 0 {
+		return nil
+	}
+	// Deterministic column order following the configured field order.
+	fieldOrder := make([]string, 0, len(cols))
+	selCols := make([]string, 0, len(cols))
+	for _, f := range fields {
+		if col, ok := cols[f]; ok {
+			fieldOrder = append(fieldOrder, f)
+			selCols = append(selCols, `"`+col+`"`)
+		}
+	}
+	q := `SELECT key, ` + strings.Join(selCols, ", ") + ` FROM issues`
+	var args []any
+	switch {
+	case len(keys) > 0:
+		args, _ = keyFilter(keys, &q)
+	case len(projects) > 0:
+		ph := make([]string, len(projects))
+		for i, p := range projects {
+			ph[i] = "?"
+			args = append(args, p)
+		}
+		q += " WHERE project IN (" + strings.Join(ph, ", ") + ")"
+	}
+	rows, err := b.store.db.Query(q, args...)
+	if err != nil {
+		return fmt.Errorf("load scalar current values: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var key string
+		vals := make([]sql.NullString, len(fieldOrder))
+		dest := make([]any, 0, len(fieldOrder)+1)
+		dest = append(dest, &key)
+		for i := range vals {
+			dest = append(dest, &vals[i])
+		}
+		if err := rows.Scan(dest...); err != nil {
+			return err
+		}
+		i, ok := index[key]
+		if !ok {
+			continue
+		}
+		for j, f := range fieldOrder {
+			if sh := sources[i].scalar[f]; sh != nil {
+				sh.CurrentKnown = true
+				sh.CurrentValue = vals[j].String
+			}
+		}
+	}
+	return rows.Err()
+}
+
+// scalarColumns resolves each scalar tracked field to the issues column holding its current
+// value, limited to fields whose column actually exists. Resolution is via field_map
+// (matching the changelog field name against name or jira_name), falling back to a
+// same-named column.
+func (b *Builder) scalarColumns(fields []string) (map[string]string, error) {
+	existing := map[string]bool{}
+	crows, err := b.store.db.Query(`PRAGMA table_info(issues)`)
+	if err != nil {
+		return nil, fmt.Errorf("inspect issues columns: %w", err)
+	}
+	for crows.Next() {
+		var (
+			cid, notnull, pk int
+			name             string
+			ctype, dflt      sql.NullString
+		)
+		if err := crows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			crows.Close()
+			return nil, err
+		}
+		existing[name] = true
+	}
+	crows.Close()
+	if err := crows.Err(); err != nil {
+		return nil, err
+	}
+
+	lookup := map[string]string{}
+	frows, err := b.store.db.Query(`SELECT name, jira_name FROM field_map WHERE is_column = 1`)
+	if err != nil {
+		return nil, fmt.Errorf("load field map: %w", err)
+	}
+	for frows.Next() {
+		var name string
+		var jiraName sql.NullString
+		if err := frows.Scan(&name, &jiraName); err != nil {
+			frows.Close()
+			return nil, err
+		}
+		lookup[strings.ToLower(name)] = name
+		if jn := strings.TrimSpace(jiraName.String); jn != "" {
+			lookup[strings.ToLower(jn)] = name
+		}
+	}
+	frows.Close()
+	if err := frows.Err(); err != nil {
+		return nil, err
+	}
+
+	out := map[string]string{}
+	for _, f := range fields {
+		col, ok := lookup[strings.ToLower(strings.TrimSpace(f))]
+		if !ok && existing[f] {
+			col, ok = f, true
+		}
+		if ok && existing[col] {
+			out[f] = col
+		}
+	}
+	return out, nil
 }
 
 // keyFilter appends/returns an "IN (?, ...)" clause for issue keys. When q is non-nil the
