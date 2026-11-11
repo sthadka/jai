@@ -209,7 +209,7 @@ func TestBuildPaneLinesRendersSectionsAndDiagnostics(t *testing.T) {
 		"config: metric ratio disabled: undefined class",
 		"▸ Throughput",
 		"▸ Cycle time",
-		"total=8",       // throughput series sum
+		"total=8", // throughput series sum
 		"unavailable: boom",
 	} {
 		if !strings.Contains(got, want) {
