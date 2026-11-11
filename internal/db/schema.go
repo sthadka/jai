@@ -147,3 +147,87 @@ func createSchema(tx *sql.Tx) error {
 	}
 	return nil
 }
+
+// createMetricsSchema creates the flow-metrics fact store: staged generations with a
+// one-row active-generation pointer, status interval facts, and the one-row-per-issue
+// flow rollup. Readers always filter on the active generation so an interrupted or
+// partial build is never visible; obsolete generations are plain-DELETEd after the
+// atomic pointer swap. Open intervals store exited_at = NULL and are aged against an
+// explicit query as_of, never a build-frozen now.
+func createMetricsSchema(tx *sql.Tx) error {
+	stmts := []string{
+		// Generation metadata. built_at and source_watermark are recorded separately
+		// from any query as_of: built_at is the build watermark, source_watermark is the
+		// latest source change the build observed (used to serialize/catch up incremental
+		// writers). fingerprint is the normalized Policy fingerprint; a change forces a
+		// full restatement.
+		`CREATE TABLE IF NOT EXISTS metrics_generation (
+			generation       INTEGER PRIMARY KEY AUTOINCREMENT,
+			fingerprint      TEXT NOT NULL,
+			scope            TEXT,
+			built_at         DATETIME NOT NULL,
+			source_watermark DATETIME,
+			issue_count      INTEGER NOT NULL DEFAULT 0
+		)`,
+
+		// One-row pointer to the active generation. Swapped in a single transaction once
+		// all facts and rollups for the new generation are written.
+		`CREATE TABLE IF NOT EXISTS metrics_active_generation (
+			id         INTEGER PRIMARY KEY CHECK (id = 1),
+			generation INTEGER REFERENCES metrics_generation(generation)
+		)`,
+		`INSERT OR IGNORE INTO metrics_active_generation (id, generation) VALUES (1, NULL)`,
+
+		// Status-value-over-time intervals (Phase 1: field = 'status' only). value_id is
+		// the stable Jira status id, value the display name; stage/provenance come from the
+		// versioned config mapping. seq orders intervals deterministically within an issue.
+		`CREATE TABLE IF NOT EXISTS fact_field_interval (
+			generation  INTEGER NOT NULL,
+			issue_key   TEXT NOT NULL,
+			project     TEXT NOT NULL,
+			field       TEXT NOT NULL,
+			seq         INTEGER NOT NULL,
+			value_id    TEXT,
+			value       TEXT,
+			stage       TEXT,
+			provenance  TEXT,
+			entered_at  DATETIME NOT NULL,
+			exited_at   DATETIME,
+			is_open     INTEGER NOT NULL DEFAULT 0,
+			PRIMARY KEY (generation, issue_key, field, seq)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_ffi_gen_issue       ON fact_field_interval(generation, issue_key)`,
+		`CREATE INDEX IF NOT EXISTS idx_ffi_gen_field_stage ON fact_field_interval(generation, field, stage)`,
+
+		// One row per issue: the Phase-1 snapshot flow rollup. Carries the current
+		// completion only (resolved/resolution); repeated completions of reopened issues
+		// are the Phase-2 event model's job. lead/cycle seconds are NULL when inputs are
+		// missing or timestamps are reversed.
+		`CREATE TABLE IF NOT EXISTS fact_issue_flow (
+			generation      INTEGER NOT NULL,
+			issue_key       TEXT NOT NULL,
+			project         TEXT NOT NULL,
+			type            TEXT,
+			created         DATETIME,
+			first_active_at DATETIME,
+			resolved        DATETIME,
+			resolution      TEXT,
+			lead_seconds    INTEGER,
+			cycle_seconds   INTEGER,
+			reopen_count    INTEGER NOT NULL DEFAULT 0,
+			current_stage   TEXT,
+			has_active      INTEGER NOT NULL DEFAULT 0,
+			has_unknown     INTEGER NOT NULL DEFAULT 0,
+			PRIMARY KEY (generation, issue_key)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_fif_gen_project  ON fact_issue_flow(generation, project)`,
+		`CREATE INDEX IF NOT EXISTS idx_fif_gen_resolved ON fact_issue_flow(generation, resolved)`,
+	}
+
+	for _, stmt := range stmts {
+		if _, err := tx.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	return nil
+}
