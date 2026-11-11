@@ -195,6 +195,31 @@ jai query "SELECT substr(changed_at, 1, 7) as month, COUNT(*) as completed
 
 ---
 
+## Flow metrics
+
+jai computes a portable, tenant-neutral flow-metrics suite entirely from the
+local database (issues + replayed changelog). One definition per metric is shared
+across the CLI, the MCP `jai_metrics` tool, the TUI pane (key `m`) and an offline
+dashboard, so every surface returns identical values.
+
+```sh
+jai metrics                       # list available metrics
+jai metrics cycle_time --format csv
+jai metrics throughput --period week --from 2024-01-01 --to 2024-07-01
+jai metrics coverage              # data-coverage diagnostics
+jai metrics rebuild               # full fact-store restatement
+jai metrics dashboard             # self-contained offline HTML dashboard
+```
+
+The taxonomy (status→stage map, WIP set, delivery resolutions, type classes,
+ratio, tracked fields, blocker links, SLA) comes from the `metrics:` block in
+your config (see `config.example.yaml`); structural config errors fail closed
+per metric. See the [Flow metrics guide](docs/user-guide.md#flow-metrics) for
+configuration, the metric catalog, the generation/rebuild model and the known
+limitations.
+
+---
+
 ## Keeping rank (and other silent fields) fresh
 
 Incremental sync is gated on each issue's `updated` timestamp, but Jira does **not** bump `updated` when an issue is re-ranked (drag-reorder / LexoRank). So a rank-only change is invisible to incremental sync and the local `rank` column silently drifts.

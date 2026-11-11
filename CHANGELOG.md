@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased]
+
+
+### Features
+
+* **metrics:** add a portable flow-metrics suite — `metrics:` config block (status→stage map, WIP/done resolutions, type classes, ratio, tracked fields, blocker links, SLA) with fail-closed per-metric validation, status + scalar interval replay, set-valued membership, staged generations with atomic activation and cross-process locking, and ~24 metric providers behind one shared service.
+* **metrics:** add `jai metrics` CLI (`list`, `<name>`, `coverage`, `rebuild`, `dashboard`), generated `jai view`/`jai snippet` fragments, MCP `jai_metrics` tool, a read-only TUI metrics pane (key `m`), and a self-contained offline HTML dashboard (`jai metrics dashboard`).
+
 ## [5.1.0](https://github.com/sthadka/jai/compare/v5.0.0...v5.1.0) (2026-10-09)
 
 
