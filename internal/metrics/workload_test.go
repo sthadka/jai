@@ -151,7 +151,7 @@ func TestTimeOnOwner_AdvancesWithAsOf(t *testing.T) {
 	if err != nil {
 		t.Fatalf("time_on_owner late: %v", err)
 	}
-	if !(late.Counts["Alice"] > early.Counts["Alice"]) {
+	if late.Counts["Alice"] <= early.Counts["Alice"] {
 		t.Errorf("time-on-owner must advance with as_of: early=%d late=%d", early.Counts["Alice"], late.Counts["Alice"])
 	}
 	if early.Counts["Alice"] != 10 { // day1 -> day11 = 10 days
