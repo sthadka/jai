@@ -341,24 +341,19 @@ func (b *Builder) loadSources(projects, keys []string) ([]issueSource, *time.Tim
 			hist: IssueHistory{
 				Key:                   key,
 				Project:               project,
-				HistoryComplete:       synced.Valid && strings.TrimSpace(synced.String) != "",
+				HistoryComplete:       nullTime(synced) != nil,
 				CurrentStatus:         status.String,
 				CurrentStatusCategory: category.String,
 			},
 			resolution: resltn.String,
 			itype:      itype.String,
 		}
-		if created.Valid && strings.TrimSpace(created.String) != "" {
-			src.hist.CreatedAt = parseDBTime(created.String)
+		if t := nullTime(created); t != nil {
+			src.hist.CreatedAt = *t
 		}
-		if resolved.Valid && strings.TrimSpace(resolved.String) != "" {
-			t := parseDBTime(resolved.String)
-			src.resolved = &t
-		}
-		if updated.Valid && strings.TrimSpace(updated.String) != "" {
-			if t := parseDBTime(updated.String); t.After(watermark) {
-				watermark = t
-			}
+		src.resolved = nullTime(resolved)
+		if t := nullTime(updated); t != nil && t.After(watermark) {
+			watermark = *t
 		}
 		index[key] = len(sources)
 		sources = append(sources, src)
