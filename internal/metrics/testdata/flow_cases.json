@@ -1,0 +1,882 @@
+{
+  "_comment": "Phase-0 flow-metrics fixture cohorts (jai-lgs / M00). Deterministic inputs + expected status-interval replay (M03) and reconciliation (M04) outcomes. Taxonomy is fixture-local; no tenant literal is assumed in code. Timestamps RFC3339 UTC.",
+  "config": {
+    "status_stage_ids": {
+      "10001": "done"
+    },
+    "status_stages": {
+      "todo": [
+        "New",
+        "Backlog",
+        "To Do",
+        "Refinement",
+        "Planning"
+      ],
+      "active": [
+        "In Progress",
+        "Review",
+        "Dev Complete",
+        "Testing",
+        "Approved"
+      ],
+      "waiting": [
+        "Waiting",
+        "Hold"
+      ],
+      "done": [
+        "Closed",
+        "Release Pending"
+      ]
+    },
+    "wip_stages": [
+      "active"
+    ],
+    "done_resolutions": [
+      "Done",
+      "Done-Errata"
+    ],
+    "type_classes": {
+      "bug": [
+        "Bug"
+      ],
+      "feature": [
+        "Story",
+        "Feature",
+        "Feature Request"
+      ],
+      "task": [
+        "Task",
+        "Sub-task"
+      ],
+      "security": [
+        "Vulnerability",
+        "Weakness"
+      ]
+    },
+    "ratio": {
+      "numerator": "bug",
+      "denominator": "feature",
+      "cohort": "completed"
+    }
+  },
+  "as_of": "2024-06-01T00:00:00Z",
+  "cohorts": {
+    "total_issues": 12,
+    "genuine_done": 6,
+    "genuine_done_with_active_interval": 3,
+    "genuine_done_unknown_cycle": 3
+  },
+  "reconcile_summary": {
+    "match": 10,
+    "mismatch": 1,
+    "unknown": 1,
+    "trusted": false,
+    "by_project": {
+      "ALPHA": {
+        "match": 6,
+        "mismatch": 1,
+        "unknown": 0
+      },
+      "BETA": {
+        "match": 3,
+        "mismatch": 0,
+        "unknown": 0
+      },
+      "GAMMA": {
+        "match": 1,
+        "mismatch": 0,
+        "unknown": 1
+      }
+    }
+  },
+  "cases": [
+    {
+      "name": "reopened",
+      "project": "ALPHA",
+      "type": "Bug",
+      "created_at": "2024-01-01T00:00:00Z",
+      "history_complete": true,
+      "events": [
+        {
+          "id": "c1",
+          "changed_at": "2024-01-02T00:00:00Z",
+          "from_value": "1",
+          "from_string": "Backlog",
+          "to_value": "2",
+          "to_string": "In Progress"
+        },
+        {
+          "id": "c2",
+          "changed_at": "2024-01-05T00:00:00Z",
+          "from_value": "2",
+          "from_string": "In Progress",
+          "to_value": "9",
+          "to_string": "Closed"
+        },
+        {
+          "id": "c3",
+          "changed_at": "2024-01-10T00:00:00Z",
+          "from_value": "9",
+          "from_string": "Closed",
+          "to_value": "2",
+          "to_string": "In Progress"
+        },
+        {
+          "id": "c4",
+          "changed_at": "2024-01-15T00:00:00Z",
+          "from_value": "2",
+          "from_string": "In Progress",
+          "to_value": "9",
+          "to_string": "Closed"
+        }
+      ],
+      "current": {
+        "status_id": "9",
+        "status": "Closed",
+        "status_category": "Done",
+        "resolution": "Done",
+        "resolved": "2024-01-15T00:00:00Z"
+      },
+      "expected": {
+        "intervals": [
+          {
+            "value": "Backlog",
+            "value_id": "1",
+            "stage": "todo",
+            "provenance": "name",
+            "entered_at": "2024-01-01T00:00:00Z",
+            "exited_at": "2024-01-02T00:00:00Z",
+            "open": false
+          },
+          {
+            "value": "In Progress",
+            "value_id": "2",
+            "stage": "active",
+            "provenance": "name",
+            "entered_at": "2024-01-02T00:00:00Z",
+            "exited_at": "2024-01-05T00:00:00Z",
+            "open": false
+          },
+          {
+            "value": "Closed",
+            "value_id": "9",
+            "stage": "done",
+            "provenance": "name",
+            "entered_at": "2024-01-05T00:00:00Z",
+            "exited_at": "2024-01-10T00:00:00Z",
+            "open": false
+          },
+          {
+            "value": "In Progress",
+            "value_id": "2",
+            "stage": "active",
+            "provenance": "name",
+            "entered_at": "2024-01-10T00:00:00Z",
+            "exited_at": "2024-01-15T00:00:00Z",
+            "open": false
+          },
+          {
+            "value": "Closed",
+            "value_id": "9",
+            "stage": "done",
+            "provenance": "name",
+            "entered_at": "2024-01-15T00:00:00Z",
+            "exited_at": null,
+            "open": true
+          }
+        ],
+        "current_stage": "done",
+        "known_count": 5,
+        "unknown_count": 0,
+        "wip": false,
+        "never_changed": false,
+        "ambiguous": false,
+        "seeded": true,
+        "has_active_interval": true,
+        "reconcile": {
+          "outcome": "match",
+          "reason": ""
+        }
+      }
+    },
+    {
+      "name": "initially-active",
+      "project": "ALPHA",
+      "type": "Story",
+      "created_at": "2024-02-01T00:00:00Z",
+      "history_complete": true,
+      "events": [
+        {
+          "id": "c1",
+          "changed_at": "2024-02-03T00:00:00Z",
+          "from_value": "2",
+          "from_string": "In Progress",
+          "to_value": "3",
+          "to_string": "Review"
+        }
+      ],
+      "current": {
+        "status_id": "3",
+        "status": "Review",
+        "status_category": "In Progress",
+        "resolution": "",
+        "resolved": ""
+      },
+      "expected": {
+        "intervals": [
+          {
+            "value": "In Progress",
+            "value_id": "2",
+            "stage": "active",
+            "provenance": "name",
+            "entered_at": "2024-02-01T00:00:00Z",
+            "exited_at": "2024-02-03T00:00:00Z",
+            "open": false
+          },
+          {
+            "value": "Review",
+            "value_id": "3",
+            "stage": "active",
+            "provenance": "name",
+            "entered_at": "2024-02-03T00:00:00Z",
+            "exited_at": null,
+            "open": true
+          }
+        ],
+        "current_stage": "active",
+        "known_count": 2,
+        "unknown_count": 0,
+        "wip": true,
+        "never_changed": false,
+        "ambiguous": false,
+        "seeded": true,
+        "has_active_interval": true,
+        "reconcile": {
+          "outcome": "match",
+          "reason": ""
+        }
+      }
+    },
+    {
+      "name": "never-changed",
+      "project": "ALPHA",
+      "type": "Task",
+      "created_at": "2024-03-01T00:00:00Z",
+      "history_complete": true,
+      "events": [],
+      "current": {
+        "status_id": "1",
+        "status": "Backlog",
+        "status_category": "To Do",
+        "resolution": "",
+        "resolved": ""
+      },
+      "expected": {
+        "intervals": [
+          {
+            "value": "Backlog",
+            "value_id": "1",
+            "stage": "todo",
+            "provenance": "name",
+            "entered_at": "2024-03-01T00:00:00Z",
+            "exited_at": null,
+            "open": true
+          }
+        ],
+        "current_stage": "todo",
+        "known_count": 1,
+        "unknown_count": 0,
+        "wip": false,
+        "never_changed": true,
+        "ambiguous": false,
+        "seeded": false,
+        "has_active_interval": false,
+        "reconcile": {
+          "outcome": "match",
+          "reason": ""
+        }
+      }
+    },
+    {
+      "name": "equal-timestamp",
+      "project": "ALPHA",
+      "type": "Bug",
+      "created_at": "2024-01-01T00:00:00Z",
+      "history_complete": true,
+      "events": [
+        {
+          "id": "c1",
+          "changed_at": "2024-01-04T00:00:00Z",
+          "from_value": "1",
+          "from_string": "Backlog",
+          "to_value": "2",
+          "to_string": "In Progress"
+        },
+        {
+          "id": "c2",
+          "changed_at": "2024-01-04T00:00:00Z",
+          "from_value": "2",
+          "from_string": "In Progress",
+          "to_value": "3",
+          "to_string": "Review"
+        }
+      ],
+      "current": {
+        "status_id": "3",
+        "status": "Review",
+        "status_category": "In Progress",
+        "resolution": "",
+        "resolved": ""
+      },
+      "expected": {
+        "intervals": [
+          {
+            "value": "Backlog",
+            "value_id": "1",
+            "stage": "todo",
+            "provenance": "name",
+            "entered_at": "2024-01-01T00:00:00Z",
+            "exited_at": "2024-01-04T00:00:00Z",
+            "open": false
+          },
+          {
+            "value": "In Progress",
+            "value_id": "2",
+            "stage": "active",
+            "provenance": "name",
+            "entered_at": "2024-01-04T00:00:00Z",
+            "exited_at": "2024-01-04T00:00:00Z",
+            "open": false
+          },
+          {
+            "value": "Review",
+            "value_id": "3",
+            "stage": "active",
+            "provenance": "name",
+            "entered_at": "2024-01-04T00:00:00Z",
+            "exited_at": null,
+            "open": true
+          }
+        ],
+        "current_stage": "active",
+        "known_count": 3,
+        "unknown_count": 0,
+        "wip": true,
+        "never_changed": false,
+        "ambiguous": true,
+        "seeded": true,
+        "has_active_interval": true,
+        "reconcile": {
+          "outcome": "match",
+          "reason": ""
+        }
+      }
+    },
+    {
+      "name": "no-op",
+      "project": "ALPHA",
+      "type": "Bug",
+      "created_at": "2024-01-01T00:00:00Z",
+      "history_complete": true,
+      "events": [
+        {
+          "id": "c1",
+          "changed_at": "2024-01-02T00:00:00Z",
+          "from_value": "1",
+          "from_string": "Backlog",
+          "to_value": "2",
+          "to_string": "In Progress"
+        },
+        {
+          "id": "c2",
+          "changed_at": "2024-01-03T00:00:00Z",
+          "from_value": "2",
+          "from_string": "In Progress",
+          "to_value": "2",
+          "to_string": "In Progress"
+        },
+        {
+          "id": "c3",
+          "changed_at": "2024-01-04T00:00:00Z",
+          "from_value": "2",
+          "from_string": "In Progress",
+          "to_value": "9",
+          "to_string": "Closed"
+        }
+      ],
+      "current": {
+        "status_id": "9",
+        "status": "Closed",
+        "status_category": "Done",
+        "resolution": "Done",
+        "resolved": "2024-01-04T00:00:00Z"
+      },
+      "expected": {
+        "intervals": [
+          {
+            "value": "Backlog",
+            "value_id": "1",
+            "stage": "todo",
+            "provenance": "name",
+            "entered_at": "2024-01-01T00:00:00Z",
+            "exited_at": "2024-01-02T00:00:00Z",
+            "open": false
+          },
+          {
+            "value": "In Progress",
+            "value_id": "2",
+            "stage": "active",
+            "provenance": "name",
+            "entered_at": "2024-01-02T00:00:00Z",
+            "exited_at": "2024-01-04T00:00:00Z",
+            "open": false
+          },
+          {
+            "value": "Closed",
+            "value_id": "9",
+            "stage": "done",
+            "provenance": "name",
+            "entered_at": "2024-01-04T00:00:00Z",
+            "exited_at": null,
+            "open": true
+          }
+        ],
+        "current_stage": "done",
+        "known_count": 3,
+        "unknown_count": 0,
+        "wip": false,
+        "never_changed": false,
+        "ambiguous": false,
+        "seeded": true,
+        "has_active_interval": true,
+        "reconcile": {
+          "outcome": "match",
+          "reason": ""
+        }
+      }
+    },
+    {
+      "name": "partial-history",
+      "project": "BETA",
+      "type": "Bug",
+      "created_at": "2024-01-01T00:00:00Z",
+      "history_complete": false,
+      "events": [
+        {
+          "id": "c1",
+          "changed_at": "2024-03-01T00:00:00Z",
+          "from_value": "3",
+          "from_string": "Review",
+          "to_value": "9",
+          "to_string": "Closed"
+        }
+      ],
+      "current": {
+        "status_id": "9",
+        "status": "Closed",
+        "status_category": "Done",
+        "resolution": "Done",
+        "resolved": "2024-03-01T00:00:00Z"
+      },
+      "expected": {
+        "intervals": [
+          {
+            "value": "",
+            "value_id": "",
+            "stage": "unknown",
+            "provenance": "unknown",
+            "entered_at": "2024-01-01T00:00:00Z",
+            "exited_at": "2024-03-01T00:00:00Z",
+            "open": false
+          },
+          {
+            "value": "Closed",
+            "value_id": "9",
+            "stage": "done",
+            "provenance": "name",
+            "entered_at": "2024-03-01T00:00:00Z",
+            "exited_at": null,
+            "open": true
+          }
+        ],
+        "current_stage": "done",
+        "known_count": 1,
+        "unknown_count": 1,
+        "wip": false,
+        "never_changed": false,
+        "ambiguous": false,
+        "seeded": false,
+        "has_active_interval": false,
+        "reconcile": {
+          "outcome": "match",
+          "reason": ""
+        }
+      }
+    },
+    {
+      "name": "missing-active-event",
+      "project": "BETA",
+      "type": "Bug",
+      "created_at": "2024-01-01T00:00:00Z",
+      "history_complete": true,
+      "events": [
+        {
+          "id": "c1",
+          "changed_at": "2024-01-10T00:00:00Z",
+          "from_value": "1",
+          "from_string": "Backlog",
+          "to_value": "9",
+          "to_string": "Closed"
+        }
+      ],
+      "current": {
+        "status_id": "9",
+        "status": "Closed",
+        "status_category": "Done",
+        "resolution": "Done",
+        "resolved": "2024-01-10T00:00:00Z"
+      },
+      "expected": {
+        "intervals": [
+          {
+            "value": "Backlog",
+            "value_id": "1",
+            "stage": "todo",
+            "provenance": "name",
+            "entered_at": "2024-01-01T00:00:00Z",
+            "exited_at": "2024-01-10T00:00:00Z",
+            "open": false
+          },
+          {
+            "value": "Closed",
+            "value_id": "9",
+            "stage": "done",
+            "provenance": "name",
+            "entered_at": "2024-01-10T00:00:00Z",
+            "exited_at": null,
+            "open": true
+          }
+        ],
+        "current_stage": "done",
+        "known_count": 2,
+        "unknown_count": 0,
+        "wip": false,
+        "never_changed": false,
+        "ambiguous": false,
+        "seeded": true,
+        "has_active_interval": false,
+        "reconcile": {
+          "outcome": "match",
+          "reason": ""
+        }
+      }
+    },
+    {
+      "name": "renamed-status",
+      "project": "BETA",
+      "type": "Story",
+      "created_at": "2024-01-01T00:00:00Z",
+      "history_complete": true,
+      "events": [
+        {
+          "id": "c1",
+          "changed_at": "2024-01-05T00:00:00Z",
+          "from_value": "1",
+          "from_string": "Backlog",
+          "to_value": "10001",
+          "to_string": "Shipped"
+        }
+      ],
+      "current": {
+        "status_id": "10001",
+        "status": "Shipped",
+        "status_category": "Done",
+        "resolution": "Done",
+        "resolved": "2024-01-05T00:00:00Z"
+      },
+      "expected": {
+        "intervals": [
+          {
+            "value": "Backlog",
+            "value_id": "1",
+            "stage": "todo",
+            "provenance": "name",
+            "entered_at": "2024-01-01T00:00:00Z",
+            "exited_at": "2024-01-05T00:00:00Z",
+            "open": false
+          },
+          {
+            "value": "Shipped",
+            "value_id": "10001",
+            "stage": "done",
+            "provenance": "id",
+            "entered_at": "2024-01-05T00:00:00Z",
+            "exited_at": null,
+            "open": true
+          }
+        ],
+        "current_stage": "done",
+        "known_count": 2,
+        "unknown_count": 0,
+        "wip": false,
+        "never_changed": false,
+        "ambiguous": false,
+        "seeded": true,
+        "has_active_interval": false,
+        "reconcile": {
+          "outcome": "match",
+          "reason": ""
+        }
+      }
+    },
+    {
+      "name": "unknown-status",
+      "project": "GAMMA",
+      "type": "Task",
+      "created_at": "2024-01-01T00:00:00Z",
+      "history_complete": true,
+      "events": [
+        {
+          "id": "c1",
+          "changed_at": "2024-01-05T00:00:00Z",
+          "from_value": "1",
+          "from_string": "Backlog",
+          "to_value": "",
+          "to_string": "Escalated"
+        }
+      ],
+      "current": {
+        "status_id": "",
+        "status": "Escalated",
+        "status_category": "",
+        "resolution": "",
+        "resolved": ""
+      },
+      "expected": {
+        "intervals": [
+          {
+            "value": "Backlog",
+            "value_id": "1",
+            "stage": "todo",
+            "provenance": "name",
+            "entered_at": "2024-01-01T00:00:00Z",
+            "exited_at": "2024-01-05T00:00:00Z",
+            "open": false
+          },
+          {
+            "value": "Escalated",
+            "value_id": "",
+            "stage": "unknown",
+            "provenance": "unknown",
+            "entered_at": "2024-01-05T00:00:00Z",
+            "exited_at": null,
+            "open": true
+          }
+        ],
+        "current_stage": "unknown",
+        "known_count": 1,
+        "unknown_count": 1,
+        "wip": false,
+        "never_changed": false,
+        "ambiguous": false,
+        "seeded": true,
+        "has_active_interval": false,
+        "reconcile": {
+          "outcome": "unknown",
+          "reason": "reconstructed stage unknown"
+        }
+      }
+    },
+    {
+      "name": "category-default",
+      "project": "GAMMA",
+      "type": "Story",
+      "created_at": "2024-01-01T00:00:00Z",
+      "history_complete": true,
+      "events": [
+        {
+          "id": "c1",
+          "changed_at": "2024-01-05T00:00:00Z",
+          "from_value": "1",
+          "from_string": "Backlog",
+          "to_value": "",
+          "to_string": "QA Signoff"
+        }
+      ],
+      "current": {
+        "status_id": "",
+        "status": "QA Signoff",
+        "status_category": "In Progress",
+        "resolution": "",
+        "resolved": ""
+      },
+      "expected": {
+        "intervals": [
+          {
+            "value": "Backlog",
+            "value_id": "1",
+            "stage": "todo",
+            "provenance": "name",
+            "entered_at": "2024-01-01T00:00:00Z",
+            "exited_at": "2024-01-05T00:00:00Z",
+            "open": false
+          },
+          {
+            "value": "QA Signoff",
+            "value_id": "",
+            "stage": "active",
+            "provenance": "category",
+            "entered_at": "2024-01-05T00:00:00Z",
+            "exited_at": null,
+            "open": true
+          }
+        ],
+        "current_stage": "active",
+        "known_count": 2,
+        "unknown_count": 0,
+        "wip": true,
+        "never_changed": false,
+        "ambiguous": false,
+        "seeded": true,
+        "has_active_interval": true,
+        "reconcile": {
+          "outcome": "match",
+          "reason": ""
+        }
+      }
+    },
+    {
+      "name": "mismatch",
+      "project": "ALPHA",
+      "type": "Bug",
+      "created_at": "2024-01-01T00:00:00Z",
+      "history_complete": false,
+      "events": [
+        {
+          "id": "c1",
+          "changed_at": "2024-01-05T00:00:00Z",
+          "from_value": "1",
+          "from_string": "Backlog",
+          "to_value": "2",
+          "to_string": "In Progress"
+        }
+      ],
+      "current": {
+        "status_id": "9",
+        "status": "Closed",
+        "status_category": "Done",
+        "resolution": "Done",
+        "resolved": "2024-02-01T00:00:00Z"
+      },
+      "expected": {
+        "intervals": [
+          {
+            "value": "",
+            "value_id": "",
+            "stage": "unknown",
+            "provenance": "unknown",
+            "entered_at": "2024-01-01T00:00:00Z",
+            "exited_at": "2024-01-05T00:00:00Z",
+            "open": false
+          },
+          {
+            "value": "In Progress",
+            "value_id": "2",
+            "stage": "active",
+            "provenance": "name",
+            "entered_at": "2024-01-05T00:00:00Z",
+            "exited_at": null,
+            "open": true
+          }
+        ],
+        "current_stage": "active",
+        "known_count": 1,
+        "unknown_count": 1,
+        "wip": true,
+        "never_changed": false,
+        "ambiguous": false,
+        "seeded": false,
+        "has_active_interval": true,
+        "reconcile": {
+          "outcome": "mismatch",
+          "reason": "reconstructed active != snapshot done"
+        }
+      }
+    },
+    {
+      "name": "waiting-not-wip",
+      "project": "ALPHA",
+      "type": "Task",
+      "created_at": "2024-01-01T00:00:00Z",
+      "history_complete": true,
+      "events": [
+        {
+          "id": "c1",
+          "changed_at": "2024-01-03T00:00:00Z",
+          "from_value": "1",
+          "from_string": "Backlog",
+          "to_value": "2",
+          "to_string": "In Progress"
+        },
+        {
+          "id": "c2",
+          "changed_at": "2024-01-06T00:00:00Z",
+          "from_value": "2",
+          "from_string": "In Progress",
+          "to_value": "7",
+          "to_string": "Waiting"
+        }
+      ],
+      "current": {
+        "status_id": "7",
+        "status": "Waiting",
+        "status_category": "In Progress",
+        "resolution": "",
+        "resolved": ""
+      },
+      "expected": {
+        "intervals": [
+          {
+            "value": "Backlog",
+            "value_id": "1",
+            "stage": "todo",
+            "provenance": "name",
+            "entered_at": "2024-01-01T00:00:00Z",
+            "exited_at": "2024-01-03T00:00:00Z",
+            "open": false
+          },
+          {
+            "value": "In Progress",
+            "value_id": "2",
+            "stage": "active",
+            "provenance": "name",
+            "entered_at": "2024-01-03T00:00:00Z",
+            "exited_at": "2024-01-06T00:00:00Z",
+            "open": false
+          },
+          {
+            "value": "Waiting",
+            "value_id": "7",
+            "stage": "waiting",
+            "provenance": "name",
+            "entered_at": "2024-01-06T00:00:00Z",
+            "exited_at": null,
+            "open": true
+          }
+        ],
+        "current_stage": "waiting",
+        "known_count": 3,
+        "unknown_count": 0,
+        "wip": false,
+        "never_changed": false,
+        "ambiguous": false,
+        "seeded": true,
+        "has_active_interval": true,
+        "reconcile": {
+          "outcome": "match",
+          "reason": ""
+        }
+      }
+    }
+  ]
+}
