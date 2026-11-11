@@ -238,11 +238,17 @@ func projectFilter(projects []string, col string) ([]any, string) {
 	return args, " AND " + col + " IN (" + strings.Join(ph, ", ") + ")"
 }
 
+// nullTime converts a scanned DATETIME string to a *time.Time, returning nil when absent.
+// The go-sqlite3 driver auto-parses DATETIME columns, so an empty/unset value surfaces as
+// the zero time ("0001-01-01T00:00:00Z"); that is treated as absent, not a real instant.
 func nullTime(s sql.NullString) *time.Time {
 	if !s.Valid || strings.TrimSpace(s.String) == "" {
 		return nil
 	}
 	t := parseDBTime(s.String)
+	if t.IsZero() {
+		return nil
+	}
 	return &t
 }
 
