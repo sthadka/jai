@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -255,4 +256,33 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("config validation errors:\n  %s", strings.Join(errs, "\n  "))
 	}
 	return nil
+}
+
+// MergeGeneratedSnippets adds generated (in-memory) SQL fragments into the
+// snippet set without overwriting user-defined snippets of the same name: user
+// snippets always win, and a colliding generated name is skipped and returned
+// for visibility. Generated snippets are never written back to the config file,
+// so a metrics-config change can never leave a stale, apparently-valid snippet
+// on disk. Returns the names added and the names skipped due to a collision.
+func (c *Config) MergeGeneratedSnippets(gen map[string]string) (added, collisions []string) {
+	if len(gen) == 0 {
+		return nil, nil
+	}
+	if c.Snippets == nil {
+		c.Snippets = make(map[string]string, len(gen))
+	}
+	names := make([]string, 0, len(gen))
+	for name := range gen {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if _, exists := c.Snippets[name]; exists {
+			collisions = append(collisions, name)
+			continue
+		}
+		c.Snippets[name] = gen[name]
+		added = append(added, name)
+	}
+	return added, collisions
 }
