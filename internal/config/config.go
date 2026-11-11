@@ -37,6 +37,7 @@ type Config struct {
 	Templates   map[string]string `yaml:"templates"`
 	Snippets    map[string]string `yaml:"snippets"`
 	MCP         MCPConfig         `yaml:"mcp"`
+	Metrics     *MetricsConfig    `yaml:"metrics"`
 }
 
 // HierarchyLevel defines one level in the issue hierarchy.
