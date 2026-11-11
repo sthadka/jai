@@ -54,6 +54,7 @@ var noAutoSync = map[string]bool{
 	"serve":      true, // MCP server with background sync
 	"changelog":  true,
 	"prune":      true, // sync prune sub-command: never sync before deleting
+	"metrics":    true, // reads/rebuilds local facts; never auto-sync first
 }
 
 // noDBRequired lists `db` sub-commands that only need config loaded, not an
