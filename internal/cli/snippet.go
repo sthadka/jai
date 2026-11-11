@@ -34,6 +34,14 @@ var snippetListCmd = &cobra.Command{
 			return fmt.Errorf("loading config: %w", err)
 		}
 
+		// Merge the config-generated metric fragments (in-memory; never persisted)
+		// so they are discoverable alongside user snippets.
+		genNames, _, _ := applyGeneratedMetrics(cfg)
+		generated := make(map[string]bool, len(genNames))
+		for _, n := range genNames {
+			generated[n] = true
+		}
+
 		if len(cfg.Snippets) == 0 {
 			if g.jsonOut {
 				fmt.Println(string(output.OK(map[string]interface{}{"snippets": []string{}})))
@@ -59,7 +67,11 @@ var snippetListCmd = &cobra.Command{
 		fmt.Println("Available Snippets")
 		fmt.Println(strings.Repeat("─", 40))
 		for _, name := range names {
-			fmt.Printf("  %s\n", name)
+			if generated[name] {
+				fmt.Printf("  %-24s (generated)\n", name)
+			} else {
+				fmt.Printf("  %s\n", name)
+			}
 		}
 
 		return nil
@@ -81,6 +93,9 @@ var snippetShowCmd = &cobra.Command{
 			}
 			return fmt.Errorf("loading config: %w", err)
 		}
+
+		// Include generated metric fragments (in-memory; never persisted).
+		applyGeneratedMetrics(cfg)
 
 		sql, ok := cfg.Snippets[name]
 		if !ok {
