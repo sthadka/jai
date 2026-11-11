@@ -1,10 +1,15 @@
 package cli
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"os"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/sthadka/jai/internal/metrics"
 	"github.com/sthadka/jai/internal/output"
 )
 
@@ -100,7 +105,101 @@ var changelogCmd = &cobra.Command{
 	},
 }
 
+// changelogSync flags for the standalone `jai changelog sync` command.
+var (
+	changelogSyncSource string
+	changelogSyncForce  bool
+)
+
+var changelogSyncCmd = &cobra.Command{
+	Use:   "sync",
+	Short: "Fetch changelog history for issues that need it",
+	Long: `Sync only changelog history, without re-fetching issue snapshots.
+
+Incremental by default: fetches changelog for issues whose history was never
+synced or whose "updated" timestamp is newer than the last check. --force
+re-fetches all changelog history from scratch.
+
+After the fetch, flow-metric facts are refreshed for the affected issues so
+changelog-derived facts (cycle time, WIP) advance even though a history-only
+fetch never changes the issue snapshot's "updated" timestamp. The refresh is a
+no-op when flow metrics are not configured.`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+
+		// Capture the keys that will be (re)fetched before the sync stamps them
+		// as checked, so the metric refresh advances exactly those facts. This
+		// mirrors SyncChangelogs' own candidate scoping (a single named source is
+		// limited to its projects).
+		touched, err := g.db.GetChangelogSyncCandidates(changelogSyncProjectFilter())
+		if err != nil {
+			return fmt.Errorf("finding changelog candidates: %w", err)
+		}
+
+		ch, err := g.sync.SyncChangelogs(ctx, changelogSyncSource, changelogSyncForce)
+		if err != nil {
+			return fmt.Errorf("changelog sync: %w", err)
+		}
+		displayChangelogProgress(ch)
+
+		// Advance flow-metric facts for the issues whose history changed. Metric
+		// publication is separate from the changelog fetch: a build failure is
+		// logged but never fails an otherwise-successful sync.
+		if err := refreshMetricFacts(touched); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: metric refresh after changelog sync failed: %v\n", err)
+		}
+		return nil
+	},
+}
+
+// changelogSyncProjectFilter mirrors SyncChangelogs' scoping: a single named
+// source restricts the candidate (and refresh) set to that source's projects;
+// no filter — or a source with no project keys (JQL) — covers all candidates.
+func changelogSyncProjectFilter() []string {
+	if changelogSyncSource == "" || g.cfg == nil {
+		return nil
+	}
+	for _, s := range g.cfg.SyncSources {
+		if s.Name == changelogSyncSource {
+			return s.Projects
+		}
+	}
+	return nil
+}
+
+// refreshMetricFacts advances the flow-metric fact store for the given touched or
+// deleted issue keys, holding the same cross-process advisory lock the sync
+// engine uses (invariant #6). Keys that still exist in `issues` have their facts
+// restated; keys that no longer exist have their facts removed, so a standalone
+// changelog backfill or a prune keeps facts in step without leaving visible
+// orphan facts.
+//
+// The refresh is incremental within the active generation; a policy/mapping
+// change (or the absence of any active generation) returns
+// metrics.ErrFullRebuildRequired and falls back to a full restatement
+// (invariant #7). A nil metrics config, or an empty key set, is a no-op so the
+// commands work unchanged when flow metrics are not configured.
+func refreshMetricFacts(keys []string) error {
+	if g.cfg == nil || g.cfg.Metrics == nil || len(keys) == 0 {
+		return nil
+	}
+	pol := metrics.CompilePolicy(g.cfg.Metrics)
+	store := metrics.NewStore(g.db, g.cfg.DB.Path)
+	builder := metrics.NewBuilder(store, pol)
+
+	asOf := time.Now().UTC()
+	_, err := builder.Incremental(asOf, keys)
+	if errors.Is(err, metrics.ErrFullRebuildRequired) {
+		_, err = builder.BuildAll(asOf, nil)
+	}
+	return err
+}
+
 func init() {
 	changelogCmd.Flags().StringVar(&changelogFieldFilter, "field", "", "filter by field name")
+	changelogSyncCmd.Flags().StringVar(&changelogSyncSource, "source", "", "limit to a single configured sync source")
+	changelogSyncCmd.Flags().BoolVar(&changelogSyncForce, "force", false, "re-fetch all changelog history from scratch")
+	changelogCmd.AddCommand(changelogSyncCmd)
 	rootCmd.AddCommand(changelogCmd)
 }

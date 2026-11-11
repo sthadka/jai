@@ -2,7 +2,9 @@ package cli
 
 import (
 	"fmt"
+	"os"
 	"sort"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/sthadka/jai/internal/output"
@@ -111,6 +113,14 @@ Runs as a dry run by default — pass --yes to apply.`,
 			}
 			return nil
 		}
+		// Capture the keys about to be pruned before they are deleted, so their
+		// derived flow-metric facts can be removed afterwards. Once PruneProjects
+		// runs, these keys no longer exist in `issues`, and the metric refresh
+		// purges their facts (no visible orphan facts remain).
+		prunedKeys, err := issueKeysForProjects(sortedProjects)
+		if err != nil {
+			return fmt.Errorf("listing issues to prune: %w", err)
+		}
 
 		removed, err := g.db.PruneProjects(sortedProjects)
 		if err != nil {
@@ -120,12 +130,50 @@ Runs as a dry run by default — pass --yes to apply.`,
 		if err != nil {
 			return fmt.Errorf("deleting sync metadata: %w", err)
 		}
+
+		// Remove the pruned issues' flow-metric facts (and their rollup
+		// contributions) through the shared writer lock. No-op when metrics are
+		// unconfigured; a build failure is logged, never failing the prune.
+		if err := refreshMetricFacts(prunedKeys); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: metric refresh after prune failed: %v\n", err)
+		}
 		if !g.jsonOut {
 			fmt.Printf("✓ Pruned %d issues across %d project(s), %d sync metadata row(s).\n",
 				removed, len(sortedProjects), deletedMeta)
 		}
 		return nil
 	},
+}
+
+// issueKeysForProjects returns the keys of all issues in the given Jira project
+// keys. Called before PruneProjects so the pruned issues' metric facts can be
+// removed once the issues themselves are gone.
+func issueKeysForProjects(projects []string) ([]string, error) {
+	if len(projects) == 0 {
+		return nil, nil
+	}
+	placeholders := make([]string, len(projects))
+	args := make([]interface{}, len(projects))
+	for i, p := range projects {
+		placeholders[i] = "?"
+		args[i] = p
+	}
+	rows, err := g.db.Query(
+		"SELECT key FROM issues WHERE project IN ("+strings.Join(placeholders, ",")+")", args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var keys []string
+	for rows.Next() {
+		var k string
+		if err := rows.Scan(&k); err != nil {
+			return nil, err
+		}
+		keys = append(keys, k)
+	}
+	return keys, rows.Err()
 }
 
 func init() {
