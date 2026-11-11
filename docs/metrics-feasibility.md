@@ -633,6 +633,41 @@ computed metrics.
 4. **Close data gaps** — enable `sync.sprints`/project-keyed sources (real sprint
    completion/velocity) and `sync.dev_info` (PR cycle time) once permissions are confirmed.
 
+### Phase-1 generalization gate (measured — bead jai-f5b / M12)
+
+Phase 2 generalization was gated on an end-to-end reconciled benchmark that runs the real
+fact pipeline (not just unit assertions) and proves the Phase-1 correctness and perf
+contract on a representative, safely bounded cohort. The gate is a deterministic Go test,
+`TestGate_EndToEndReconciledBenchmark` in `internal/metrics/benchmark_test.go`, so it runs
+under `make check` on every change.
+
+- **Data shape**: 3,000 synthetic, history-complete issues across 3 projects, evenly split
+  across todo (never-changed), active (open WIP), and done (full lifecycle, genuine-done
+  resolved) — 5,700 replayed status intervals. Fixed `as_of` (2024-06-01), no `time.Now`,
+  so the result is reproducible.
+- **Pipeline exercised**: `Builder.BuildAll` (full restatement, staged generation +
+  atomic swap) → the shared `Service.Compute` for a representative set of CLI/view/service
+  results (`cycle_time` distribution, `throughput` series, `net_flow`, `aged_open`) →
+  reconstruction of each issue's current stage from its DB status history, reconciled
+  against the live `issues` snapshot via `metrics.Reconcile` (the same read path `BuildAll`
+  uses, so this is genuinely end-to-end).
+- **Reconciliation result (the correctness gate): PASS.** All 3,000 issues reconcile as
+  `match` (0 mismatch, 0 unknown) and the report is `trusted`, with unknown/excluded
+  denominators surfaced, never dropped. A companion test,
+  `TestGate_ReconcileCatchesDrift`, injects one drifted snapshot and asserts it surfaces as
+  a visible mismatch that forbids a trusted series — the gate has teeth.
+- **Representative runtime** (Apple Silicon, `make check`, CGO + fts5): `BuildAll` ≈ 41 ms;
+  the four `Service.Compute` calls ≈ 31 ms combined. Output counts match the cohort shape
+  (1,000 cycle-eligible genuine-done, throughput total 1,000, net-flow +2,000, 2,000 aged
+  open). No timeout was removed and no Cartesian join was introduced; the asserted budgets
+  (`BuildAll` ≤ 30 s, `Compute` ≤ 10 s) leave ≈ two orders of magnitude of headroom so the
+  gate flags a quadratic read path or a missing index without flaking.
+- **Verdict**: the narrow status-fact pipeline (replay, coverage, reconciliation,
+  distributions, snapshots, refresh, and the cross-process lost-update regression) is
+  proven on-demand for this cohort; no premature `fact_field_event` copy or `fact_wip_daily`
+  materialization is justified yet. **Phase 2 generalization (scalar/set replay + extended
+  metrics) is unblocked.**
+
 ## How to query
 
 ```bash
