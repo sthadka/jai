@@ -434,7 +434,249 @@ sync:
 Updates `pr_count`, `has_open_pr`, `branch_name` on issues.
 
 ---
+## Flow metrics
 
+jai ships a portable flow-metrics suite computed entirely from the local SQLite
+database (issues + replayed changelog history). There is a single definition of
+each metric behind `internal/metrics`; the CLI (`jai metrics`), the MCP tool
+(`jai_metrics`), the TUI pane (key `m`) and the offline dashboard all read it, so
+equivalent requests return identical values, denominators, time basis and
+taxonomy version — the SQL is never forked per consumer.
+
+The taxonomy is tenant-neutral: no status, type or resolution literal is baked
+into the code. Everything comes from the `metrics:` block in your config.
+
+### Configuring the `metrics:` block
+
+Add a `metrics:` block to your config YAML (a full annotated example lives in
+`config.example.yaml`):
+
+```yaml
+metrics:
+  status_stage_ids: {}            # optional: "10001": done (Jira status ID; overrides name, survives renames)
+  status_stages:                  # name fallback; names not listed -> statusCategory default -> unknown
+    todo:    [New, Backlog, To Do, Refinement, Planning]
+    active:  [In Progress, Review, Dev Complete, Testing, Approved]
+    waiting: [Waiting, Hold]
+    done:    [Closed, Release Pending]
+  wip_stages: [active]            # stages counted as WIP / cycle-time active
+  done_resolutions: [Done, Done-Errata]  # omit to run delivery metrics over ALL resolved issues (labelled)
+  type_classes:                   # types not listed -> `other`
+    bug:      [Bug]
+    feature:  [Story, Feature, "Feature Request"]
+    task:     [Task, Sub-task]
+    security: [Vulnerability, Weakness]
+  ratio:                          # zero denominator is undefined, never 0
+    numerator: bug
+    denominator: feature
+    cohort: completed             # created | completed
+  tracked_fields: [status, priority, assignee, Team, Rank]  # must appear in changelog.field
+  blocker_link_types: [is blocked by, depends on]
+  sla:                            # optional; drives security/SLA metrics
+    security:
+      severity_field: priority    # categorical field with per-value deadlines
+      deadlines_days: { Critical: 7, Major: 30, Minor: 90 }
+      clock_start: created
+      on_missing_severity: exclude  # exclude | treat_as:<label>
+```
+
+Key semantics:
+
+- **Stage precedence**: `status_stage_ids` (Jira status ID) → `status_stages`
+  (status name) → statusCategory default → the surfaced `unknown` bucket.
+  `unknown` is a real bucket, never dropped.
+- **`wip_stages`**: stages treated as work-in-progress / cycle-time active
+  (default `[active]`).
+- **`done_resolutions`**: required for *genuine-delivery* metrics. If unset,
+  delivery metrics compute over ALL resolved issues, label the result
+  "includes non-delivery resolutions", and the `--genuine` variant is disabled
+  (errors rather than guessing).
+- **`type_classes` / `ratio`**: named numerator/denominator classes (e.g.
+  bug/feature). A zero denominator is undefined (never 0); unlisted types fall
+  into `other`.
+- **`tracked_fields`**: scalar fields replayed into interval facts; each must
+  appear in `changelog.field`. Set-valued fields (`Sprint`, `labels`,
+  `components`) are modelled as membership intervals, not scalar replay.
+
+**Fail-closed validation.** Structural config errors (malformed YAML, an
+undefined stage/class reference, a duplicate mapping) reject the *individual*
+affected metric at load time — not the whole document, and not as a silent
+warning. Unrelated metrics keep working; the rejected metric is surfaced as a
+warning on the CLI output and as an "unavailable" card on the dashboard.
+Data-dependent gaps (missing fields, empty cohorts) are runtime coverage
+diagnostics, not fatal errors.
+
+### The `jai metrics` command
+
+```sh
+jai metrics                       # list available metrics (alias: jai metrics list)
+jai metrics cycle_time            # run one metric
+jai metrics cycle_time --format csv
+jai metrics throughput --period week --from 2024-01-01 --to 2024-07-01
+jai metrics ratio --cohort completed
+jai metrics cycle_time --genuine  # require the delivery-only variant
+jai metrics coverage              # data-coverage diagnostics
+jai metrics rebuild               # full fact-store restatement
+jai metrics dashboard             # offline self-contained HTML dashboard
+```
+
+Run flags (on `jai metrics <name>`):
+
+| Flag | Description |
+|------|-------------|
+| `-p`, `--project` | Limit to project(s); repeat or comma-separate. |
+| `--as-of` | Compute open intervals/ages against this time (RFC3339 or `YYYY-MM-DD`; default now UTC). |
+| `--from` | Range start (inclusive) for time-bounded metrics. |
+| `--to` | Range end (exclusive) for time-bounded metrics. |
+| `--period` | Throughput/net-flow bucket: `month` (default) or `week`. |
+| `--cohort` | Cohort selector (metric-specific: `created` \| `completed` \| `all`). |
+| `--basis` | Counting basis (currently `snapshot` only; other values are rejected). |
+| `--genuine` | Require the genuine-done variant (errors if `done_resolutions` is unset). |
+| `--timeout` | Bound the computation (default `1m`; `0` disables). |
+
+`--project` and `--as-of` are shared (persistent) across the `coverage`,
+`rebuild` and `dashboard` subcommands too. All standard output formats apply
+(`--format table|json|csv|tsv|markdown`, `--json`). On the row formats the
+caveats (cohort, genuine-done state, build/source freshness, exclusions,
+warnings) print to stderr so the CSV/TSV data stream stays clean; the `json`
+format carries the full envelope.
+
+### Metric catalog
+
+`jai metrics list` prints the registered ids. Current catalog:
+
+| Metric | What it reports |
+|--------|-----------------|
+| `cycle_time` | Active-stage duration distribution (percentiles) for completed work. |
+| `lead_time` | Create-to-done duration distribution for completed work. |
+| `throughput` | Count of items completed per bucket (`--period`). |
+| `net_flow` | Arrivals minus departures per bucket (issues-only). |
+| `aged_open` | Age distribution of still-open issues vs `--as-of`. |
+| `resolution_mix` | Breakdown of resolved issues by resolution value. |
+| `ratio` | Configured numerator/denominator type-class ratio. |
+| `workload_by_assignee` | Current open workload grouped by assignee. |
+| `workload_throughput` | Completed-item throughput by assignee. |
+| `workload_throughput_current` | Throughput attributed to the current assignee. |
+| `workload_time_on_owner` | Time intervals spent on each owner. |
+| `reassignment_thrash` | Assignee churn / reassignment rate signal. |
+| `reassignment_count` | Count of assignee changes. |
+| `blocker_ageing` | Age proxy for blocked issues (via `blocker_link_types`). |
+| `security_sla` | SLA compliance for security/severity deadlines (`sla:` config). |
+| `wip` | Current work-in-progress item count. |
+| `stage_dwell` | Time spent per flow stage. |
+| `cfd` | Cumulative flow diagram data across all stages. |
+| `reopen` | Reopen counts/rate from status replay. |
+| `flow_occupancy` | Share of time spent occupying each stage. |
+| `sprint_resolution` | Eventual resolution outcome of sprint-scoped work. |
+| `priority_changes` | Count/rate of priority field changes. |
+| `rank_volatility` | Rank-change churn signal. |
+| `triage_latency` | Time from creation to first triage transition. |
+
+Every metric returns a truthful known/unknown result: empty cohorts, absent
+tracked fields and unconfigured dependencies surface as warnings or
+"unavailable", never as fabricated values.
+
+### Generated views and snippets
+
+The status→stage taxonomy, the WIP set and the genuine-delivery filter are also
+compiled from the `metrics:` config into shared SQL fragments (`jai snippet`)
+and simple views (`jai view`), so ad-hoc queries reuse exactly one definition of
+the taxonomy. They are regenerated from the current policy on every command (a
+config change never leaves a stale fragment behind):
+
+```sh
+jai snippet list          # includes: status_stage_map, active_stages, genuine_done  (generated)
+jai view metrics-stage-breakdown   # Flow stage breakdown
+jai view metrics-wip               # Work-in-progress item count
+jai view metrics-delivered         # Genuinely delivered item count
+jai view metrics-resolution-mix    # Resolution mix of resolved issues
+```
+
+```sql
+-- reuse the generated fragment in your own query
+jai query "SELECT {{status_stage_map}} AS stage, COUNT(*) FROM issues GROUP BY stage"
+```
+
+### Generations, rebuild and the locking model
+
+Interval metrics are served from a materialized **fact store** (replayed
+changelog intervals + rollups). Each build tags its rows with a `generation`
+id and a one-row active-generation pointer is swapped in a single transaction
+only after all facts and rollups for that generation are complete. Readers
+always filter on the active generation, so a query never sees a half-built
+generation; obsolete generations are deleted after the swap. WAL mode keeps
+reads live during a build.
+
+- `jai metrics rebuild` stages a fresh full generation (`BuildAll`) and
+  atomically publishes it. Run it after changing the `metrics:` config — a map
+  change restates history and requires a full rebuild.
+- Normal `jai sync` refreshes facts incrementally for changed issues within the
+  active generation (changelog/prune/sync paths are wired to keep facts fresh).
+- Because jai runs as multiple processes (CLI, `serve`, TUI) over one SQLite
+  file, the rebuilder and every incremental writer take a cross-process OS
+  advisory lock (`flock` on a sidecar file in the DB dir). A rebuild launched
+  from a second process can never publish stale facts over a newer incremental
+  update.
+
+If you query a delivery metric before any generation exists, you get a result
+with a warning ("no active fact generation; build the fact store before
+querying delivery metrics") rather than an error.
+
+### MCP `jai_metrics`
+
+The `metrics` toolset exposes a read-only `jai_metrics` MCP tool backed by the
+same shared service as the CLI. Omit `metric` to list; supply it to run one and
+get the full envelope (values plus basis, cohort, taxonomy version, policies,
+exclusions, warnings, build generation and per-project source freshness). It
+accepts `metric`, `project`, `as_of`, `from`, `to`, `period`, `cohort`,
+`basis`, `genuine` and `timeout_seconds` (default 25s, capped at 30s). Enable
+it with `jai serve --toolsets metrics` (or include it in `JAI_MCP_TOOLSETS`).
+
+### TUI metrics pane
+
+In `jai tui`, press `m` to open the read-only metrics pane. It renders the same
+computed metrics through the shared service; scroll with the usual vim-style
+keys. It never writes the fact store.
+
+### Offline dashboard
+
+```sh
+jai metrics dashboard                               # writes ./dashboard.html
+jai metrics dashboard --output flow.html --project ENG
+jai metrics dashboard --from 2024-01-01 --to 2024-07-01 --as-of 2024-07-01
+jai metrics dashboard --title "Platform Flow"
+```
+
+`jai metrics dashboard` exports ONE self-contained HTML file: the computed
+metric data is embedded as JSON and the visualization layer is an inlined,
+pure-SVG renderer. There are no CDN references, no `<script src>` and no network
+or file-fetch requests at runtime — open it from disk with networking disabled
+and every chart renders. Metrics that are unconfigured or have no data render as
+explicit "unavailable" cards rather than fabricated charts.
+
+Dashboard flags: `-o`/`--output` (default `dashboard.html`), `--title`
+(default `Flow Metrics`), `--from`/`--to` (trend window; default `as_of − 6
+months` .. `as_of`), plus the inherited `--project`/`--as-of`.
+
+**Privacy.** The artifact embeds the selected Jira issue data. Share it only
+with viewers authorized to see those issues.
+
+### Known limitations / future work
+
+- **Single-run sync changelog staleness** — within a single `jai sync` run the
+  changelog-derived facts can lag the just-synced changelog; re-running sync or
+  `jai metrics rebuild` refreshes them (tracked as `jai-xoi.1`).
+- **Numeric `severity_bands` SLA config** — the SLA/security metric currently
+  keys deadlines off categorical severity values; numeric severity-band
+  compliance config is not yet supported (tracked as `jai-xoi.2`).
+- **MCP `jai_sync` changelog refresh** — triggering sync through the MCP
+  `jai_sync` tool does not yet refresh changelog-derived metric facts in the
+  same call (tracked as `jai-xoi.3`).
+- **Deferred signals** — true optional-completion events, true sprint/velocity
+  and PR-based metrics remain separately labelled and deferred until their own
+  prerequisites land; they are not reported as supported.
+
+---
 ## Agent mode
 
 Every command supports `--json` for structured output and `--fields` to select columns:
