@@ -44,6 +44,13 @@ type MetricsConfig struct {
 	// from the changelog are a run-time coverage diagnostic, not a structural error.
 	TrackedFields []string `yaml:"tracked_fields"`
 
+	// MembershipFields lists the set-valued changelog fields (Sprint, labels,
+	// components) persisted as event-time membership intervals in
+	// fact_issue_membership. Each must be a set-valued field (coercing a scalar
+	// here rejects the membership facts, fail closed). Empty applies the default
+	// [components, labels, Sprint].
+	MembershipFields []string `yaml:"membership_fields"`
+
 	// BlockerLinkTypes lists issue-link types treated as blockers (direction
 	// normalized at build time).
 	BlockerLinkTypes []string `yaml:"blocker_link_types"`

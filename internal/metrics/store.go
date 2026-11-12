@@ -76,6 +76,23 @@ type IntervalRow struct {
 	Open       bool
 }
 
+// MembershipIntervalRow is a persisted event-time membership interval for a set-valued
+// dimension (component, label, sprint). Open intervals have ExitedAt == nil and Open ==
+// true. One row per (issue, member, interval): a GROUP BY member_name over a temporal join
+// never double-counts a single issue's measure. MemberID is empty for members with no
+// stable id (e.g. labels, or a components snapshot that carries names only).
+type MembershipIntervalRow struct {
+	IssueKey   string
+	Project    string
+	Dimension  string
+	Seq        int
+	MemberID   string
+	MemberName string
+	EnteredAt  time.Time
+	ExitedAt   *time.Time
+	Open       bool
+}
+
 // LockPath returns the advisory-lock sidecar path this store serializes writers on.
 func (s *Store) LockPath() string { return LockPath(s.dbPath) }
 
@@ -215,6 +232,48 @@ func (s *Store) Intervals(projects []string, field string) ([]IntervalRow, error
 		r.Value = value.String
 		r.Stage = stage.String
 		r.Provenance = provenance.String
+		r.EnteredAt = parseDBTime(enteredAt)
+		r.ExitedAt = nullTime(exitedAt)
+		r.Open = isOpen
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// MembershipIntervals returns the active generation's membership interval facts for a
+// dimension (component, label, sprint), optionally scoped to projects. Ordered by
+// (issue_key, seq). Mirrors Intervals; the half-open temporal join
+// `entered_at <= t AND (exited_at IS NULL OR exited_at > t)` yields event-time members.
+func (s *Store) MembershipIntervals(projects []string, dimension string) ([]MembershipIntervalRow, error) {
+	q := `SELECT issue_key, project, dimension, seq, member_id, member_name,
+	             entered_at, exited_at, is_open
+	        FROM fact_issue_membership
+	       WHERE generation = ` + activeGenSub + ` AND dimension = ?`
+	args := []any{dimension}
+	more, where := projectFilter(projects, "project")
+	q += where + " ORDER BY issue_key, seq"
+	args = append(args, more...)
+	rows, err := s.db.Query(q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("membership interval rows query: %w", err)
+	}
+	defer rows.Close()
+
+	var out []MembershipIntervalRow
+	for rows.Next() {
+		var (
+			r                    MembershipIntervalRow
+			memberID, memberName sql.NullString
+			enteredAt            string
+			exitedAt             sql.NullString
+			isOpen               bool
+		)
+		if err := rows.Scan(&r.IssueKey, &r.Project, &r.Dimension, &r.Seq, &memberID, &memberName,
+			&enteredAt, &exitedAt, &isOpen); err != nil {
+			return nil, err
+		}
+		r.MemberID = memberID.String
+		r.MemberName = memberName.String
 		r.EnteredAt = parseDBTime(enteredAt)
 		r.ExitedAt = nullTime(exitedAt)
 		r.Open = isOpen

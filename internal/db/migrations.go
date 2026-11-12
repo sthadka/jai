@@ -369,6 +369,11 @@ var migrations = []migration{
 			return err
 		},
 	},
+	{
+		version:     16,
+		description: "add fact_issue_membership table (event-time set-valued dimension facts)",
+		up:          createMembershipSchema,
+	},
 }
 
 func addColumnIfNotExists(tx *sql.Tx, table, column, columnType string) error {
