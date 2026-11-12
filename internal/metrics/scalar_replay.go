@@ -35,6 +35,24 @@ func IsSetValuedField(field string) bool {
 	return setValuedFields[strings.ToLower(strings.TrimSpace(field))]
 }
 
+// membershipDimensions maps a set-valued Jira field name to its stable dimension token
+// ({component, label, sprint}) used in fact_issue_membership.dimension. These are Jira
+// platform field names (a fixed vocabulary), not tenant taxonomy.
+var membershipDimensions = map[string]string{
+	"sprint":      "sprint",
+	"labels":      "label",
+	"components":  "component",
+	"component":   "component",
+	"component/s": "component",
+}
+
+// MembershipDimension maps a set-valued changelog field name to its dimension token
+// ({component, label, sprint}). ok is false for a field that is not set-valued.
+func MembershipDimension(field string) (string, bool) {
+	d, ok := membershipDimensions[strings.ToLower(strings.TrimSpace(field))]
+	return d, ok
+}
+
 // ErrSetValuedField is returned by ReplayScalar when asked to replay a set-valued
 // membership field. Such fields must be modeled with ReplayMembership (membership.go), not
 // coerced into a single-valued interval series that would silently publish misleading

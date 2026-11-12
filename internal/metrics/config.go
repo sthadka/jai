@@ -43,6 +43,7 @@ const (
 	MetricTypeClasses  = "type_classes"
 	MetricRatio        = "ratio"
 	MetricSLA          = "sla"
+	MetricMembership   = "membership_fields"
 )
 
 // categoryDefaultStage maps Jira's fixed statusCategory names (platform enum, not tenant
@@ -84,6 +85,7 @@ type Policy struct {
 	ratio       *RatioPolicy
 
 	trackedFields    []string
+	membershipFields []string
 	blockerLinkTypes []string
 
 	rejections  map[string][]string
@@ -107,7 +109,8 @@ func CompilePolicy(cfg *config.MetricsConfig) *Policy {
 	}
 	if cfg == nil {
 		p.wipStages[StageActive] = true
-		p.fingerprint = fingerprint(cfg)
+		p.membershipFields = defaultMembershipFields()
+		p.fingerprint = fingerprint(cfg, p.membershipDimensions())
 		return p
 	}
 
@@ -120,12 +123,57 @@ func CompilePolicy(cfg *config.MetricsConfig) *Policy {
 
 	p.trackedFields = dedupeStrings(cfg.TrackedFields)
 	p.blockerLinkTypes = dedupeStrings(cfg.BlockerLinkTypes)
-	p.fingerprint = fingerprint(cfg)
+	p.compileMembershipFields(cfg)
+	p.fingerprint = fingerprint(cfg, p.membershipDimensions())
 	return p
 }
 
 func (p *Policy) reject(metric, reason string) {
 	p.rejections[metric] = append(p.rejections[metric], reason)
+}
+
+// defaultMembershipFields is the default set of set-valued fields persisted as event-time
+// membership intervals. These are Jira platform field names, not tenant taxonomy.
+func defaultMembershipFields() []string {
+	return []string{"components", "labels", "Sprint"}
+}
+
+// compileMembershipFields resolves the membership_fields policy: the configured set-valued
+// fields persisted as membership intervals, defaulting to [components, labels, Sprint] when
+// unset. A non-set-valued entry is a structural error — coercing a scalar into membership
+// intervals would publish misleading facts — so it fails closed, rejecting the membership
+// metric (scoped) and dropping the offending field.
+func (p *Policy) compileMembershipFields(cfg *config.MetricsConfig) {
+	fields := dedupeStrings(cfg.MembershipFields)
+	if len(fields) == 0 {
+		p.membershipFields = defaultMembershipFields()
+		return
+	}
+	out := make([]string, 0, len(fields))
+	for _, f := range fields {
+		if !IsSetValuedField(f) {
+			p.reject(MetricMembership, fmt.Sprintf("membership field %q is not a set-valued field", f))
+			continue
+		}
+		out = append(out, f)
+	}
+	p.membershipFields = out
+}
+
+// membershipDimensions returns the sorted, de-duplicated dimension tokens
+// ({component, label, sprint}) resolved from the configured membership fields. Folded into
+// the fingerprint so a membership_fields change restates history.
+func (p *Policy) membershipDimensions() []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, f := range p.membershipFields {
+		if d, ok := MembershipDimension(f); ok && !seen[d] {
+			seen[d] = true
+			out = append(out, d)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 func (p *Policy) compileStages(cfg *config.MetricsConfig) {
@@ -358,6 +406,10 @@ func (p *Policy) Ratio() (*RatioPolicy, bool) { return p.ratio, p.ratio != nil }
 // TrackedFields returns the changelog fields configured for interval replay.
 func (p *Policy) TrackedFields() []string { return append([]string(nil), p.trackedFields...) }
 
+// MembershipFields returns the set-valued fields persisted as event-time membership
+// intervals (fact_issue_membership).
+func (p *Policy) MembershipFields() []string { return append([]string(nil), p.membershipFields...) }
+
 // BlockerLinkTypes returns the configured blocker link types.
 func (p *Policy) BlockerLinkTypes() []string { return append([]string(nil), p.blockerLinkTypes...) }
 
@@ -399,8 +451,9 @@ func (p *Policy) Err() error {
 	return fmt.Errorf("%s", b.String())
 }
 
-func fingerprint(cfg *config.MetricsConfig) string {
+func fingerprint(cfg *config.MetricsConfig, membershipDims []string) string {
 	h := sha256.New()
+	writeList(h, "membership_dimensions", membershipDims)
 	if cfg == nil {
 		fmt.Fprint(h, "nil")
 		return hex.EncodeToString(h.Sum(nil))[:16]

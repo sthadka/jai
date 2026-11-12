@@ -231,3 +231,36 @@ func createMetricsSchema(tx *sql.Tx) error {
 	}
 	return nil
 }
+
+// createMembershipSchema creates fact_issue_membership: event-time intervals for the
+// set-valued dimensions (components, labels, Sprint) that fact_field_interval cannot model.
+// It mirrors fact_field_interval's generation handling exactly — rows tagged with the
+// staged generation, readers filter on the active generation, obsolete generations are
+// plain-DELETEd after the atomic pointer swap, and open intervals store exited_at = NULL
+// aged against an explicit query as_of. One row per (issue, member, interval): a
+// GROUP BY member_name over a temporal join never double-counts a single issue's measure.
+func createMembershipSchema(tx *sql.Tx) error {
+	stmts := []string{
+		`CREATE TABLE IF NOT EXISTS fact_issue_membership (
+			generation  INTEGER NOT NULL,
+			issue_key   TEXT NOT NULL,
+			project     TEXT NOT NULL,
+			dimension   TEXT NOT NULL,
+			seq         INTEGER NOT NULL,
+			member_id   TEXT,
+			member_name TEXT,
+			entered_at  DATETIME NOT NULL,
+			exited_at   DATETIME,
+			is_open     INTEGER NOT NULL DEFAULT 0,
+			PRIMARY KEY (generation, issue_key, dimension, seq)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_fim_gen_issue      ON fact_issue_membership(generation, issue_key)`,
+		`CREATE INDEX IF NOT EXISTS idx_fim_gen_dim_member ON fact_issue_membership(generation, dimension, member_name)`,
+	}
+	for _, stmt := range stmts {
+		if _, err := tx.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	return nil
+}
