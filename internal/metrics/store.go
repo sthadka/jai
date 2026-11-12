@@ -58,6 +58,11 @@ type FlowRow struct {
 	CurrentStage  string
 	HasActive     bool
 	HasUnknown    bool
+	// FlowOccupancy is the persisted active-status occupancy proxy (active ÷ lead,
+	// bounded [0,1]); nil for issues the flow_occupancy provider excludes (non-delivery
+	// or undefined lead). Estimate is the issue's story-point value; nil when absent.
+	FlowOccupancy *float64
+	Estimate      *float64
 }
 
 // IntervalRow is a persisted status dwell. Open intervals have ExitedAt == nil and
@@ -150,7 +155,8 @@ func (s *Store) generation(gen int64) (*GenerationMeta, error) {
 // (empty = all). Results are ordered by (project, issue_key) for deterministic output.
 func (s *Store) FlowRows(projects []string) ([]FlowRow, error) {
 	q := `SELECT issue_key, project, type, created, first_active_at, resolved, resolution,
-	             lead_seconds, cycle_seconds, reopen_count, current_stage, has_active, has_unknown
+	             lead_seconds, cycle_seconds, reopen_count, current_stage, has_active, has_unknown,
+	             flow_occupancy, estimate
 	        FROM fact_issue_flow
 	       WHERE generation = ` + activeGenSub
 	args, where := projectFilter(projects, "project")
@@ -171,9 +177,11 @@ func (s *Store) FlowRows(projects []string) ([]FlowRow, error) {
 			leadSec, cycleSec     sql.NullInt64
 			currentStage          sql.NullString
 			hasActive, hasUnknown bool
+			occupancy, estimate   sql.NullFloat64
 		)
 		if err := rows.Scan(&r.IssueKey, &r.Project, &itype, &created, &firstActive, &resolved,
-			&resolution, &leadSec, &cycleSec, &r.ReopenCount, &currentStage, &hasActive, &hasUnknown); err != nil {
+			&resolution, &leadSec, &cycleSec, &r.ReopenCount, &currentStage, &hasActive, &hasUnknown,
+			&occupancy, &estimate); err != nil {
 			return nil, err
 		}
 		r.Type = itype.String
@@ -191,6 +199,14 @@ func (s *Store) FlowRows(projects []string) ([]FlowRow, error) {
 		if cycleSec.Valid {
 			v := cycleSec.Int64
 			r.CycleSeconds = &v
+		}
+		if occupancy.Valid {
+			v := occupancy.Float64
+			r.FlowOccupancy = &v
+		}
+		if estimate.Valid {
+			v := estimate.Float64
+			r.Estimate = &v
 		}
 		out = append(out, r)
 	}

@@ -374,6 +374,21 @@ var migrations = []migration{
 		description: "add fact_issue_membership table (event-time set-valued dimension facts)",
 		up:          createMembershipSchema,
 	},
+	{
+		version:     17,
+		description: "add flow_occupancy + estimate columns to fact_issue_flow (persisted occupancy proxy / Effort measure)",
+		up: func(tx *sql.Tx) error {
+			// flow_occupancy: precomputed active-status occupancy proxy (active ÷ lead,
+			// bounded [0,1]) so BI/notebook users query it without a per-row windowed
+			// active-seconds aggregation. NULL for issues the provider excludes
+			// (non-delivery or undefined lead). estimate: the issue's story-point value
+			// where present (NULL when absent), enabling the Effort (Σ estimate) measure.
+			if err := addColumnIfNotExists(tx, "fact_issue_flow", "flow_occupancy", "REAL"); err != nil {
+				return err
+			}
+			return addColumnIfNotExists(tx, "fact_issue_flow", "estimate", "REAL")
+		},
+	},
 }
 
 func addColumnIfNotExists(tx *sql.Tx, table, column, columnType string) error {

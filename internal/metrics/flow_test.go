@@ -131,3 +131,85 @@ func TestFlowOccupancy_BoundsAndUndefinedLead(t *testing.T) {
 		t.Errorf("occupancy unit = %q, want ratio", r.Distribution.Unit)
 	}
 }
+
+// The persisted fact_issue_flow.flow_occupancy column reproduces the flow_occupancy
+// provider's per-issue output exactly (one definition, two consumers), and estimate is
+// carried from the issue's story points where present and NULL otherwise. This is the
+// no-windowing query path: BI/notebook users read the column directly.
+func TestFlowOccupancyAndEstimate_PersistedMatchesProvider(t *testing.T) {
+	pol := factPolicy()
+	store, svc := buildService(t, pol)
+	database := store.db
+	// F1 delivered: active [d3,d7), lead [d1,d7) => 4/6.
+	upIssue(t, database, "F1", "PW", "Story", "Closed", "Done", day(1), day(7), "Done", true)
+	cl(t, database, "F1-s1", "F1", "Backlog", "In Progress", day(3))
+	cl(t, database, "F1-s2", "F1", "In Progress", "Closed", day(7))
+	// F3 delivered: active [d2,d4), lead [d1,d5) => 2/4 = 0.5.
+	upIssue(t, database, "F3", "PW", "Story", "Closed", "Done", day(1), day(5), "Done", true)
+	cl(t, database, "F3-s1", "F3", "Backlog", "In Progress", day(2))
+	cl(t, database, "F3-s2", "F3", "In Progress", "Closed", day(4))
+	// FE delivered + story points 5: active [d2,d6), lead [d1,d11) => 4/10 = 0.4.
+	upIssue(t, database, "FE", "PW", "Story", "Closed", "Done", day(1), day(11), "Done", true)
+	cl(t, database, "FE-s1", "FE", "Backlog", "In Progress", day(2))
+	cl(t, database, "FE-s2", "FE", "In Progress", "Closed", day(6))
+	if _, err := database.Exec(`UPDATE issues SET story_points = ? WHERE key = ?`, 5.0, "FE"); err != nil {
+		t.Fatalf("set story_points: %v", err)
+	}
+	// F2 delivered but resolved == created => undefined lead => occupancy NULL.
+	upIssue(t, database, "F2", "PW", "Story", "Closed", "Done", day(5), day(5), "Done", true)
+	// FO open (not resolved) => not delivered => occupancy NULL.
+	upIssue(t, database, "FO", "PW", "Story", "In Progress", "In Progress", day(1), "", "", true)
+	cl(t, database, "FO-s1", "FO", "Backlog", "In Progress", day(2))
+	rebuild(t, store, pol)
+
+	// Provider output over the delivered, defined-lead cohort.
+	r, err := svc.Compute(Query{Metric: MetricFlowOccupancy, AsOf: asOf})
+	if err != nil {
+		t.Fatalf("flow_occupancy: %v", err)
+	}
+
+	// Persisted column, read straight off fact_issue_flow (no windowing).
+	rows, err := store.FlowRows(nil)
+	if err != nil {
+		t.Fatalf("FlowRows: %v", err)
+	}
+	var persisted []float64
+	for i := range rows {
+		if rows[i].FlowOccupancy != nil {
+			persisted = append(persisted, *rows[i].FlowOccupancy)
+		}
+	}
+	pd := distribution(persisted)
+	if pd.Count != r.Distribution.Count {
+		t.Fatalf("persisted occupancy count = %d, want %d (provider)", pd.Count, r.Distribution.Count)
+	}
+	assertFloat(t, "persisted vs provider p50", pd.P50, r.Distribution.P50)
+	assertFloat(t, "persisted vs provider p85", pd.P85, r.Distribution.P85)
+	assertFloat(t, "persisted vs provider p95", pd.P95, r.Distribution.P95)
+	assertFloat(t, "persisted vs provider min", pd.Min, r.Distribution.Min)
+	assertFloat(t, "persisted vs provider max", pd.Max, r.Distribution.Max)
+	assertFloat(t, "persisted vs provider mean", pd.Mean, r.Distribution.Mean)
+
+	// NULL for excluded issues; exact value for delivered ones.
+	if fr := findFlow(rows, "F1"); fr == nil || fr.FlowOccupancy == nil {
+		t.Fatal("F1 must carry a persisted occupancy")
+	} else {
+		assertFloat(t, "F1 occupancy", *fr.FlowOccupancy, 4.0/6.0)
+	}
+	if fr := findFlow(rows, "F2"); fr == nil || fr.FlowOccupancy != nil {
+		t.Error("F2 (undefined lead) must have NULL occupancy")
+	}
+	if fr := findFlow(rows, "FO"); fr == nil || fr.FlowOccupancy != nil {
+		t.Error("FO (not delivered) must have NULL occupancy")
+	}
+
+	// estimate carried from story points, NULL where absent.
+	if fr := findFlow(rows, "FE"); fr == nil || fr.Estimate == nil {
+		t.Fatal("FE must carry a persisted estimate")
+	} else {
+		assertFloat(t, "FE estimate", *fr.Estimate, 5.0)
+	}
+	if fr := findFlow(rows, "F1"); fr == nil || fr.Estimate != nil {
+		t.Error("F1 (no story points) must have NULL estimate")
+	}
+}
