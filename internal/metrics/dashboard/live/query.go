@@ -1,0 +1,332 @@
+package live
+
+import (
+	"encoding/json"
+	"fmt"
+	"sort"
+	"strings"
+	"time"
+)
+
+// -----------------------------------------------------------------------------
+// Whitelists — the ONLY identifiers that may reach SQL.
+// -----------------------------------------------------------------------------
+//
+// The /q endpoint is read-only, SELECT-only, and parameterized from a FIXED SQL
+// template. Client tokens NEVER reach SQL: each token is looked up in one of the
+// maps below and mapped to a SERVER-DEFINED SQL fragment (column name, temporal
+// join, aggregation). Anything not present in a whitelist is rejected with 400,
+// so there is no injection or write surface. The only value-based inputs are the
+// project (validated against the active generation's project set) and the date
+// window (validated to YYYY-MM-DD), both re-emitted as canonical literals.
+
+// measureSpec describes an aggregatable measure. valueExpr is the per-row numeric
+// expression (empty => count-only, e.g. throughput); filter is an extra WHERE
+// fragment dropping rows the measure is undefined for.
+type measureSpec struct {
+	valueExpr string
+	filter    string
+	unit      string
+}
+
+// measures is the whitelist of measure tokens. All SQL fragments are constant,
+// server-authored strings over the `f` (fact_issue_flow) alias.
+var measures = map[string]measureSpec{
+	"cycle_time":     {valueExpr: "f.cycle_seconds / 86400.0", filter: "f.cycle_seconds IS NOT NULL", unit: "days"},
+	"lead_time":      {valueExpr: "f.lead_seconds / 86400.0", filter: "f.lead_seconds IS NOT NULL", unit: "days"},
+	"flow_occupancy": {valueExpr: "f.flow_occupancy", filter: "f.flow_occupancy IS NOT NULL", unit: "ratio"},
+	"triage_latency": {valueExpr: "(epoch(f.first_active_at) - epoch(f.created)) / 86400.0", filter: "f.first_active_at IS NOT NULL AND f.created IS NOT NULL AND f.first_active_at >= f.created", unit: "days"},
+	"estimate":       {valueExpr: "f.estimate", filter: "f.estimate IS NOT NULL", unit: "points"},
+	"throughput":     {valueExpr: "", filter: "", unit: "count"},
+}
+
+// dimKind selects how a dimension produces its group value.
+type dimKind int
+
+const (
+	dimNone       dimKind = iota // no grouping
+	dimColumn                    // a column on fact_issue_flow
+	dimPeriod                    // date_trunc(grain, resolved) — time series
+	dimMembership                // event-time fact_issue_membership temporal join
+	dimInterval                  // event-time fact_field_interval temporal join
+)
+
+// dimSpec describes a slice/segment dimension. For column dims, expr is the SQL
+// column. For membership/interval dims, joinValue is the fixed dimension/field
+// literal and the group value comes from the joined alias.
+type dimSpec struct {
+	kind      dimKind
+	expr      string // dimColumn only
+	joinValue string // dimMembership (dimension) / dimInterval (field)
+}
+
+// dimensions is the whitelist of slice/segment tokens.
+var dimensions = map[string]dimSpec{
+	"none":       {kind: dimNone},
+	"period":     {kind: dimPeriod},
+	"project":    {kind: dimColumn, expr: "f.project"},
+	"type":       {kind: dimColumn, expr: "f.type"},
+	"resolution": {kind: dimColumn, expr: "f.resolution"},
+	"status":     {kind: dimColumn, expr: "f.current_stage"},
+	"priority":   {kind: dimInterval, joinValue: "priority"},
+	"assignee":   {kind: dimInterval, joinValue: "assignee"},
+	"component":  {kind: dimMembership, joinValue: "component"},
+	"label":      {kind: dimMembership, joinValue: "label"},
+	"sprint":     {kind: dimMembership, joinValue: "sprint"},
+}
+
+// grains is the whitelist of time-grain tokens; each maps to a DuckDB
+// date_trunc part (server-authored, never client text).
+var grains = map[string]string{
+	"day":     "day",
+	"week":    "week",
+	"month":   "month",
+	"quarter": "quarter",
+	"year":    "year",
+}
+
+// cohorts is the whitelist of completion cohorts. The delivered cohort reads the
+// config-derived `done_res` variable (bound at engine setup — no tenant literal).
+var cohorts = map[string]string{
+	"delivered": "f.resolved IS NOT NULL AND list_contains(getvariable('done_res'), f.resolution)",
+	"resolved":  "f.resolved IS NOT NULL",
+	"all":       "1 = 1",
+}
+
+// QueryParams are the raw client tokens from /q. All are validated before use.
+type QueryParams struct {
+	Measure string
+	Slice   string
+	Segment string
+	Grain   string
+	Project string
+	From    string
+	To      string
+	Cohort  string
+}
+
+// Whitelist builds queries against the fixed template. It holds the set of
+// projects present in the active generation so the project token is validated,
+// never interpolated blindly.
+type Whitelist struct {
+	projects map[string]bool
+}
+
+// NewWhitelist binds the active generation's project set.
+func NewWhitelist(projects []string) *Whitelist {
+	set := make(map[string]bool, len(projects))
+	for _, p := range projects {
+		set[p] = true
+	}
+	return &Whitelist{projects: set}
+}
+
+// defaults fills unset tokens with safe defaults.
+func (p QueryParams) withDefaults() QueryParams {
+	if p.Measure == "" {
+		p.Measure = "cycle_time"
+	}
+	if p.Slice == "" {
+		p.Slice = "none"
+	}
+	if p.Segment == "" {
+		p.Segment = "none"
+	}
+	if p.Grain == "" {
+		p.Grain = "month"
+	}
+	if p.Cohort == "" {
+		p.Cohort = "delivered"
+	}
+	return p
+}
+
+// dimSelect returns the SELECT expression and (optional) JOIN clause for a
+// dimension, using a server-generated alias. grainPart is the validated
+// date_trunc part for period dims.
+func dimSelect(spec dimSpec, alias, grainPart string) (sel, join string) {
+	switch spec.kind {
+	case dimNone:
+		return "''", ""
+	case dimColumn:
+		return "CAST(" + spec.expr + " AS VARCHAR)", ""
+	case dimPeriod:
+		return "CAST(date_trunc('" + grainPart + "', f.resolved) AS VARCHAR)", ""
+	case dimMembership:
+		j := fmt.Sprintf("JOIN jai.fact_issue_membership %s ON %s.generation = f.generation AND %s.issue_key = f.issue_key AND %s.dimension = '%s' AND %s.entered_at <= f.resolved AND (%s.exited_at IS NULL OR %s.exited_at > f.resolved)",
+			alias, alias, alias, alias, spec.joinValue, alias, alias, alias)
+		return "CAST(" + alias + ".member_name AS VARCHAR)", j
+	case dimInterval:
+		j := fmt.Sprintf("JOIN jai.fact_field_interval %s ON %s.generation = f.generation AND %s.issue_key = f.issue_key AND %s.field = '%s' AND %s.entered_at <= f.resolved AND (%s.exited_at IS NULL OR %s.exited_at > f.resolved)",
+			alias, alias, alias, alias, spec.joinValue, alias, alias, alias)
+		return "CAST(" + alias + ".value AS VARCHAR)", j
+	}
+	return "''", ""
+}
+
+// Build validates all tokens and assembles the fixed SELECT template. It returns
+// a 400-worthy error for any non-whitelisted token or malformed date.
+func (w *Whitelist) Build(raw QueryParams) (string, error) {
+	p := raw.withDefaults()
+
+	m, ok := measures[p.Measure]
+	if !ok {
+		return "", fmt.Errorf("unknown measure %q", p.Measure)
+	}
+	sliceSpec, ok := dimensions[p.Slice]
+	if !ok {
+		return "", fmt.Errorf("unknown slice %q", p.Slice)
+	}
+	segSpec, ok := dimensions[p.Segment]
+	if !ok {
+		return "", fmt.Errorf("unknown segment %q", p.Segment)
+	}
+	grainPart, ok := grains[p.Grain]
+	if !ok {
+		return "", fmt.Errorf("unknown grain %q", p.Grain)
+	}
+	cohortExpr, ok := cohorts[p.Cohort]
+	if !ok {
+		return "", fmt.Errorf("unknown cohort %q", p.Cohort)
+	}
+
+	where := []string{
+		"f.generation = getvariable('g')",
+		"(" + cohortExpr + ")",
+	}
+
+	// Project: validated against the active generation's set, then re-emitted as a
+	// canonical literal (never raw client text reaching SQL).
+	if p.Project != "" && p.Project != "all" {
+		if !w.projects[p.Project] {
+			return "", fmt.Errorf("unknown project %q", p.Project)
+		}
+		where = append(where, "f.project = '"+sqlEscape(p.Project)+"'")
+	}
+
+	// Date window: parsed as YYYY-MM-DD and re-emitted canonically.
+	if p.From != "" {
+		d, err := parseDate(p.From)
+		if err != nil {
+			return "", fmt.Errorf("invalid from date %q", p.From)
+		}
+		where = append(where, "f.resolved >= DATE '"+d+"'")
+	}
+	if p.To != "" {
+		d, err := parseDate(p.To)
+		if err != nil {
+			return "", fmt.Errorf("invalid to date %q", p.To)
+		}
+		where = append(where, "f.resolved < DATE '"+d+"'")
+	}
+
+	if m.filter != "" {
+		where = append(where, m.filter)
+	}
+
+	sliceSel, sliceJoin := dimSelect(sliceSpec, "d0", grainPart)
+	segSel, segJoin := dimSelect(segSpec, "d1", grainPart)
+
+	// Aggregation columns: percentiles/avg/total for value measures; NULL for
+	// count-only measures (n carries the count).
+	var aggCols string
+	if m.valueExpr == "" {
+		aggCols = "NULL AS p50, NULL AS p85, NULL AS p95, NULL AS avg, NULL AS total"
+	} else {
+		v := m.valueExpr
+		aggCols = fmt.Sprintf(
+			"round(quantile_cont(%s, 0.50), 3) AS p50, round(quantile_cont(%s, 0.85), 3) AS p85, round(quantile_cont(%s, 0.95), 3) AS p95, round(avg(%s), 3) AS avg, round(sum(%s), 3) AS total",
+			v, v, v, v, v)
+	}
+
+	var b strings.Builder
+	b.WriteString("SELECT\n")
+	fmt.Fprintf(&b, "  %s AS slice,\n", sliceSel)
+	fmt.Fprintf(&b, "  %s AS segment,\n", segSel)
+	b.WriteString("  count(*) AS n,\n")
+	b.WriteString("  " + aggCols + "\n")
+	b.WriteString("FROM jai.fact_issue_flow f\n")
+	if sliceJoin != "" {
+		b.WriteString(sliceJoin + "\n")
+	}
+	if segJoin != "" {
+		b.WriteString(segJoin + "\n")
+	}
+	b.WriteString("WHERE " + strings.Join(where, "\n  AND ") + "\n")
+	b.WriteString("GROUP BY slice, segment\n")
+	b.WriteString("ORDER BY n DESC\n")
+	b.WriteString("LIMIT 1000")
+	return b.String(), nil
+}
+
+// -----------------------------------------------------------------------------
+// Small SQL / JSON helpers
+// -----------------------------------------------------------------------------
+
+// sqlEscape doubles single quotes so a server-controlled literal cannot break
+// out of its quotes. (Client-derived values also pass a whitelist first.)
+func sqlEscape(s string) string { return strings.ReplaceAll(s, "'", "''") }
+
+// sqlStringList renders a Go slice as a DuckDB list literal: ['a', 'b'].
+func sqlStringList(items []string) string {
+	parts := make([]string, len(items))
+	for i, it := range items {
+		parts[i] = "'" + sqlEscape(it) + "'"
+	}
+	return "[" + strings.Join(parts, ", ") + "]"
+}
+
+// parseDate validates YYYY-MM-DD and returns it in canonical form.
+func parseDate(s string) (string, error) {
+	t, err := time.Parse("2006-01-02", strings.TrimSpace(s))
+	if err != nil {
+		return "", err
+	}
+	return t.Format("2006-01-02"), nil
+}
+
+// decodeRows parses one DuckDB JSON-array output line into row maps.
+func decodeRows(line string) ([]map[string]any, error) {
+	var rows []map[string]any
+	if err := json.Unmarshal([]byte(line), &rows); err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+// MeasureTokens / DimensionTokens / GrainTokens / CohortTokens expose the
+// whitelists (sorted) for the /meta endpoint so the SPA builds its dropdowns
+// from the same source of truth that validates requests.
+func MeasureTokens() []string   { return sortedKeys(measuresKeys()) }
+func DimensionTokens() []string { return sortedKeys(dimensionKeys()) }
+func GrainTokens() []string     { return []string{"day", "week", "month", "quarter", "year"} }
+func CohortTokens() []string    { return sortedKeys(cohortKeys()) }
+
+func measuresKeys() []string {
+	ks := make([]string, 0, len(measures))
+	for k := range measures {
+		ks = append(ks, k)
+	}
+	return ks
+}
+
+func dimensionKeys() []string {
+	ks := make([]string, 0, len(dimensions))
+	for k := range dimensions {
+		ks = append(ks, k)
+	}
+	return ks
+}
+
+func cohortKeys() []string {
+	ks := make([]string, 0, len(cohorts))
+	for k := range cohorts {
+		ks = append(ks, k)
+	}
+	return ks
+}
+
+func sortedKeys(ks []string) []string {
+	sort.Strings(ks)
+	return ks
+}

@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>jai · live flow metrics</title>
+<!-- Vendored Vega-Lite stack: served from this localhost server, NO CDN. -->
+<script src="/assets/vega.min.js"></script>
+<script src="/assets/vega-lite.min.js"></script>
+<script src="/assets/vega-embed.min.js"></script>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; }
+  header { padding: 12px 18px; border-bottom: 1px solid #8884; display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  header .gen { font-size: 12px; opacity: 0.7; }
+  .controls { display: flex; flex-wrap: wrap; gap: 14px 20px; padding: 14px 18px; border-bottom: 1px solid #8884; }
+  .controls label { display: flex; flex-direction: column; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; opacity: 0.75; gap: 4px; }
+  .controls select, .controls input { font-size: 13px; padding: 4px 6px; min-width: 120px; }
+  main { padding: 18px; }
+  #chart { min-height: 320px; }
+  #status { padding: 0 18px 14px; font-size: 12px; opacity: 0.8; }
+  #status.err { color: #c0392b; opacity: 1; font-weight: 600; }
+  details { margin: 12px 18px; font-size: 12px; }
+  details pre { overflow: auto; padding: 8px; background: #8881; border-radius: 4px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>jai · live flow metrics</h1>
+  <span class="gen" id="gen"></span>
+</header>
+
+<div class="controls">
+  <label>Dashboard
+    <select id="dashboard">
+      <option value="explore">Explore (ad-hoc)</option>
+    </select>
+  </label>
+  <label>Measure <select id="measure"></select></label>
+  <label>Slice <select id="slice"></select></label>
+  <label>Segment <select id="segment"></select></label>
+  <label>Time grain <select id="grain"></select></label>
+  <label>Project <select id="project"></select></label>
+  <label>Cohort <select id="cohort"></select></label>
+  <label>From <input type="date" id="from"></label>
+  <label>To <input type="date" id="to"></label>
+</div>
+
+<div id="status">loading…</div>
+<main><div id="chart"></div></main>
+<details>
+  <summary>Generated SQL (read-only, templated)</summary>
+  <pre id="sql"></pre>
+</details>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+function fillSelect(sel, items, selected) {
+  sel.innerHTML = "";
+  for (const it of items) {
+    const o = document.createElement("option");
+    o.value = it; o.textContent = it;
+    if (it === selected) o.selected = true;
+    sel.appendChild(o);
+  }
+}
+
+async function loadMeta() {
+  const meta = await (await fetch("/meta")).json();
+  $("gen").textContent = "active generation " + meta.generation;
+  fillSelect($("measure"), meta.measures, "cycle_time");
+  fillSelect($("slice"), meta.dimensions, "priority");
+  fillSelect($("segment"), meta.dimensions, "none");
+  fillSelect($("grain"), meta.grains, "month");
+  fillSelect($("project"), ["all", ...meta.projects], "all");
+  fillSelect($("cohort"), meta.cohorts, "delivered");
+  for (const id of ["measure","slice","segment","grain","project","cohort","from","to","dashboard"]) {
+    $(id).addEventListener("change", refresh);
+  }
+}
+
+function params() {
+  const p = new URLSearchParams();
+  for (const id of ["measure","slice","segment","grain","project","cohort","from","to"]) {
+    const v = $(id).value;
+    if (v) p.set(id, v);
+  }
+  return p;
+}
+
+// Build a Vega-Lite spec from the current controls and the returned rows.
+function spec(rows) {
+  const measure = $("measure").value;
+  const slice = $("slice").value;
+  const segment = $("segment").value;
+  const isCount = measure === "throughput";
+  const isPeriod = slice === "period";
+  const yField = isCount ? "n" : "p50";
+  const yTitle = isCount ? "count" : measure + " p50";
+
+  const enc = {
+    x: isPeriod
+      ? { field: "slice", type: "temporal", title: slice }
+      : { field: "slice", type: "nominal", sort: "-y", title: slice },
+    y: { field: yField, type: "quantitative", title: yTitle },
+    tooltip: [
+      { field: "slice", title: slice },
+      ...(segment !== "none" ? [{ field: "segment", title: segment }] : []),
+      { field: "n", title: "count", type: "quantitative" },
+      ...(isCount ? [] : [
+        { field: "p50", type: "quantitative" },
+        { field: "p85", type: "quantitative" },
+        { field: "p95", type: "quantitative" },
+      ]),
+    ],
+  };
+  if (segment !== "none") {
+    enc.color = { field: "segment", type: "nominal", title: segment };
+  }
+  return {
+    $schema: "https://vega.github.io/schema/vega-lite/v5.json",
+    width: "container",
+    height: 360,
+    data: { values: rows },
+    mark: isPeriod ? { type: "line", point: true } : { type: "bar" },
+    encoding: enc,
+  };
+}
+
+async function refresh() {
+  const status = $("status");
+  status.className = "";
+  status.textContent = "querying…";
+  try {
+    const res = await fetch("/q?" + params().toString());
+    const body = await res.json();
+    $("sql").textContent = body.sql || "";
+    if (!res.ok) {
+      status.className = "err";
+      status.textContent = "error: " + (body.error || res.status);
+      return;
+    }
+    const rows = body.rows || [];
+    status.textContent = rows.length + " group(s)";
+    await vegaEmbed("#chart", spec(rows), { actions: false });
+  } catch (e) {
+    status.className = "err";
+    status.textContent = "error: " + e;
+  }
+}
+
+(async () => { await loadMeta(); await refresh(); })();
+</script>
+</body>
+</html>

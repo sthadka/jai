@@ -1,11 +1,16 @@
 package cli
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
+	"os/signal"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/sthadka/jai/internal/metrics"
+	"github.com/sthadka/jai/internal/metrics/dashboard/live"
 	"github.com/sthadka/jai/internal/output"
 )
 
@@ -15,38 +20,98 @@ var (
 	dashboardTitle  string
 	dashboardFrom   string
 	dashboardTo     string
+	dashboardPort   int
 )
 
 var metricsDashboardCmd = &cobra.Command{
 	Use:   "dashboard",
-	Short: "Export a self-contained offline flow-metrics dashboard (HTML)",
-	Long: `Export ONE self-contained dashboard.html, fed by the shared metrics service.
+	Short: "Serve a live, interactive flow-metrics dashboard (localhost)",
+	Long: `Serve a LIVE, interactive flow-metrics dashboard.
 
-The exported file embeds both the computed metric data (as JSON) and the
-visualization assets (a pure-SVG renderer, inlined). It has no CDN references, no
-<script src>, and makes no network or file-fetch requests at runtime: open the
-file from disk, with networking disabled, and every chart renders.
+By default this starts a localhost-only HTTP server backed by one persistent
+DuckDB process (jai.db ATTACHed READ_ONLY) and opens your browser at it. Every
+control (measure / slice / segment / time-grain / project / date-window / cohort)
+re-queries the live fact store and re-renders with a vendored Vega-Lite SPA — no
+CDN, no export step. The project dropdown lists the projects present in the active
+fact generation. The one dependency is the ` + "`duckdb`" + ` binary on PATH.
 
-Charts follow the spec chart-mapping: cycle/lead-time distributions and monthly
-percentile trends, an all-stage cumulative-flow diagram (WIP), throughput,
-net-flow, aged-open, resolution mix, type-class ratio, workload by assignee,
-sprint eventual-resolution, and the blocker-age proxy. Metrics that are
-unconfigured or have no data render as explicit "unavailable" cards rather than
-fabricated charts.
+The data endpoint (/q) is read-only, SELECT-only, and parameterized from a fixed
+SQL template plus whitelisted identifiers — never raw client SQL, so there is no
+injection or write surface.
 
-The artifact contains the selected Jira issue data: share it only with viewers
-authorized to see those issues.
+Pass --output to instead write the self-contained offline snapshot (pure-SVG,
+inlined JSON, no server, no deps) — a portable artifact for stakeholders without
+jai/duckdb.
 
 Examples:
   jai metrics dashboard
-  jai metrics dashboard --output flow.html --project ENG
-  jai metrics dashboard --from 2024-01-01 --to 2024-07-01 --as-of 2024-07-01`,
+  jai metrics dashboard --port 8099
+  jai metrics dashboard --output flow.html --project ENG`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runMetricsDashboard()
+		if dashboardOutput != "" {
+			return runMetricsDashboardStatic()
+		}
+		return runMetricsDashboardLive()
 	},
 }
 
-func runMetricsDashboard() error {
+// runMetricsDashboardLive starts the persistent DuckDB-backed localhost server.
+func runMetricsDashboardLive() error {
+	_, pol, store := metricsService()
+
+	engine, err := live.NewEngine(live.EngineConfig{
+		DBPath:          g.cfg.DB.Path,
+		DoneResolutions: pol.DoneResolutions(),
+	})
+	if err != nil {
+		if errors.Is(err, live.ErrDuckDBNotFound) {
+			fmt.Fprintln(os.Stderr, "error: the live dashboard requires the `duckdb` binary on your PATH.")
+			fmt.Fprintln(os.Stderr, "  Install it with:  brew install duckdb")
+			fmt.Fprintln(os.Stderr, "  Or download from: https://duckdb.org/docs/installation/")
+			fmt.Fprintln(os.Stderr, "  (Alternatively, `jai metrics dashboard --output dashboard.html` writes an offline snapshot with no duckdb dependency.)")
+			return metricErr("DuckDBNotFound", err)
+		}
+		return metricErr("DashboardError", err)
+	}
+	defer engine.Close()
+
+	projects, err := live.FetchProjects(engine)
+	if err != nil {
+		return metricErr("DashboardError", fmt.Errorf("list active-generation projects: %w", err))
+	}
+
+	var gen any
+	if meta, gerr := store.ActiveGeneration(); gerr == nil && meta != nil {
+		gen = meta.Generation
+	}
+
+	srv := live.NewServer(engine, projects, gen)
+	url, httpSrv, err := srv.ListenAndServe(dashboardPort)
+	if err != nil {
+		return metricErr("DashboardError", fmt.Errorf("bind localhost server: %w", err))
+	}
+
+	fmt.Printf("Live flow-metrics dashboard: %s\n", url)
+	fmt.Printf("Active generation %v · projects: %v\n", gen, projects)
+	fmt.Println("Read-only, localhost-only. Press Ctrl-C to stop.")
+	if err := browserOpener(url); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not open browser automatically (%v); open %s manually\n", err, url)
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	<-ctx.Done()
+
+	fmt.Println("\nShutting down…")
+	shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = httpSrv.Shutdown(shutCtx)
+	return nil
+}
+
+// runMetricsDashboardStatic writes the self-contained offline snapshot. Reachable
+// via --output; jai-2lc.5 promotes this to --snapshot.
+func runMetricsDashboardStatic() error {
 	svc, pol, _ := metricsService()
 
 	asOf, err := parseMetricTime(metricAsOf)
@@ -81,19 +146,15 @@ func runMetricsDashboard() error {
 	rejections := sortedRejectionKeys(pol.Rejections())
 
 	path := dashboardOutput
-	if path == "" {
-		path = "dashboard.html"
-	}
 	if err := os.WriteFile(path, html, 0o644); err != nil {
 		return metricErr("DashboardError", fmt.Errorf("write %s: %w", path, err))
 	}
 
 	if g.jsonOut || g.format == "json" {
 		fmt.Println(string(output.OK(map[string]interface{}{
-			"path":            path,
-			"bytes":           len(html),
-			"self_contained":  true,
-			"metric_warnings": rejections,
+			"path":       path,
+			"bytes":      len(html),
+			"rejections": rejections,
 		})))
 		return nil
 	}
@@ -107,14 +168,16 @@ func runMetricsDashboard() error {
 }
 
 func init() {
-	metricsDashboardCmd.Flags().StringVarP(&dashboardOutput, "output", "o", "dashboard.html",
-		"output HTML file path")
+	metricsDashboardCmd.Flags().StringVarP(&dashboardOutput, "output", "o", "",
+		"write the self-contained offline snapshot to this path instead of serving live")
+	metricsDashboardCmd.Flags().IntVar(&dashboardPort, "port", 0,
+		"localhost port for the live server (0 = ephemeral)")
 	metricsDashboardCmd.Flags().StringVar(&dashboardTitle, "title", "Flow Metrics",
-		"dashboard heading")
+		"snapshot heading (--output only)")
 	metricsDashboardCmd.Flags().StringVar(&dashboardFrom, "from", "",
-		"trend window start (inclusive; RFC3339 or YYYY-MM-DD; default as_of − 6 months)")
+		"snapshot trend window start (--output only; RFC3339 or YYYY-MM-DD)")
 	metricsDashboardCmd.Flags().StringVar(&dashboardTo, "to", "",
-		"trend window end (exclusive; RFC3339 or YYYY-MM-DD; default as_of)")
+		"snapshot trend window end (--output only; RFC3339 or YYYY-MM-DD)")
 
 	metricsCmd.AddCommand(metricsDashboardCmd)
 }

@@ -392,6 +392,19 @@ func (p *Policy) IsDoneResolution(res string) bool { return p.doneResolutions[st
 // issues (labelled "includes non-delivery resolutions").
 func (p *Policy) DoneResolutionsConfigured() bool { return p.doneResolutionsSet }
 
+// DoneResolutions returns the configured genuine-delivery resolution set (sorted),
+// or an empty slice when done_resolutions was not configured. Consumers that build
+// their own delivered-cohort filter (e.g. the live DuckDB dashboard) read it from
+// here so there is no tenant resolution literal in code.
+func (p *Policy) DoneResolutions() []string {
+	out := make([]string, 0, len(p.doneResolutions))
+	for r := range p.doneResolutions {
+		out = append(out, r)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // ClassForType maps an issue type to its configured class, or "other" if unmapped.
 func (p *Policy) ClassForType(issueType string) string {
 	if cl, ok := p.typeClasses[strings.TrimSpace(issueType)]; ok {
