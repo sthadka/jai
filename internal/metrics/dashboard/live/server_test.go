@@ -172,3 +172,89 @@ func TestLiveIndexNoCDN(t *testing.T) {
 		}
 	}
 }
+
+// execOnDB applies write SQL to the fixture DB from a separate duckdb process,
+// simulating a `metrics rebuild` publishing a new generation while the server's
+// persistent READ_ONLY engine stays attached.
+func execOnDB(t *testing.T, dbPath, sql string) {
+	t.Helper()
+	bin, err := exec.LookPath("duckdb")
+	if err != nil {
+		t.Skip("duckdb not on PATH")
+	}
+	cmd := exec.Command(bin, ":memory:")
+	cmd.Stdin = strings.NewReader("LOAD sqlite;\nATTACH '" + dbPath + "' AS jai (TYPE sqlite);\n" + sql)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("exec on db: %v\n%s", err, out)
+	}
+}
+
+// TestLiveGenerationRefresh proves the dashboard serves the CURRENTLY active fact
+// generation after a rebuild publishes a new one (and deletes the obsolete rows),
+// with no server restart: Engine.Query re-binds `g` per call and /meta refreshes
+// the generation id + the /q project whitelist. This is the regression guard for
+// the "no data after rebuild" bug (g was frozen at engine setup).
+func TestLiveGenerationRefresh(t *testing.T) {
+	dbPath := buildFixtureDB(t)
+	engine, err := NewEngine(EngineConfig{DBPath: dbPath, DoneResolutions: []string{"Done"}})
+	if err != nil {
+		t.Fatalf("NewEngine: %v", err)
+	}
+	projects, err := FetchProjects(engine)
+	if err != nil {
+		t.Fatalf("FetchProjects: %v", err)
+	}
+	srv := NewServer(engine, projects, int64(7))
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(func() { ts.Close(); engine.Close() })
+
+	// Baseline: generation 7, ROX present and queryable.
+	if _, body := getJSON(t, ts.URL+"/meta"); body["generation"] != float64(7) {
+		t.Fatalf("baseline generation: got %v, want 7", body["generation"])
+	}
+	if status, _ := getJSON(t, ts.URL+"/q?measure=lead_time&slice=priority&cohort=delivered&project=ROX"); status != 200 {
+		t.Fatalf("baseline ROX query: got %d", status)
+	}
+
+	// Simulate a rebuild: publish generation 8 for a NEW project, delete the old
+	// generation's rows, and flip the active pointer — all external to the engine.
+	execOnDB(t, dbPath, `
+INSERT INTO jai.fact_issue_flow VALUES
+  (8,'NEW-1','NEWP','Bug', TIMESTAMP '2024-05-01', TIMESTAMP '2024-05-02', TIMESTAMP '2024-05-10','Done', 777600, 691200, 0,'done',0,0,0.5,NULL);
+INSERT INTO jai.fact_field_interval VALUES
+  (8,'NEW-1','NEWP','priority',0,'1','High','', '', TIMESTAMP '2024-05-01', NULL, 1);
+DELETE FROM jai.fact_issue_flow WHERE generation=7;
+DELETE FROM jai.fact_field_interval WHERE generation=7;
+UPDATE jai.metrics_active_generation SET generation=8 WHERE id=1;
+`)
+
+	// /meta now reports generation 8 and the new project (not ROX).
+	_, meta := getJSON(t, ts.URL+"/meta")
+	if meta["generation"] != float64(8) {
+		t.Fatalf("after rebuild generation: got %v, want 8", meta["generation"])
+	}
+	projs, _ := meta["projects"].([]any)
+	hasNew, hasROX := false, false
+	for _, p := range projs {
+		if p == "NEWP" {
+			hasNew = true
+		}
+		if p == "ROX" {
+			hasROX = true
+		}
+	}
+	if !hasNew || hasROX {
+		t.Fatalf("projects not refreshed after rebuild: %v", meta["projects"])
+	}
+
+	// /q serves generation-8 data: the new project returns rows; the stale project
+	// is rejected by the refreshed whitelist.
+	if status, body := getJSON(t, ts.URL+"/q?measure=lead_time&slice=priority&cohort=delivered&project=NEWP"); status != 200 {
+		t.Fatalf("NEWP query after rebuild: got %d %+v", status, body)
+	} else if rows, _ := body["rows"].([]any); len(rows) == 0 {
+		t.Fatalf("expected gen-8 rows for NEWP, got none")
+	}
+	if status, _ := getJSON(t, ts.URL+"/q?measure=lead_time&slice=priority&cohort=delivered&project=ROX"); status != 400 {
+		t.Fatalf("stale project ROX should be 400 after refresh, got %d", status)
+	}
+}

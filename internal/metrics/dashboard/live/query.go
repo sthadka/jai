@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -156,16 +157,30 @@ type QueryParams struct {
 // projects present in the active generation so the project token is validated,
 // never interpolated blindly.
 type Whitelist struct {
+	mu       sync.RWMutex
 	projects map[string]bool
 }
 
 // NewWhitelist binds the active generation's project set.
 func NewWhitelist(projects []string) *Whitelist {
+	return &Whitelist{projects: projectSet(projects)}
+}
+
+// SetProjects replaces the validated project set (called from /meta so a
+// `metrics rebuild` that changed the project set is honored without a restart).
+func (w *Whitelist) SetProjects(projects []string) {
+	set := projectSet(projects)
+	w.mu.Lock()
+	w.projects = set
+	w.mu.Unlock()
+}
+
+func projectSet(projects []string) map[string]bool {
 	set := make(map[string]bool, len(projects))
 	for _, p := range projects {
 		set[p] = true
 	}
-	return &Whitelist{projects: set}
+	return set
 }
 
 // defaults fills unset tokens with safe defaults.
@@ -253,7 +268,10 @@ func (w *Whitelist) Build(raw QueryParams) (string, error) {
 	// Project: validated against the active generation's set, then re-emitted as a
 	// canonical literal (never raw client text reaching SQL).
 	if p.Project != "" && p.Project != "all" {
-		if !w.projects[p.Project] {
+		w.mu.RLock()
+		known := w.projects[p.Project]
+		w.mu.RUnlock()
+		if !known {
 			return "", fmt.Errorf("unknown project %q", p.Project)
 		}
 		where = append(where, "f.project = '"+sqlEscape(p.Project)+"'")
