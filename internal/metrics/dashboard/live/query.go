@@ -217,12 +217,16 @@ func dimSelect(spec dimSpec, alias, grainPart string) (sel, join string) {
 	case dimCreatedPeriod:
 		return "CAST(date_trunc('" + grainPart + "', f.created) AS VARCHAR)", ""
 	case dimMembership:
-		j := fmt.Sprintf("JOIN jai.fact_issue_membership %s ON %s.generation = f.generation AND %s.issue_key = f.issue_key AND %s.dimension = '%s' AND %s.entered_at <= f.resolved AND (%s.exited_at IS NULL OR %s.exited_at > f.resolved)",
-			alias, alias, alias, alias, spec.joinValue, alias, alias, alias)
+		// Event-time membership as-of resolution; for still-open issues (resolved
+		// IS NULL) fall back to the CURRENTLY-open interval (exited_at IS NULL) so
+		// the open cohort gets its current members. Delivered path is unchanged, so
+		// reconciliation holds. No CURRENT_TIMESTAMP → no VARCHAR/timestamp type mix.
+		j := fmt.Sprintf("JOIN jai.fact_issue_membership %s ON %s.generation = f.generation AND %s.issue_key = f.issue_key AND %s.dimension = '%s' AND ((%s.entered_at <= f.resolved AND (%s.exited_at IS NULL OR %s.exited_at > f.resolved)) OR (f.resolved IS NULL AND %s.exited_at IS NULL))",
+			alias, alias, alias, alias, spec.joinValue, alias, alias, alias, alias)
 		return "CAST(" + alias + ".member_name AS VARCHAR)", j
 	case dimInterval:
-		j := fmt.Sprintf("JOIN jai.fact_field_interval %s ON %s.generation = f.generation AND %s.issue_key = f.issue_key AND %s.field = '%s' AND %s.entered_at <= f.resolved AND (%s.exited_at IS NULL OR %s.exited_at > f.resolved)",
-			alias, alias, alias, alias, spec.joinValue, alias, alias, alias)
+		j := fmt.Sprintf("JOIN jai.fact_field_interval %s ON %s.generation = f.generation AND %s.issue_key = f.issue_key AND %s.field = '%s' AND ((%s.entered_at <= f.resolved AND (%s.exited_at IS NULL OR %s.exited_at > f.resolved)) OR (f.resolved IS NULL AND %s.exited_at IS NULL))",
+			alias, alias, alias, alias, spec.joinValue, alias, alias, alias, alias)
 		return "CAST(" + alias + ".value AS VARCHAR)", j
 	case dimCurrentInterval:
 		// CURRENT value = the open interval (exited_at IS NULL): the owner/value in
@@ -277,20 +281,27 @@ func (w *Whitelist) Build(raw QueryParams) (string, error) {
 		where = append(where, "f.project = '"+sqlEscape(p.Project)+"'")
 	}
 
-	// Date window: parsed as YYYY-MM-DD and re-emitted canonically.
+	// Date window: parsed as YYYY-MM-DD and re-emitted canonically. The window
+	// applies to the cohort's time basis: completion time for delivered/resolved,
+	// but CREATION time for the open cohort (open issues have resolved IS NULL, so a
+	// resolved-based window would wipe them) and for the catch-all cohort.
+	dateCol := "f.resolved"
+	if p.Cohort == "open" || p.Cohort == "all" {
+		dateCol = "f.created"
+	}
 	if p.From != "" {
 		d, err := parseDate(p.From)
 		if err != nil {
 			return "", fmt.Errorf("invalid from date %q", p.From)
 		}
-		where = append(where, "f.resolved >= DATE '"+d+"'")
+		where = append(where, dateCol+" >= DATE '"+d+"'")
 	}
 	if p.To != "" {
 		d, err := parseDate(p.To)
 		if err != nil {
 			return "", fmt.Errorf("invalid to date %q", p.To)
 		}
-		where = append(where, "f.resolved < DATE '"+d+"'")
+		where = append(where, dateCol+" < DATE '"+d+"'")
 	}
 
 	if m.filter != "" {

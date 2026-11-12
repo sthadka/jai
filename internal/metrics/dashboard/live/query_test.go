@@ -118,3 +118,46 @@ func TestBuildUnknownProjectRejected(t *testing.T) {
 		t.Fatalf("'all' project should be accepted: %v", err)
 	}
 }
+
+// TestBuildDateWindowCohortBasis proves the date window filters on the cohort's
+// time basis: resolution time for delivered/resolved, but CREATION time for the
+// open cohort (open issues have resolved IS NULL, so a resolved-based window would
+// wipe them). Regression guard for empty open-cohort panels under a date range.
+func TestBuildDateWindowCohortBasis(t *testing.T) {
+	w := newTestWhitelist()
+	delivered, err := w.Build(QueryParams{Measure: "cycle_time", Cohort: "delivered", From: "2025-01-01", To: "2025-04-01"})
+	if err != nil {
+		t.Fatalf("delivered build: %v", err)
+	}
+	if !strings.Contains(delivered, "f.resolved >= DATE '2025-01-01'") || !strings.Contains(delivered, "f.resolved < DATE '2025-04-01'") {
+		t.Fatalf("delivered cohort should window on f.resolved:\n%s", delivered)
+	}
+	open, err := w.Build(QueryParams{Measure: "aged_open", Cohort: "open", From: "2025-01-01", To: "2025-04-01"})
+	if err != nil {
+		t.Fatalf("open build: %v", err)
+	}
+	if !strings.Contains(open, "f.created >= DATE '2025-01-01'") || !strings.Contains(open, "f.created < DATE '2025-04-01'") {
+		t.Fatalf("open cohort should window on f.created:\n%s", open)
+	}
+	if strings.Contains(open, "f.resolved >= DATE") {
+		t.Fatalf("open cohort must not window on f.resolved:\n%s", open)
+	}
+}
+
+// TestBuildEventTimeDimOpenFallback proves event-time interval/membership dims
+// fall back to the currently-open interval for open issues (resolved IS NULL), so
+// the open cohort gets current values instead of an empty join. Delivered path
+// (entered_at <= f.resolved) is preserved, so reconciliation is unaffected.
+func TestBuildEventTimeDimOpenFallback(t *testing.T) {
+	w := newTestWhitelist()
+	sql, err := w.Build(QueryParams{Measure: "aged_open", Slice: "priority", Cohort: "open"})
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if !strings.Contains(sql, "entered_at <= f.resolved") {
+		t.Fatalf("delivered interval path missing (reconciliation guard):\n%s", sql)
+	}
+	if !strings.Contains(sql, "f.resolved IS NULL AND") || !strings.Contains(sql, ".exited_at IS NULL))") {
+		t.Fatalf("open-issue current-interval fallback missing:\n%s", sql)
+	}
+}
