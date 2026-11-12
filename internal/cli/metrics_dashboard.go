@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -88,6 +89,7 @@ func runMetricsDashboardLive() error {
 
 	srv := live.NewServer(engine, projects, gen)
 	srv.SetDashboards(dashboardCapabilities(pol), nil)
+	srv.SetJiraBaseURL(strings.TrimRight(g.cfg.Jira.URL, "/"))
 	url, httpSrv, err := srv.ListenAndServe(dashboardPort)
 	if err != nil {
 		return metricErr("DashboardError", fmt.Errorf("bind localhost server: %w", err))

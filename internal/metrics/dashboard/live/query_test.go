@@ -161,3 +161,61 @@ func TestBuildEventTimeDimOpenFallback(t *testing.T) {
 		t.Fatalf("open-issue current-interval fallback missing:\n%s", sql)
 	}
 }
+
+// TestTeamDimensionJoinsIssues proves the Team slice/segment is served from a
+// current-snapshot join on jai.issues (Team is not event-time tracked).
+func TestTeamDimensionJoinsIssues(t *testing.T) {
+	w := newTestWhitelist()
+	sql, err := w.Build(QueryParams{Measure: "throughput", Slice: "team", Cohort: "delivered"})
+	if err != nil {
+		t.Fatalf("team slice build: %v", err)
+	}
+	if !strings.Contains(sql, "JOIN jai.issues") || !strings.Contains(sql, ".team") {
+		t.Fatalf("team dimension should join jai.issues on the team column:\n%s", sql)
+	}
+}
+
+// TestBuildIssuesDrill proves the issue drill narrows to the clicked slice value
+// (as an escaped literal), joins jai.issues for the summary, selects issue_key,
+// and stays a single SELECT — the same whitelist guarantees as the aggregate.
+func TestBuildIssuesDrill(t *testing.T) {
+	w := newTestWhitelist()
+	sql, err := w.BuildIssues(QueryParams{Measure: "cycle_time", Slice: "priority", Cohort: "delivered"}, "P2-Medium", "", 500)
+	if err != nil {
+		t.Fatalf("drill build: %v", err)
+	}
+	for _, want := range []string{
+		"f.issue_key AS issue_key",
+		"JOIN jai.issues iss ON iss.key = f.issue_key",
+		"= 'P2-Medium'",
+		"LIMIT 500",
+	} {
+		if !strings.Contains(sql, want) {
+			t.Fatalf("drill SQL missing %q:\n%s", want, sql)
+		}
+	}
+	if strings.Contains(strings.ToUpper(sql), "INSERT") || strings.Contains(strings.ToUpper(sql), "UPDATE") || strings.Contains(strings.ToUpper(sql), "DELETE") {
+		t.Fatalf("drill must be read-only SELECT:\n%s", sql)
+	}
+}
+
+// TestBuildIssuesEscapesSliceValue proves a slice value carrying a quote is
+// escaped into a literal, never breaking out of the string (no injection).
+func TestBuildIssuesEscapesSliceValue(t *testing.T) {
+	w := newTestWhitelist()
+	sql, err := w.BuildIssues(QueryParams{Measure: "throughput", Slice: "team", Cohort: "all"}, "Ops' OR 1=1 --", "", 10)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if !strings.Contains(sql, "= 'Ops'' OR 1=1 --'") {
+		t.Fatalf("slice value not escaped as a literal:\n%s", sql)
+	}
+}
+
+// TestBuildIssuesRejectsUnknownMeasure proves drill tokens are whitelisted too.
+func TestBuildIssuesRejectsUnknownMeasure(t *testing.T) {
+	w := newTestWhitelist()
+	if _, err := w.BuildIssues(QueryParams{Measure: "evil", Slice: "team"}, "x", "", 10); err == nil {
+		t.Fatal("expected rejection for unknown measure in drill")
+	}
+}

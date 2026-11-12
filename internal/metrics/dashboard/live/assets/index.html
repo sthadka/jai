@@ -92,6 +92,28 @@
   #explore .ex-controls select { font: inherit; font-size: 13px; padding: 5px 8px; min-width: 130px; color: var(--fg); background: var(--panel); border: 1px solid var(--border); border-radius: 6px; }
   #explore .pchart { width: 100%; height: 440px; }
   #globalErr { padding: 10px 20px; color: #d14b4b; font-weight: 600; font-size: 13px; }
+  .panel .pchart, #explore .pchart { cursor: pointer; }
+  .hint { font-size: 11.5px; color: var(--muted); padding: 2px 20px 12px; }
+  .modal { position: fixed; inset: 0; z-index: 50; display: none; }
+  .modal.show { display: block; }
+  .modal-backdrop { position: absolute; inset: 0; background: rgba(10,10,15,0.45); }
+  .modal-card { position: absolute; top: 5vh; left: 50%; transform: translateX(-50%); width: min(840px, 94vw); max-height: 88vh; display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 10px 40px rgba(0,0,0,0.3); overflow: hidden; }
+  .modal-head { display: flex; align-items: center; gap: 12px; padding: 13px 16px; border-bottom: 1px solid var(--border); }
+  .modal-head h3 { font-size: 14px; margin: 0; font-weight: 600; flex: 1; letter-spacing: -0.01em; }
+  .modal-head button { font: inherit; font-size: 13px; cursor: pointer; background: var(--panel); color: var(--fg); border: 1px solid var(--border); border-radius: 6px; padding: 5px 10px; }
+  .modal-body { overflow: auto; padding: 4px 16px 14px; }
+  .im-count { font-size: 12px; color: var(--muted); padding: 10px 2px 8px; }
+  .im-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  .im-table th { text-align: left; color: var(--muted); font-weight: 500; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.04em; padding: 7px 8px; position: sticky; top: 0; background: var(--panel); border-bottom: 1px solid var(--border); }
+  .im-table td { padding: 6px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  .im-table td.num, .im-table th.num { text-align: right; white-space: nowrap; }
+  .im-table td.key { white-space: nowrap; }
+  .im-table a { color: var(--accent); text-decoration: none; }
+  .im-table a:hover { text-decoration: underline; }
+  .im-loading, .im-err { padding: 20px; color: var(--muted); }
+  .im-err { color: #d14b4b; }
+  .modal-foot { border-top: 1px solid var(--border); padding: 10px 16px; font-size: 11px; color: var(--muted); }
+  .modal-foot pre { overflow: auto; padding: 8px; background: var(--chip-bg); border-radius: 6px; font-size: 11px; margin: 6px 0 0; }
 </style>
 </head>
 <body>
@@ -129,6 +151,7 @@
   </div>
 </header>
 <div id="globalErr"></div>
+<div class="hint">Tip: click any bar, point, or line to list the issues behind it (with Jira links + a copy-paste <code>jai query</code>).</div>
 <main>
   <p id="desc"></p>
   <div id="tiles"></div>
@@ -155,6 +178,21 @@
     </div>
   </section>
 </main>
+
+<div class="modal" id="issuesModal">
+  <div class="modal-backdrop" id="imBackdrop"></div>
+  <div class="modal-card">
+    <div class="modal-head">
+      <h3 id="imTitle"></h3>
+      <button id="imCopy" style="display:none">Copy jai query</button>
+      <button id="imClose">Close</button>
+    </div>
+    <div class="modal-body" id="imBody"></div>
+    <div class="modal-foot">
+      <details><summary>Generated SQL (read-only)</summary><pre id="imSql"></pre></details>
+    </div>
+  </div>
+</div>
 
 <script>
 "use strict";
@@ -464,6 +502,7 @@ function buildDashboard(d) {
     grid.appendChild(card);
     const chart = echarts.init(chartDiv, null, { renderer: "canvas" });
     chartPanels.push({ panel, chart, statusEl: status, sqlPre: det.querySelector("pre") });
+    chart.on("click", p => openIssues(panel, p));
   }
 }
 function panelMeta(panel) {
@@ -547,6 +586,84 @@ async function refreshExplore() {
   }
 }
 
+// Drill-through: list the affected issues behind a clicked chart cell ----------
+function openIssues(panel, params) {
+  if (!panel || panel.unavailable) return;
+  const sliceValue = params && params.name != null ? String(params.name) : "";
+  let segmentValue = "";
+  if (params && params.seriesName && !["p50", "p85", "p95"].includes(params.seriesName) &&
+      state.segment && state.segment !== "none") {
+    segmentValue = params.seriesName === "(none)" ? "" : params.seriesName;
+  }
+  showIssues(panel, sliceValue, segmentValue);
+}
+
+function issueTitle(panel, sv, seg) {
+  let t = measureLabel(panel.measure);
+  if (panel.slice && panel.slice !== "none" && sv) t += " · " + (DIM_LABEL[panel.slice] || panel.slice) + ": " + sv;
+  else if (sv) t += " · " + sv;
+  if (seg) t += " / " + seg;
+  return t;
+}
+
+async function showIssues(panel, sliceValue, segmentValue) {
+  const modal = $("issuesModal");
+  modal.classList.add("show");
+  $("imTitle").textContent = issueTitle(panel, sliceValue, segmentValue);
+  $("imBody").innerHTML = '<div class="im-loading">Loading issues…</div>';
+  $("imSql").textContent = "";
+  const copyBtn = $("imCopy"); copyBtn.style.display = "none";
+  try {
+    const p = panelParams(panel, { slice_value: sliceValue, segment_value: segmentValue });
+    const u = new URLSearchParams();
+    for (const k in p) if (p[k] !== undefined && p[k] !== null && p[k] !== "") u.set(k, p[k]);
+    const r = await fetch("/issues?" + u.toString());
+    const j = await r.json();
+    if (!r.ok) throw new Error(j && j.error ? j.error : ("HTTP " + r.status));
+    renderIssues(panel, j);
+  } catch (e) {
+    $("imBody").innerHTML = '<div class="im-err">' + escapeHTML(e.message) + '</div>';
+  }
+}
+
+function renderIssues(panel, j) {
+  const base = (META && META.jira_base_url) || "";
+  const rows = j.rows || [];
+  const unit = unitOf(panel);
+  const shown = rows.length, more = j.count > shown ? ` (showing first ${shown})` : "";
+  let html = `<div class="im-count">${j.count} issue${j.count === 1 ? "" : "s"}${more}</div>`;
+  if (!rows.length) {
+    $("imBody").innerHTML = html + '<div class="im-loading">No issues in scope.</div>';
+  } else {
+    html += '<table class="im-table"><thead><tr><th>Key</th><th>Summary</th><th class="num">' +
+      escapeHTML(measureLabel(panel.measure)) + '</th></tr></thead><tbody>';
+    for (const row of rows) {
+      const key = row.issue_key || "";
+      const link = base
+        ? `<a href="${base}/browse/${encodeURIComponent(key)}" target="_blank" rel="noopener">${escapeHTML(key)}</a>`
+        : escapeHTML(key);
+      const val = row.value == null ? "" : fmtVal(row.value, unit);
+      html += `<tr><td class="key">${link}</td><td>${escapeHTML(row.summary || "")}</td><td class="num">${val}</td></tr>`;
+    }
+    html += "</tbody></table>";
+    $("imBody").innerHTML = html;
+  }
+  $("imSql").textContent = j.sql || "";
+  const copyBtn = $("imCopy");
+  if (j.jai_query) {
+    copyBtn.style.display = "";
+    copyBtn.textContent = "Copy jai query";
+    copyBtn.onclick = () => {
+      navigator.clipboard.writeText(j.jai_query).then(() => {
+        copyBtn.textContent = "Copied!";
+        setTimeout(() => { copyBtn.textContent = "Copy jai query"; }, 1200);
+      });
+    };
+  }
+}
+
+function closeIssues() { $("issuesModal").classList.remove("show"); }
+
 // View orchestration --------------------------------------------------------
 function buildCurrentView() {
   if (state.view === EXPLORE) {
@@ -555,7 +672,10 @@ function buildCurrentView() {
     $("grid").style.display = "none";
     $("explore").style.display = "";
     disposeAll();
-    if (!exploreChart) exploreChart = echarts.init($("exChartDiv"), null, { renderer: "canvas" });
+    if (!exploreChart) {
+      exploreChart = echarts.init($("exChartDiv"), null, { renderer: "canvas" });
+      exploreChart.on("click", p => openIssues(explorePanel(), p));
+    }
   } else {
     $("desc").style.display = "";
     $("tiles").style.display = "";
@@ -633,6 +753,10 @@ function wireEvents() {
   // Re-theme ECharts on light/dark switch (CSS vars drive colors read at build time).
   const mq = window.matchMedia("(prefers-color-scheme: dark)");
   if (mq.addEventListener) mq.addEventListener("change", () => refreshCurrent());
+
+  $("imClose").addEventListener("click", closeIssues);
+  $("imBackdrop").addEventListener("click", closeIssues);
+  document.addEventListener("keydown", e => { if (e.key === "Escape") closeIssues(); });
 }
 
 // ---------------------------------------------------------------------------
