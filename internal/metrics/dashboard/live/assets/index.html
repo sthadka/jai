@@ -17,12 +17,23 @@
   .controls { display: flex; flex-wrap: wrap; gap: 14px 20px; padding: 14px 18px; border-bottom: 1px solid #8884; }
   .controls label { display: flex; flex-direction: column; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; opacity: 0.75; gap: 4px; }
   .controls select, .controls input { font-size: 13px; padding: 4px 6px; min-width: 120px; }
+  .controls select:disabled { opacity: 0.4; }
   main { padding: 18px; }
   #chart { min-height: 320px; }
   #status { padding: 0 18px 14px; font-size: 12px; opacity: 0.8; }
   #status.err { color: #c0392b; opacity: 1; font-weight: 600; }
   details { margin: 12px 18px; font-size: 12px; }
   details pre { overflow: auto; padding: 8px; background: #8881; border-radius: 4px; }
+  #desc { padding: 0 18px 6px; font-size: 12px; opacity: 0.7; max-width: 70ch; }
+  #panels { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 18px; }
+  .panel { border: 1px solid #8884; border-radius: 6px; padding: 12px; }
+  .panel h3 { font-size: 13px; margin: 0 0 8px; font-weight: 600; }
+  .panel .pmeta { font-size: 11px; opacity: 0.6; margin-bottom: 8px; }
+  .panel .pchart { min-height: 260px; }
+  .panel .pstatus { font-size: 11px; opacity: 0.7; }
+  .panel.unavailable { border-style: dashed; opacity: 0.85; }
+  .panel .unavail { font-size: 12px; padding: 14px; background: #f39c1218; border-left: 3px solid #f39c12; border-radius: 4px; }
+  .panel .unavail b { text-transform: uppercase; letter-spacing: 0.04em; font-size: 11px; color: #c87f0a; }
 </style>
 </head>
 <body>
@@ -47,15 +58,21 @@
   <label>To <input type="date" id="to"></label>
 </div>
 
+<div id="desc"></div>
 <div id="status">loading…</div>
-<main><div id="chart"></div></main>
-<details>
+<main>
+  <div id="chart"></div>
+  <div id="panels" hidden></div>
+</main>
+<details id="sqlBox">
   <summary>Generated SQL (read-only, templated)</summary>
   <pre id="sql"></pre>
 </details>
 
 <script>
 const $ = (id) => document.getElementById(id);
+let DASHBOARDS = [];       // [{id,title,description,source,panels:[...]}]
+const EXPLORE_CONTROLS = ["measure","slice","segment","cohort"];
 
 function fillSelect(sel, items, selected) {
   sel.innerHTML = "";
@@ -81,6 +98,30 @@ async function loadMeta() {
   }
 }
 
+async function loadDashboards() {
+  try {
+    const body = await (await fetch("/dashboards")).json();
+    DASHBOARDS = body.dashboards || [];
+  } catch (e) { DASHBOARDS = []; }
+  const sel = $("dashboard");
+  const current = sel.value;
+  sel.innerHTML = "";
+  const addOpt = (value, label) => {
+    const o = document.createElement("option");
+    o.value = value; o.textContent = label;
+    sel.appendChild(o);
+  };
+  addOpt("explore", "Explore (ad-hoc)");
+  for (const d of DASHBOARDS) {
+    const tag = d.source && d.source !== "embedded" ? " [" + d.source + "]" : "";
+    addOpt("dash:" + d.id, d.title + tag);
+  }
+  // Preserve the current selection across reloads when still present.
+  if ([...sel.options].some((o) => o.value === current)) sel.value = current;
+}
+
+// ---- ad-hoc "Explore" mode -------------------------------------------------
+
 function params() {
   const p = new URLSearchParams();
   for (const id of ["measure","slice","segment","grain","project","cohort","from","to"]) {
@@ -90,16 +131,55 @@ function params() {
   return p;
 }
 
-// Build a Vega-Lite spec from the current controls and the returned rows.
-function spec(rows) {
+function exploreSpec(rows) {
   const measure = $("measure").value;
-  const slice = $("slice").value;
-  const segment = $("segment").value;
+  return chartSpec({
+    measure, slice: $("slice").value, segment: $("segment").value,
+    chart: $("slice").value === "period" ? "line" : "bar",
+  }, rows);
+}
+
+// ---- shared chart builder (used by Explore and dashboard panels) -----------
+
+// chartSpec maps a panel's {measure, slice, segment, chart} + returned rows to a
+// Vega-Lite spec. chart picks the render per plan §2d: bar (segmented bar / counts),
+// scatter (distribution with p50/p85/p95 percentile markers), line (time series).
+function chartSpec(panel, rows) {
+  const { measure, slice, segment, chart } = panel;
   const isCount = measure === "throughput";
-  const isPeriod = slice === "period";
+  const hasSeg = segment && segment !== "none";
+  const base = { $schema: "https://vega.github.io/schema/vega-lite/v5.json", width: "container", height: 260, data: { values: rows } };
+
+  if (chart === "scatter" && !isCount) {
+    // Distribution: percentile markers (p50/p85/p95) per slice, with a p50->p95 rule.
+    return Object.assign(base, {
+      transform: [{ fold: ["p50","p85","p95"], as: ["pct","value"] }],
+      layer: [
+        { mark: { type: "rule", color: "#8886" },
+          encoding: {
+            x: { field: "slice", type: "nominal", sort: "-y", title: slice },
+            y: { field: "p50", type: "quantitative", title: measure },
+            y2: { field: "p95" },
+          } },
+        { mark: { type: "point", filled: true, size: 70 },
+          encoding: {
+            x: { field: "slice", type: "nominal", sort: "-y", title: slice },
+            y: { field: "value", type: "quantitative", title: measure },
+            color: { field: "pct", type: "nominal", title: "percentile" },
+            tooltip: [
+              { field: "slice", title: slice },
+              { field: "pct", title: "percentile" },
+              { field: "value", type: "quantitative" },
+              { field: "n", title: "count", type: "quantitative" },
+            ],
+          } },
+      ],
+    });
+  }
+
+  const isPeriod = slice === "period" || slice === "created_period" || chart === "line";
   const yField = isCount ? "n" : "p50";
   const yTitle = isCount ? "count" : measure + " p50";
-
   const enc = {
     x: isPeriod
       ? { field: "slice", type: "temporal", title: slice }
@@ -107,7 +187,7 @@ function spec(rows) {
     y: { field: yField, type: "quantitative", title: yTitle },
     tooltip: [
       { field: "slice", title: slice },
-      ...(segment !== "none" ? [{ field: "segment", title: segment }] : []),
+      ...(hasSeg ? [{ field: "segment", title: segment }] : []),
       { field: "n", title: "count", type: "quantitative" },
       ...(isCount ? [] : [
         { field: "p50", type: "quantitative" },
@@ -116,42 +196,113 @@ function spec(rows) {
       ]),
     ],
   };
-  if (segment !== "none") {
-    enc.color = { field: "segment", type: "nominal", title: segment };
-  }
-  return {
-    $schema: "https://vega.github.io/schema/vega-lite/v5.json",
-    width: "container",
-    height: 360,
-    data: { values: rows },
+  if (hasSeg) enc.color = { field: "segment", type: "nominal", title: segment };
+  return Object.assign(base, {
     mark: isPeriod ? { type: "line", point: true } : { type: "bar" },
     encoding: enc,
-  };
+  });
+}
+
+// ---- dashboard (multi-panel) mode ------------------------------------------
+
+function panelParams(panel) {
+  const d = panel.defaults || {};
+  const p = new URLSearchParams();
+  p.set("measure", panel.measure || "");
+  p.set("slice", panel.slice || "none");
+  p.set("segment", panel.segment || "none");
+  // Shared knobs inherit the control bar; cohort stays panel-fixed.
+  p.set("grain", $("grain").value || d.grain || "month");
+  p.set("project", $("project").value || d.project || "all");
+  p.set("cohort", d.cohort || "delivered");
+  const from = $("from").value || d.from; if (from) p.set("from", from);
+  const to = $("to").value || d.to; if (to) p.set("to", to);
+  return p;
+}
+
+async function renderPanel(panel, el) {
+  const chartEl = el.querySelector(".pchart");
+  const statusEl = el.querySelector(".pstatus");
+  statusEl.textContent = "querying…";
+  try {
+    const res = await fetch("/q?" + panelParams(panel).toString());
+    const body = await res.json();
+    if (!res.ok) { statusEl.textContent = "error: " + (body.error || res.status); return; }
+    const rows = body.rows || [];
+    statusEl.textContent = rows.length + " group(s)";
+    if (!rows.length) { chartEl.textContent = "no data in scope"; return; }
+    await vegaEmbed(chartEl, chartSpec(panel, rows), { actions: false });
+  } catch (e) { statusEl.textContent = "error: " + e; }
+}
+
+async function renderDashboard(dash) {
+  $("desc").textContent = dash.description || "";
+  const grid = $("panels");
+  grid.innerHTML = "";
+  for (const panel of dash.panels || []) {
+    const el = document.createElement("div");
+    el.className = "panel";
+    const h = document.createElement("h3");
+    h.textContent = panel.title || panel.metric || panel.measure || "panel";
+    el.appendChild(h);
+    if (panel.unavailable) {
+      el.classList.add("unavailable");
+      const u = document.createElement("div");
+      u.className = "unavail";
+      u.innerHTML = "<b>unavailable</b><br>";
+      u.appendChild(document.createTextNode(panel.unavailable));
+      el.appendChild(u);
+    } else {
+      const meta = document.createElement("div");
+      meta.className = "pmeta";
+      meta.textContent = [panel.measure, "by " + (panel.slice || "none"),
+        panel.segment && panel.segment !== "none" ? "× " + panel.segment : ""].filter(Boolean).join(" ");
+      el.appendChild(meta);
+      const c = document.createElement("div"); c.className = "pchart"; el.appendChild(c);
+      const s = document.createElement("div"); s.className = "pstatus"; el.appendChild(s);
+    }
+    grid.appendChild(el);
+    if (!panel.unavailable) renderPanel(panel, el);
+  }
+}
+
+// ---- top-level dispatch ----------------------------------------------------
+
+function setExploreControls(disabled) {
+  for (const id of EXPLORE_CONTROLS) $(id).disabled = disabled;
 }
 
 async function refresh() {
+  const selection = $("dashboard").value;
   const status = $("status");
   status.className = "";
+
+  if (selection !== "explore") {
+    const dash = DASHBOARDS.find((d) => "dash:" + d.id === selection);
+    if (!dash) { status.textContent = "dashboard not found"; return; }
+    $("chart").hidden = true; $("panels").hidden = false; $("sqlBox").hidden = true;
+    setExploreControls(true);
+    status.textContent = dash.title + " · " + (dash.panels || []).length + " panel(s)";
+    await renderDashboard(dash);
+    return;
+  }
+
+  // Explore (ad-hoc) single-chart mode.
+  $("chart").hidden = false; $("panels").hidden = true; $("sqlBox").hidden = false;
+  $("desc").textContent = ""; setExploreControls(false);
   status.textContent = "querying…";
   try {
     const res = await fetch("/q?" + params().toString());
     const body = await res.json();
     $("sql").textContent = body.sql || "";
-    if (!res.ok) {
-      status.className = "err";
-      status.textContent = "error: " + (body.error || res.status);
-      return;
-    }
+    if (!res.ok) { status.className = "err"; status.textContent = "error: " + (body.error || res.status); return; }
     const rows = body.rows || [];
     status.textContent = rows.length + " group(s)";
-    await vegaEmbed("#chart", spec(rows), { actions: false });
-  } catch (e) {
-    status.className = "err";
-    status.textContent = "error: " + e;
-  }
+    await vegaEmbed("#chart", exploreSpec(rows), { actions: false });
+  } catch (e) { status.className = "err"; status.textContent = "error: " + e; }
 }
 
-(async () => { await loadMeta(); await refresh(); })();
+(async () => { await loadMeta(); await loadDashboards(); await refresh(); })();
 </script>
 </body>
 </html>

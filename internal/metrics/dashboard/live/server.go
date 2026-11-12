@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"sort"
 	"time"
+
+	"github.com/sthadka/jai/internal/metrics/dashboard/specs"
 )
 
 // assets holds the single-page app and the VENDORED Vega-Lite stack (vega,
@@ -26,6 +28,12 @@ type Server struct {
 	projects   []string
 	generation any
 	mux        *http.ServeMux
+	// specDirs are the runtime custom-spec directories (lowest->highest precedence),
+	// re-read on every /dashboards request so custom specs appear without a rebuild.
+	specDirs []string
+	// caps names the satisfied server capabilities (e.g. blocker_link_types) used to
+	// resolve config-dependent panels to explicit unavailable cards.
+	caps map[string]bool
 }
 
 // NewServer wires routes over the given engine and active-generation metadata.
@@ -36,9 +44,23 @@ func NewServer(engine *Engine, projects []string, generation any) *Server {
 		projects:   projects,
 		generation: generation,
 		mux:        http.NewServeMux(),
+		specDirs:   specs.DefaultDirs(),
+		caps:       map[string]bool{},
 	}
 	s.routes()
 	return s
+}
+
+// SetDashboards overrides the capability set and the custom-spec directories
+// (lowest->highest precedence). Called by the CLI with policy-derived capabilities
+// and the resolved runtime dirs; tests may use it to point at a fixture dir.
+func (s *Server) SetDashboards(caps map[string]bool, dirs []string) {
+	if caps != nil {
+		s.caps = caps
+	}
+	if dirs != nil {
+		s.specDirs = dirs
+	}
 }
 
 // Handler exposes the route mux (for tests and embedding).
@@ -50,6 +72,22 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/", s.handleIndex)
 	s.mux.HandleFunc("/meta", s.handleMeta)
 	s.mux.HandleFunc("/q", s.handleQuery)
+	s.mux.HandleFunc("/dashboards", s.handleDashboards)
+}
+
+// handleDashboards serves the embedded default dashboards merged with custom specs
+// from the runtime dirs (project-local overrides user, which overrides embedded).
+// Loaded fresh per request so a newly-dropped spec appears on reload without a
+// rebuild. Config-dependent panels are resolved to explicit unavailable cards.
+func (s *Server) handleDashboards(w http.ResponseWriter, r *http.Request) {
+	dbs, err := specs.Load(s.specDirs...)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"dashboards": specs.ResolveAvailability(dbs, s.caps),
+	})
 }
 
 // ListenAndServe binds 127.0.0.1 on the given port (0 => ephemeral), returns the

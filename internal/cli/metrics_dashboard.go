@@ -60,8 +60,9 @@ func runMetricsDashboardLive() error {
 	_, pol, store := metricsService()
 
 	engine, err := live.NewEngine(live.EngineConfig{
-		DBPath:          g.cfg.DB.Path,
-		DoneResolutions: pol.DoneResolutions(),
+		DBPath:           g.cfg.DB.Path,
+		DoneResolutions:  pol.DoneResolutions(),
+		BlockerLinkTypes: pol.BlockerLinkTypes(),
 	})
 	if err != nil {
 		if errors.Is(err, live.ErrDuckDBNotFound) {
@@ -86,6 +87,7 @@ func runMetricsDashboardLive() error {
 	}
 
 	srv := live.NewServer(engine, projects, gen)
+	srv.SetDashboards(dashboardCapabilities(pol), nil)
 	url, httpSrv, err := srv.ListenAndServe(dashboardPort)
 	if err != nil {
 		return metricErr("DashboardError", fmt.Errorf("bind localhost server: %w", err))
@@ -107,6 +109,20 @@ func runMetricsDashboardLive() error {
 	defer cancel()
 	_ = httpSrv.Shutdown(shutCtx)
 	return nil
+}
+
+// dashboardCapabilities derives the satisfied dashboard capabilities from the
+// metrics policy/config so config-dependent panels (blocker ageing, security SLA)
+// render live only when their taxonomy is configured, and otherwise fall back to
+// explicit unavailable cards instead of fabricated data.
+func dashboardCapabilities(pol *metrics.Policy) map[string]bool {
+	caps := map[string]bool{
+		"blocker_link_types": len(pol.BlockerLinkTypes()) > 0,
+	}
+	if m := g.cfg.Metrics; m.SLA != nil && m.SLA.Security != nil {
+		caps["security_sla"] = true
+	}
+	return caps
 }
 
 // runMetricsDashboardStatic writes the self-contained offline snapshot. Reachable

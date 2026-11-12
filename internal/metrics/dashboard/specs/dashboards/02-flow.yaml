@@ -1,0 +1,39 @@
+id: flow
+title: Flow
+description: >-
+  Throughput and net-flow time series. CFD (burn-up), daily WIP and per-stage
+  dwell need a date-spine / per-interval query shape the distribution /q template
+  does not serve; they render as explicit unavailable cards (available on the CLI).
+panels:
+  - title: Throughput (completed per period)
+    metric: throughput
+    measure: throughput
+    slice: period
+    segment: none
+    chart: line
+    defaults: { cohort: delivered, grain: month }
+  - title: Net flow (created per period — compare to completed above)
+    metric: net_flow
+    measure: throughput
+    slice: created_period
+    segment: none
+    chart: line
+    defaults: { cohort: all, grain: month }
+  - title: Cumulative flow (CFD / burn-up)
+    metric: cfd
+    chart: cfd
+    unavailable: >-
+      cumulative flow / burn-up needs a date-spine running-total query shape not
+      served by the group-by /q template; run `jai metrics cfd`.
+  - title: Work in progress (daily WIP)
+    metric: wip
+    chart: line
+    unavailable: >-
+      daily WIP is a date-spine snapshot series not served by the group-by /q
+      template; run `jai metrics wip`.
+  - title: Stage dwell (time-in-stage)
+    metric: stage_dwell
+    chart: scatter
+    unavailable: >-
+      per-stage interval durations have base table fact_field_interval, not the
+      issue-grouped /q template; run `jai metrics stage_dwell`.

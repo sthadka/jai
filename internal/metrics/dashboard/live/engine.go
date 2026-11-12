@@ -41,6 +41,12 @@ type EngineConfig struct {
 	// config (no tenant literal in code); used to bind the `done_res` DuckDB
 	// variable for the delivered cohort. May be empty.
 	DoneResolutions []string
+	// BlockerLinkTypes is the configured blocker link-type set from the metrics
+	// config (metrics.blocker_link_types — no tenant literal in code); used to bind
+	// the `blocker_links` DuckDB variable for the blocker_ageing measure. When empty
+	// the measure matches nothing (the dashboard renders it as an explicit
+	// unavailable card), never fabricated data.
+	BlockerLinkTypes []string
 }
 
 // Engine owns one long-lived `duckdb` process in JSON output mode with jai.db
@@ -108,6 +114,7 @@ func (e *Engine) setup(cfg EngineConfig) error {
 	// generations are never visible.
 	b.WriteString("SET VARIABLE g = (SELECT generation FROM jai.metrics_active_generation WHERE id = 1);\n")
 	b.WriteString("SET VARIABLE done_res = " + sqlStringList(cfg.DoneResolutions) + ";\n")
+	b.WriteString("SET VARIABLE blocker_links = " + sqlStringList(cfg.BlockerLinkTypes) + ";\n")
 	if _, err := io.WriteString(e.stdin, b.String()); err != nil {
 		return fmt.Errorf("duckdb setup write: %w", err)
 	}

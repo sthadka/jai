@@ -22,11 +22,26 @@ import (
 
 // measureSpec describes an aggregatable measure. valueExpr is the per-row numeric
 // expression (empty => count-only, e.g. throughput); filter is an extra WHERE
-// fragment dropping rows the measure is undefined for.
+// fragment dropping rows the measure is undefined for; join is an optional
+// server-authored JOIN that provides an alias referenced by valueExpr (used for
+// per-issue changelog change-counts, pre-aggregated so no correlated subquery
+// reaches an aggregate). Exactly one measure is emitted per query, so every
+// measure join may reuse the same alias without collision.
 type measureSpec struct {
 	valueExpr string
 	filter    string
 	unit      string
+	join      string
+}
+
+// changelogCountJoin builds a server-authored, pre-aggregated per-issue count of
+// changelog rows for one tracked field. The field literal is a fixed, code-defined
+// token (priority/assignee/Rank) — never client text — so there is no injection
+// surface. LEFT JOIN + COALESCE keeps issues with zero changes in the population.
+func changelogCountJoin(alias, field string) string {
+	return fmt.Sprintf(
+		"LEFT JOIN (SELECT issue_key, count(*) AS cnt FROM jai.changelog WHERE field = '%s' GROUP BY issue_key) %s ON %s.issue_key = f.issue_key",
+		field, alias, alias)
 }
 
 // measures is the whitelist of measure tokens. All SQL fragments are constant,
@@ -38,17 +53,46 @@ var measures = map[string]measureSpec{
 	"triage_latency": {valueExpr: "(epoch(f.first_active_at) - epoch(f.created)) / 86400.0", filter: "f.first_active_at IS NOT NULL AND f.created IS NOT NULL AND f.first_active_at >= f.created", unit: "days"},
 	"estimate":       {valueExpr: "f.estimate", filter: "f.estimate IS NOT NULL", unit: "points"},
 	"throughput":     {valueExpr: "", filter: "", unit: "count"},
+
+	// Reopen-count distribution (per-issue reopen tally; 0 for never-reopened).
+	"reopen_count": {valueExpr: "f.reopen_count", unit: "count"},
+
+	// Age of OPEN issues as-of now, in days. Pair with cohort=open; defaults leave
+	// the date window unset so open issues (resolved IS NULL) are not filtered out.
+	"aged_open": {valueExpr: "(epoch(CURRENT_TIMESTAMP) - epoch(f.created)) / 86400.0", filter: "f.resolved IS NULL AND f.created IS NOT NULL", unit: "days"},
+
+	// Per-issue change-count distributions over the changelog. Each uses a
+	// pre-aggregated grouped join (changelogCountJoin) — a server-authored constant
+	// fragment, never client SQL.
+	"priority_changes":    {valueExpr: "COALESCE(mj.cnt, 0)", unit: "count", join: changelogCountJoin("mj", "priority")},
+	"rank_volatility":     {valueExpr: "COALESCE(mj.cnt, 0)", unit: "count", join: changelogCountJoin("mj", "Rank")},
+	"reassignment_count":  {valueExpr: "COALESCE(mj.cnt, 0)", unit: "count", join: changelogCountJoin("mj", "assignee")},
+	"reassignment_thrash": {valueExpr: "GREATEST(COALESCE(mj.cnt, 0) - 1, 0)", unit: "count", join: changelogCountJoin("mj", "assignee")},
+
+	// Blocker-ageing proxy: age (days) of OPEN issues currently linked via a
+	// CONFIGURED blocker link type. The link-type set is bound as the server-side
+	// `blocker_links` variable (from metrics.blocker_link_types — no tenant literal
+	// in code); when unconfigured the variable is empty and the EXISTS never matches,
+	// so zero rows are returned and nothing is fabricated. The dashboard marks the
+	// panel explicitly unavailable in that case (requires: blocker_link_types).
+	"blocker_ageing": {
+		valueExpr: "(epoch(CURRENT_TIMESTAMP) - epoch(f.created)) / 86400.0",
+		filter:    "f.resolved IS NULL AND f.created IS NOT NULL AND EXISTS (SELECT 1 FROM jai.issue_links bl WHERE bl.issue_key = f.issue_key AND list_contains(getvariable('blocker_links'), bl.link_type))",
+		unit:      "days",
+	},
 }
 
 // dimKind selects how a dimension produces its group value.
 type dimKind int
 
 const (
-	dimNone       dimKind = iota // no grouping
-	dimColumn                    // a column on fact_issue_flow
-	dimPeriod                    // date_trunc(grain, resolved) — time series
-	dimMembership                // event-time fact_issue_membership temporal join
-	dimInterval                  // event-time fact_field_interval temporal join
+	dimNone            dimKind = iota // no grouping
+	dimColumn                         // a column on fact_issue_flow
+	dimPeriod                         // date_trunc(grain, resolved) — resolution time series
+	dimCreatedPeriod                  // date_trunc(grain, created) — creation time series
+	dimMembership                     // event-time fact_issue_membership temporal join
+	dimInterval                       // event-time fact_field_interval temporal join (value at resolved)
+	dimCurrentInterval                // fact_field_interval CURRENT (open) interval value
 )
 
 // dimSpec describes a slice/segment dimension. For column dims, expr is the SQL
@@ -57,22 +101,24 @@ const (
 type dimSpec struct {
 	kind      dimKind
 	expr      string // dimColumn only
-	joinValue string // dimMembership (dimension) / dimInterval (field)
+	joinValue string // dimMembership (dimension) / dimInterval/dimCurrentInterval (field)
 }
 
 // dimensions is the whitelist of slice/segment tokens.
 var dimensions = map[string]dimSpec{
-	"none":       {kind: dimNone},
-	"period":     {kind: dimPeriod},
-	"project":    {kind: dimColumn, expr: "f.project"},
-	"type":       {kind: dimColumn, expr: "f.type"},
-	"resolution": {kind: dimColumn, expr: "f.resolution"},
-	"status":     {kind: dimColumn, expr: "f.current_stage"},
-	"priority":   {kind: dimInterval, joinValue: "priority"},
-	"assignee":   {kind: dimInterval, joinValue: "assignee"},
-	"component":  {kind: dimMembership, joinValue: "component"},
-	"label":      {kind: dimMembership, joinValue: "label"},
-	"sprint":     {kind: dimMembership, joinValue: "sprint"},
+	"none":             {kind: dimNone},
+	"period":           {kind: dimPeriod},
+	"created_period":   {kind: dimCreatedPeriod},
+	"project":          {kind: dimColumn, expr: "f.project"},
+	"type":             {kind: dimColumn, expr: "f.type"},
+	"resolution":       {kind: dimColumn, expr: "f.resolution"},
+	"status":           {kind: dimColumn, expr: "f.current_stage"},
+	"priority":         {kind: dimInterval, joinValue: "priority"},
+	"assignee":         {kind: dimInterval, joinValue: "assignee"},
+	"assignee_current": {kind: dimCurrentInterval, joinValue: "assignee"},
+	"component":        {kind: dimMembership, joinValue: "component"},
+	"label":            {kind: dimMembership, joinValue: "label"},
+	"sprint":           {kind: dimMembership, joinValue: "sprint"},
 }
 
 // grains is the whitelist of time-grain tokens; each maps to a DuckDB
@@ -90,6 +136,7 @@ var grains = map[string]string{
 var cohorts = map[string]string{
 	"delivered": "f.resolved IS NOT NULL AND list_contains(getvariable('done_res'), f.resolution)",
 	"resolved":  "f.resolved IS NOT NULL",
+	"open":      "f.resolved IS NULL",
 	"all":       "1 = 1",
 }
 
@@ -152,6 +199,8 @@ func dimSelect(spec dimSpec, alias, grainPart string) (sel, join string) {
 		return "CAST(" + spec.expr + " AS VARCHAR)", ""
 	case dimPeriod:
 		return "CAST(date_trunc('" + grainPart + "', f.resolved) AS VARCHAR)", ""
+	case dimCreatedPeriod:
+		return "CAST(date_trunc('" + grainPart + "', f.created) AS VARCHAR)", ""
 	case dimMembership:
 		j := fmt.Sprintf("JOIN jai.fact_issue_membership %s ON %s.generation = f.generation AND %s.issue_key = f.issue_key AND %s.dimension = '%s' AND %s.entered_at <= f.resolved AND (%s.exited_at IS NULL OR %s.exited_at > f.resolved)",
 			alias, alias, alias, alias, spec.joinValue, alias, alias, alias)
@@ -159,6 +208,12 @@ func dimSelect(spec dimSpec, alias, grainPart string) (sel, join string) {
 	case dimInterval:
 		j := fmt.Sprintf("JOIN jai.fact_field_interval %s ON %s.generation = f.generation AND %s.issue_key = f.issue_key AND %s.field = '%s' AND %s.entered_at <= f.resolved AND (%s.exited_at IS NULL OR %s.exited_at > f.resolved)",
 			alias, alias, alias, alias, spec.joinValue, alias, alias, alias)
+		return "CAST(" + alias + ".value AS VARCHAR)", j
+	case dimCurrentInterval:
+		// CURRENT value = the open interval (exited_at IS NULL): the owner/value in
+		// effect right now, independent of resolution time (workload_*_current).
+		j := fmt.Sprintf("JOIN jai.fact_field_interval %s ON %s.generation = f.generation AND %s.issue_key = f.issue_key AND %s.field = '%s' AND %s.exited_at IS NULL",
+			alias, alias, alias, alias, spec.joinValue, alias)
 		return "CAST(" + alias + ".value AS VARCHAR)", j
 	}
 	return "''", ""
@@ -246,6 +301,9 @@ func (w *Whitelist) Build(raw QueryParams) (string, error) {
 	b.WriteString("  count(*) AS n,\n")
 	b.WriteString("  " + aggCols + "\n")
 	b.WriteString("FROM jai.fact_issue_flow f\n")
+	if m.join != "" {
+		b.WriteString(m.join + "\n")
+	}
 	if sliceJoin != "" {
 		b.WriteString(sliceJoin + "\n")
 	}
