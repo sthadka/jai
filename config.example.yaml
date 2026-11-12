@@ -61,26 +61,26 @@ views:
 metrics:
   status_stage_ids: {}            # optional: "10001": done  (ID overrides name, survives renames)
   status_stages:                  # name fallback; names not listed -> category default -> unknown
-    todo:    [New, Backlog, To Do, Refinement, Planning]
-    active:  [In Progress, Review, Dev Complete, Testing, Approved]
-    waiting: [Waiting, Hold]
-    done:    [Closed, Release Pending]
+    todo:    [Open, "To Do", Backlog, Reopened]
+    active:  ["In Progress", "In Review", "Selected for Development"]
+    waiting: [Blocked, "On Hold"]
+    done:    [Done, Closed, Resolved]
   wip_stages: [active]            # stages counted as WIP / cycle-time active
-  done_resolutions: [Done, Done-Errata]  # omit to run delivery metrics over ALL resolved issues (labelled)
+  done_resolutions: [Done, Fixed]  # omit to run delivery metrics over ALL resolved issues (labelled)
   type_classes:                   # types not listed -> `other`
     bug:      [Bug]
-    feature:  [Story, Feature, "Feature Request"]
+    feature:  [Story, "New Feature", Improvement]
     task:     [Task, Sub-task]
-    security: [Vulnerability, Weakness]
+    security: [Vulnerability]
   ratio:                          # zero denominator is undefined, never 0
     numerator: bug
     denominator: feature
     cohort: completed             # created | completed
-  tracked_fields: [status, priority, assignee, Team, Rank]  # must appear in changelog.field
-  blocker_link_types: [is blocked by, depends on]
+  tracked_fields: [status, priority, assignee]  # must appear in changelog.field
+  blocker_link_types: [is blocked by]
   sla:                            # optional; drives security/SLA metrics
     security:
       severity_field: priority    # categorical field with per-value deadlines
-      deadlines_days: { Critical: 7, Major: 30, Minor: 90 }
+      deadlines_days: { Highest: 7, High: 14, Medium: 30, Low: 90 }
       clock_start: created
       on_missing_severity: exclude  # exclude | treat_as:<label>
