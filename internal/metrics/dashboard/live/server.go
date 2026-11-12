@@ -14,11 +14,12 @@ import (
 	"github.com/sthadka/jai/internal/metrics/dashboard/specs"
 )
 
-// assets holds the single-page app and the VENDORED Vega-Lite stack (vega,
-// vega-lite, vega-embed). They are embedded (go:embed) and served by this server
-// — NOT loaded from any CDN. The served index.html references only /assets/*.js.
+// assets holds the single-page app and the VENDORED Apache ECharts runtime plus
+// the IBM Plex Sans webfont. They are embedded (go:embed) and served by this
+// server — NOT loaded from any CDN. The served index.html references only
+// /assets/* (echarts.min.js, the font under /assets/fonts/, and inline styles).
 //
-//go:embed assets/index.html assets/vega.min.js assets/vega-lite.min.js assets/vega-embed.min.js
+//go:embed assets/index.html assets/echarts.min.js assets/fonts/*
 var assets embed.FS
 
 // Server is the live dashboard HTTP server. It is localhost-only and read-only:
@@ -151,10 +152,10 @@ func (s *Server) handleMeta(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"generation": gen,
 		"projects":   projects,
-		"measures":   MeasureTokens(),
-		"dimensions": DimensionTokens(),
-		"grains":     GrainTokens(),
-		"cohorts":    CohortTokens(),
+		"measures":   MeasureOptions(),
+		"dimensions": DimensionOptions(),
+		"grains":     GrainOptions(),
+		"cohorts":    CohortOptions(),
 	})
 }
 

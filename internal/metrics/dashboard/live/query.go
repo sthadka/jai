@@ -370,13 +370,120 @@ func decodeRows(line string) ([]map[string]any, error) {
 	return rows, nil
 }
 
-// MeasureTokens / DimensionTokens / GrainTokens / CohortTokens expose the
-// whitelists (sorted) for the /meta endpoint so the SPA builds its dropdowns
-// from the same source of truth that validates requests.
-func MeasureTokens() []string   { return sortedKeys(measuresKeys()) }
-func DimensionTokens() []string { return sortedKeys(dimensionKeys()) }
-func GrainTokens() []string     { return []string{"day", "week", "month", "quarter", "year"} }
-func CohortTokens() []string    { return sortedKeys(cohortKeys()) }
+// -----------------------------------------------------------------------------
+// Human labels — the single source of truth for the dropdown vocabulary. The
+// server emits {value,label} objects on /meta so the SPA renders readable names
+// while still sending/validating the raw whitelist tokens. Measures additionally
+// carry their unit so tiles format values (days/ratio/points/count).
+// -----------------------------------------------------------------------------
+
+// measureLabels maps each measure token to its human-readable display name.
+var measureLabels = map[string]string{
+	"cycle_time":          "Cycle Time",
+	"lead_time":           "Lead Time",
+	"flow_occupancy":      "Flow Occupancy",
+	"triage_latency":      "Triage Time",
+	"estimate":            "Effort (Estimate)",
+	"throughput":          "Issues Completed",
+	"reopen_count":        "Reopens",
+	"aged_open":           "Issue Age",
+	"priority_changes":    "Priority Changes",
+	"rank_volatility":     "Rank Changes",
+	"reassignment_count":  "Reassignments",
+	"reassignment_thrash": "Reassignment Thrash",
+	"blocker_ageing":      "Blocked Age",
+}
+
+// dimensionLabels maps each slice/segment token to its human-readable name.
+var dimensionLabels = map[string]string{
+	"none":             "Total",
+	"period":           "Completed (by period)",
+	"created_period":   "Created (by period)",
+	"project":          "Project",
+	"type":             "Type",
+	"resolution":       "Resolution",
+	"status":           "Status",
+	"priority":         "Priority",
+	"assignee":         "Assignee (at completion)",
+	"assignee_current": "Assignee (current)",
+	"component":        "Component",
+	"label":            "Label",
+	"sprint":           "Sprint",
+}
+
+// cohortLabels maps each cohort token to its human-readable name.
+var cohortLabels = map[string]string{
+	"delivered": "Delivered",
+	"resolved":  "Resolved",
+	"open":      "Open",
+	"all":       "All",
+}
+
+// grainLabels maps each grain token to its human-readable name.
+var grainLabels = map[string]string{
+	"day":     "Day",
+	"week":    "Week",
+	"month":   "Month",
+	"quarter": "Quarter",
+	"year":    "Year",
+}
+
+// LabelOption is a {value,label} dropdown entry emitted on /meta.
+type LabelOption struct {
+	Value string `json:"value"`
+	Label string `json:"label"`
+}
+
+// MeasureOption extends LabelOption with the measure's unit so the SPA can format
+// tile values (e.g. "12.3d", "0.42", "47 pts", "47").
+type MeasureOption struct {
+	Value string `json:"value"`
+	Label string `json:"label"`
+	Unit  string `json:"unit"`
+}
+
+// MeasureOptions / DimensionOptions / GrainOptions / CohortOptions expose the
+// whitelists as {value,label} arrays (measures also carry unit) for the /meta
+// endpoint, so the SPA builds its dropdowns from the same source of truth that
+// validates requests.
+func MeasureOptions() []MeasureOption {
+	keys := sortedKeys(measuresKeys())
+	out := make([]MeasureOption, 0, len(keys))
+	for _, k := range keys {
+		lbl := measureLabels[k]
+		if lbl == "" {
+			lbl = k
+		}
+		out = append(out, MeasureOption{Value: k, Label: lbl, Unit: measures[k].unit})
+	}
+	return out
+}
+
+func DimensionOptions() []LabelOption {
+	return labelOptions(sortedKeys(dimensionKeys()), dimensionLabels)
+}
+
+func CohortOptions() []LabelOption {
+	return labelOptions(sortedKeys(cohortKeys()), cohortLabels)
+}
+
+// GrainOptions returns grains in logical (not alphabetical) order.
+func GrainOptions() []LabelOption {
+	return labelOptions([]string{"day", "week", "month", "quarter", "year"}, grainLabels)
+}
+
+// labelOptions zips tokens with their human labels (falling back to the token).
+func labelOptions(keys []string, labels map[string]string) []LabelOption {
+	out := make([]LabelOption, 0, len(keys))
+	for _, k := range keys {
+		lbl := labels[k]
+		if lbl == "" {
+			lbl = k
+		}
+		out = append(out, LabelOption{Value: k, Label: lbl})
+	}
+	return out
+}
 
 func measuresKeys() []string {
 	ks := make([]string, 0, len(measures))

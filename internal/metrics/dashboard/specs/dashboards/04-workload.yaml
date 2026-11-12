@@ -1,0 +1,70 @@
+id: workload
+title: Workload
+description: >-
+  Where does the work sit? Completed volume and reassignment thrash up top, then
+  load by owner (event-time owner-at-completion vs the current owner), reassignment
+  churn, effort by type, and the shape-limited time-on-owner card. Event-time owner
+  attributes completed work to the owner AT completion; current owner uses the open
+  interval.
+panels:
+  - title: Issues Completed
+    metric: workload_throughput
+    measure: throughput
+    slice: none
+    segment: none
+    chart: number
+    stat: n
+    defaults: { cohort: delivered }
+  - title: Reassignment Thrash (p50)
+    metric: reassignment_thrash
+    measure: reassignment_thrash
+    slice: none
+    segment: none
+    chart: number
+    stat: p50
+    defaults: { cohort: all }
+  - title: Completed by Assignee (at completion)
+    measure: throughput
+    slice: assignee
+    segment: none
+    chart: bar
+    stat: n
+    defaults: { cohort: delivered }
+  - title: Completed by Current Owner
+    metric: workload_throughput_current
+    measure: throughput
+    slice: assignee_current
+    segment: none
+    chart: bar
+    stat: n
+    defaults: { cohort: delivered }
+  - title: Open Load by Current Owner
+    metric: workload_by_assignee
+    measure: throughput
+    slice: assignee_current
+    segment: none
+    chart: bar
+    stat: n
+    defaults: { cohort: open }
+  - title: Reassignments by Assignee
+    metric: reassignment_count
+    measure: reassignment_count
+    slice: assignee
+    segment: none
+    chart: bar
+    stat: p50
+    defaults: { cohort: all }
+  - title: Effort by Type
+    metric: estimate
+    measure: estimate
+    slice: type
+    segment: none
+    chart: bar
+    stat: p50
+    defaults: { cohort: delivered }
+  - title: Time on owner (event-time days held per owner)
+    metric: workload_time_on_owner
+    chart: bar
+    unavailable: >-
+      event-time days-held summed per owner has base table fact_field_interval,
+      not the issue-grouped /q template; run `jai metrics workload_time_on_owner`.

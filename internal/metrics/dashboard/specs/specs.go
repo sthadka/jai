@@ -5,8 +5,9 @@
 // A dashboard is a titled set of panels. A panel is purely declarative —
 // {title, measure, slice, segment, chart, defaults} — and renders THROUGH the
 // existing whitelisted /q template: measure/slice/segment/cohort/grain are the
-// same tokens the /q whitelist validates, never raw SQL. The SPA picks a Vega
-// render from `chart`. Panels tied to a metric whose data path the /q template
+// same tokens the /q whitelist validates, never raw SQL. The SPA picks an ECharts
+// render (number tile, bar, line, area, scatter) from `chart`. Panels tied to a
+// metric whose data path the /q template
 // cannot serve, or that need unconfigured taxonomy, carry an explicit
 // `unavailable` reason (or a `requires` capability resolved at serve time) so
 // they render an honest "unavailable" card — never fabricated data.
@@ -50,11 +51,23 @@ type PanelDefaults struct {
 
 // Panel is one declarative chart. It renders through the shared /q template.
 type Panel struct {
-	Title    string        `yaml:"title" json:"title"`
-	Measure  string        `yaml:"measure" json:"measure"`
-	Slice    string        `yaml:"slice" json:"slice"`
-	Segment  string        `yaml:"segment" json:"segment"`
-	Chart    string        `yaml:"chart" json:"chart"`
+	Title   string `yaml:"title" json:"title"`
+	Measure string `yaml:"measure" json:"measure"`
+	Slice   string `yaml:"slice" json:"slice"`
+	Segment string `yaml:"segment" json:"segment"`
+	// Chart selects the renderer: number (headline tile), bar, line, area, scatter.
+	Chart string `yaml:"chart" json:"chart"`
+
+	// Stat selects which aggregate column a panel reads: p50|p85|p95|avg|n|total.
+	// For chart:number it is the headline value (default: n when measure=throughput,
+	// else p50). For bar/line it optionally overrides the plotted column (e.g. a
+	// count chart over a distribution measure uses stat:n).
+	Stat string `yaml:"stat,omitempty" json:"stat,omitempty"`
+
+	// Unit optionally overrides the display unit (days|ratio|points|count);
+	// otherwise the client derives it from the measure's unit via /meta.
+	Unit string `yaml:"unit,omitempty" json:"unit,omitempty"`
+
 	Defaults PanelDefaults `yaml:"defaults" json:"defaults"`
 
 	// Metric is the canonical 24-metric-suite id this panel covers (for coverage

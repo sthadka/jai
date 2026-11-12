@@ -1,0 +1,58 @@
+id: bugs
+title: Bug clearance
+description: >-
+  Are we keeping up? Completed volume and reopen rate up top, then created-vs-
+  completed flow, reopen distribution, and the resolution/class mix. Note: issue
+  Type is NOT a /q filter yet, so these panels are general (they still honour the
+  global Project and date-range filters) — they are not bug-only. Filter honestly.
+panels:
+  - title: Issues Completed
+    measure: throughput
+    slice: none
+    segment: none
+    chart: number
+    stat: n
+    defaults: { cohort: delivered }
+  - title: Reopens (p50)
+    metric: reopen
+    measure: reopen_count
+    slice: none
+    segment: none
+    chart: number
+    stat: p50
+    defaults: { cohort: all }
+  - title: Completed by Month
+    measure: throughput
+    slice: period
+    segment: none
+    chart: line
+    defaults: { cohort: delivered, grain: month }
+  - title: Created by Month
+    measure: throughput
+    slice: created_period
+    segment: none
+    chart: line
+    defaults: { cohort: all, grain: month }
+  - title: Reopens by Priority
+    measure: reopen_count
+    slice: priority
+    segment: none
+    chart: bar
+    stat: p50
+    defaults: { cohort: all }
+  - title: Resolution mix
+    metric: resolution_mix
+    measure: throughput
+    slice: resolution
+    segment: none
+    chart: bar
+    stat: n
+    defaults: { cohort: resolved }
+  - title: "Class ratio (type counts — e.g. bug : feature)"
+    metric: ratio
+    measure: throughput
+    slice: type
+    segment: none
+    chart: bar
+    stat: n
+    defaults: { cohort: resolved }
