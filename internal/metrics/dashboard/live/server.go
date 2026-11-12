@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/sthadka/jai/internal/metrics/dashboard/specs"
@@ -34,6 +35,9 @@ type Server struct {
 	// caps names the satisfied server capabilities (e.g. blocker_link_types) used to
 	// resolve config-dependent panels to explicit unavailable cards.
 	caps map[string]bool
+	// mu guards the live-refreshed projects/generation metadata (updated on /meta
+	// so a rebuild is honored without a restart).
+	mu sync.RWMutex
 }
 
 // NewServer wires routes over the given engine and active-generation metadata.
@@ -124,10 +128,28 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 // plus the measure/dimension/grain/cohort whitelists, so the SPA builds its
 // dropdowns from the same source of truth that validates /q requests.
 func (s *Server) handleMeta(w http.ResponseWriter, r *http.Request) {
+	// Re-read the live generation + project set so a `metrics rebuild` that
+	// published a new generation (and deleted the obsolete one) is reflected
+	// without a server restart; also refresh the /q project whitelist to match.
+	// Data queries already re-bind `g` per call (see Engine.Query).
+	if projects, err := FetchProjects(s.engine); err == nil {
+		s.whitelist.SetProjects(projects)
+		s.mu.Lock()
+		s.projects = projects
+		s.mu.Unlock()
+	}
+	if gen, err := FetchGeneration(s.engine); err == nil && gen != nil {
+		s.mu.Lock()
+		s.generation = gen
+		s.mu.Unlock()
+	}
+	s.mu.RLock()
 	projects := append([]string(nil), s.projects...)
+	gen := s.generation
+	s.mu.RUnlock()
 	sort.Strings(projects)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"generation": s.generation,
+		"generation": gen,
 		"projects":   projects,
 		"measures":   MeasureTokens(),
 		"dimensions": DimensionTokens(),
@@ -190,5 +212,21 @@ func FetchProjects(engine *Engine) ([]string, error) {
 	return out, nil
 }
 
-// ActiveGeneration returns the active generation id bound at engine setup.
-func (s *Server) ActiveGeneration() any { return s.generation }
+// ActiveGeneration returns the current active generation id (refreshed on /meta).
+func (s *Server) ActiveGeneration() any {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.generation
+}
+
+// FetchGeneration returns the active fact generation id from the live DB.
+func FetchGeneration(engine *Engine) (any, error) {
+	rows, err := engine.Query("SELECT generation FROM jai.metrics_active_generation WHERE id = 1")
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	return rows[0]["generation"], nil
+}

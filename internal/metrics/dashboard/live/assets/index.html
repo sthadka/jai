@@ -20,6 +20,10 @@
   .controls select:disabled { opacity: 0.4; }
   main { padding: 18px; }
   #chart { min-height: 320px; }
+  /* vega-embed defaults its host to inline-block, which collapses to 0 width
+     when the spec uses width:"container"; force block + full width so charts render. */
+  .vega-embed { display: block !important; width: 100% !important; }
+  .vega-embed .marks { width: 100%; }
   #status { padding: 0 18px 14px; font-size: 12px; opacity: 0.8; }
   #status.err { color: #c0392b; opacity: 1; font-weight: 600; }
   details { margin: 12px 18px; font-size: 12px; }
@@ -157,13 +161,13 @@ function chartSpec(panel, rows) {
       layer: [
         { mark: { type: "rule", color: "#8886" },
           encoding: {
-            x: { field: "slice", type: "nominal", sort: "-y", title: slice },
+            x: { field: "slice", type: "nominal", sort: { field: "p95", op: "max", order: "descending" }, title: slice },
             y: { field: "p50", type: "quantitative", title: measure },
             y2: { field: "p95" },
           } },
         { mark: { type: "point", filled: true, size: 70 },
           encoding: {
-            x: { field: "slice", type: "nominal", sort: "-y", title: slice },
+            x: { field: "slice", type: "nominal", sort: { field: "p95", op: "max", order: "descending" }, title: slice },
             y: { field: "value", type: "quantitative", title: measure },
             color: { field: "pct", type: "nominal", title: "percentile" },
             tooltip: [

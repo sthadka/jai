@@ -29,6 +29,15 @@ const markerLine = `[{"` + eoqMarker + `":"` + eoqMarker + `"}]`
 // pathological query can never hang the server forever.
 const queryTimeout = 60 * time.Second
 
+// refreshActiveGen re-binds the `g` DuckDB variable to the currently-active fact
+// generation. It is prepended to every /q query so a `metrics rebuild` that
+// publishes a new generation (and DELETEs the obsolete one) is served live
+// without restarting the server — `SET VARIABLE g = (subquery)` at setup alone
+// would freeze g to the generation active at startup. SET emits no JSON output,
+// so it does not perturb the result buffer. (done_res/blocker_links are
+// config-derived and stay bound from setup.)
+const refreshActiveGen = "SET VARIABLE g = (SELECT generation FROM jai.metrics_active_generation WHERE id = 1);"
+
 // ErrDuckDBNotFound is returned by NewEngine when no `duckdb` binary is on PATH.
 // The CLI turns this into an actionable install hint and exits cleanly.
 var ErrDuckDBNotFound = errors.New("duckdb binary not found on PATH")
@@ -138,7 +147,7 @@ func (e *Engine) Query(sql string) ([]map[string]any, error) {
 	if e.closed {
 		return nil, errors.New("duckdb engine closed")
 	}
-	return e.query(sql)
+	return e.query(refreshActiveGen + "\n" + sql)
 }
 
 // query writes a statement plus the sentinel and reads rows until the sentinel.
