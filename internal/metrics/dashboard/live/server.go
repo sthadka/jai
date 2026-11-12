@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -36,6 +37,9 @@ type Server struct {
 	// caps names the satisfied server capabilities (e.g. blocker_link_types) used to
 	// resolve config-dependent panels to explicit unavailable cards.
 	caps map[string]bool
+	// jiraBaseURL is the Jira site root (trailing slash trimmed) used by the SPA to
+	// build /browse/<key> links for drill-through issue lists. Empty = no links.
+	jiraBaseURL string
 	// mu guards the live-refreshed projects/generation metadata (updated on /meta
 	// so a rebuild is honored without a restart).
 	mu sync.RWMutex
@@ -68,6 +72,9 @@ func (s *Server) SetDashboards(caps map[string]bool, dirs []string) {
 	}
 }
 
+// SetJiraBaseURL sets the Jira site root used for drill-through issue links.
+func (s *Server) SetJiraBaseURL(u string) { s.jiraBaseURL = u }
+
 // Handler exposes the route mux (for tests and embedding).
 func (s *Server) Handler() http.Handler { return s.mux }
 
@@ -78,6 +85,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/meta", s.handleMeta)
 	s.mux.HandleFunc("/q", s.handleQuery)
 	s.mux.HandleFunc("/dashboards", s.handleDashboards)
+	s.mux.HandleFunc("/issues", s.handleIssues)
 }
 
 // handleDashboards serves the embedded default dashboards merged with custom specs
@@ -150,12 +158,13 @@ func (s *Server) handleMeta(w http.ResponseWriter, r *http.Request) {
 	s.mu.RUnlock()
 	sort.Strings(projects)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"generation": gen,
-		"projects":   projects,
-		"measures":   MeasureOptions(),
-		"dimensions": DimensionOptions(),
-		"grains":     GrainOptions(),
-		"cohorts":    CohortOptions(),
+		"generation":    gen,
+		"projects":      projects,
+		"measures":      MeasureOptions(),
+		"dimensions":    DimensionOptions(),
+		"grains":        GrainOptions(),
+		"cohorts":       CohortOptions(),
+		"jira_base_url": s.jiraBaseURL,
 	})
 }
 
@@ -189,6 +198,68 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 		"sql":  sql,
 		"rows": rows,
 	})
+}
+
+// handleIssues is the read-only drill-through: it lists the individual issues
+// behind a chart cell (the clicked slice/segment value under the panel's measure/
+// cohort/project/date filters). Same whitelist + SELECT-only guarantees as /q; the
+// slice_value/segment_value are emitted as escaped literals, never identifiers. It
+// also returns a ready-to-run `jai query` over the local DB for the matched keys.
+func (s *Server) handleIssues(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	params := QueryParams{
+		Measure: q.Get("measure"),
+		Slice:   q.Get("slice"),
+		Segment: q.Get("segment"),
+		Grain:   q.Get("grain"),
+		Project: q.Get("project"),
+		From:    q.Get("from"),
+		To:      q.Get("to"),
+		Cohort:  q.Get("cohort"),
+	}
+	sql, err := s.whitelist.BuildIssues(params, q.Get("slice_value"), q.Get("segment_value"), 500)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		return
+	}
+	rows, err := s.engine.Query(sql)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+	keys := make([]string, 0, len(rows))
+	for _, row := range rows {
+		if k, ok := row["issue_key"].(string); ok && k != "" {
+			keys = append(keys, k)
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"sql":       sql,
+		"count":     len(rows),
+		"rows":      rows,
+		"jai_query": buildJaiQuery(keys),
+	})
+}
+
+// buildJaiQuery renders a copy-paste `jai query` (SQLite over the local DB) that
+// lists the matched issues' current details by key. Capped so the command stays
+// shell-friendly; empty key set yields an empty string.
+func buildJaiQuery(keys []string) string {
+	if len(keys) == 0 {
+		return ""
+	}
+	const cap = 200
+	capped := keys
+	if len(capped) > cap {
+		capped = capped[:cap]
+	}
+	quoted := make([]string, len(capped))
+	for i, k := range capped {
+		quoted[i] = "'" + sqlEscape(k) + "'"
+	}
+	sql := "SELECT key, status, priority, assignee, team, summary FROM issues WHERE key IN (" +
+		strings.Join(quoted, ", ") + ") ORDER BY key"
+	return "jai query \"" + sql + "\""
 }
 
 func writeJSON(w http.ResponseWriter, status int, body any) {

@@ -94,6 +94,7 @@ const (
 	dimMembership                     // event-time fact_issue_membership temporal join
 	dimInterval                       // event-time fact_field_interval temporal join (value at resolved)
 	dimCurrentInterval                // fact_field_interval CURRENT (open) interval value
+	dimIssueColumn                    // current-snapshot column on jai.issues (joined by key)
 )
 
 // dimSpec describes a slice/segment dimension. For column dims, expr is the SQL
@@ -120,6 +121,7 @@ var dimensions = map[string]dimSpec{
 	"component":        {kind: dimMembership, joinValue: "component"},
 	"label":            {kind: dimMembership, joinValue: "label"},
 	"sprint":           {kind: dimMembership, joinValue: "sprint"},
+	"team":             {kind: dimIssueColumn, expr: "team"},
 }
 
 // grains is the whitelist of time-grain tokens; each maps to a DuckDB
@@ -234,34 +236,48 @@ func dimSelect(spec dimSpec, alias, grainPart string) (sel, join string) {
 		j := fmt.Sprintf("JOIN jai.fact_field_interval %s ON %s.generation = f.generation AND %s.issue_key = f.issue_key AND %s.field = '%s' AND %s.exited_at IS NULL",
 			alias, alias, alias, alias, spec.joinValue, alias)
 		return "CAST(" + alias + ".value AS VARCHAR)", j
+	case dimIssueColumn:
+		// Current-snapshot attribute from jai.issues (one row per key → no fan-out);
+		// expr is a server-defined column name, never client text. Empty/NULL → '(none)'.
+		j := fmt.Sprintf("JOIN jai.issues %s ON %s.key = f.issue_key", alias, alias)
+		return "CAST(COALESCE(NULLIF(" + alias + "." + spec.expr + ", ''), '(none)') AS VARCHAR)", j
 	}
 	return "''", ""
 }
 
-// Build validates all tokens and assembles the fixed SELECT template. It returns
-// a 400-worthy error for any non-whitelisted token or malformed date.
-func (w *Whitelist) Build(raw QueryParams) (string, error) {
+// queryParts holds the validated, shared fragments of a /q query so the aggregate
+// (Build) and the per-cell issue drill (BuildIssues) stay in lockstep.
+type queryParts struct {
+	measure             measureSpec
+	sliceSel, sliceJoin string
+	segSel, segJoin     string
+	where               []string
+}
+
+// parts validates every token and builds the shared FROM/JOIN/WHERE fragments. It
+// returns a 400-worthy error for any non-whitelisted token or malformed date.
+func (w *Whitelist) parts(raw QueryParams) (queryParts, error) {
 	p := raw.withDefaults()
 
 	m, ok := measures[p.Measure]
 	if !ok {
-		return "", fmt.Errorf("unknown measure %q", p.Measure)
+		return queryParts{}, fmt.Errorf("unknown measure %q", p.Measure)
 	}
 	sliceSpec, ok := dimensions[p.Slice]
 	if !ok {
-		return "", fmt.Errorf("unknown slice %q", p.Slice)
+		return queryParts{}, fmt.Errorf("unknown slice %q", p.Slice)
 	}
 	segSpec, ok := dimensions[p.Segment]
 	if !ok {
-		return "", fmt.Errorf("unknown segment %q", p.Segment)
+		return queryParts{}, fmt.Errorf("unknown segment %q", p.Segment)
 	}
 	grainPart, ok := grains[p.Grain]
 	if !ok {
-		return "", fmt.Errorf("unknown grain %q", p.Grain)
+		return queryParts{}, fmt.Errorf("unknown grain %q", p.Grain)
 	}
 	cohortExpr, ok := cohorts[p.Cohort]
 	if !ok {
-		return "", fmt.Errorf("unknown cohort %q", p.Cohort)
+		return queryParts{}, fmt.Errorf("unknown cohort %q", p.Cohort)
 	}
 
 	where := []string{
@@ -276,7 +292,7 @@ func (w *Whitelist) Build(raw QueryParams) (string, error) {
 		known := w.projects[p.Project]
 		w.mu.RUnlock()
 		if !known {
-			return "", fmt.Errorf("unknown project %q", p.Project)
+			return queryParts{}, fmt.Errorf("unknown project %q", p.Project)
 		}
 		where = append(where, "f.project = '"+sqlEscape(p.Project)+"'")
 	}
@@ -292,14 +308,14 @@ func (w *Whitelist) Build(raw QueryParams) (string, error) {
 	if p.From != "" {
 		d, err := parseDate(p.From)
 		if err != nil {
-			return "", fmt.Errorf("invalid from date %q", p.From)
+			return queryParts{}, fmt.Errorf("invalid from date %q", p.From)
 		}
 		where = append(where, dateCol+" >= DATE '"+d+"'")
 	}
 	if p.To != "" {
 		d, err := parseDate(p.To)
 		if err != nil {
-			return "", fmt.Errorf("invalid to date %q", p.To)
+			return queryParts{}, fmt.Errorf("invalid to date %q", p.To)
 		}
 		where = append(where, dateCol+" < DATE '"+d+"'")
 	}
@@ -310,6 +326,16 @@ func (w *Whitelist) Build(raw QueryParams) (string, error) {
 
 	sliceSel, sliceJoin := dimSelect(sliceSpec, "d0", grainPart)
 	segSel, segJoin := dimSelect(segSpec, "d1", grainPart)
+	return queryParts{measure: m, sliceSel: sliceSel, sliceJoin: sliceJoin, segSel: segSel, segJoin: segJoin, where: where}, nil
+}
+
+// Build validates all tokens and assembles the fixed aggregate SELECT template.
+func (w *Whitelist) Build(raw QueryParams) (string, error) {
+	qp, err := w.parts(raw)
+	if err != nil {
+		return "", err
+	}
+	m := qp.measure
 
 	// Aggregation columns: percentiles/avg/total for value measures; NULL for
 	// count-only measures (n carries the count).
@@ -325,24 +351,80 @@ func (w *Whitelist) Build(raw QueryParams) (string, error) {
 
 	var b strings.Builder
 	b.WriteString("SELECT\n")
-	fmt.Fprintf(&b, "  %s AS slice,\n", sliceSel)
-	fmt.Fprintf(&b, "  %s AS segment,\n", segSel)
+	fmt.Fprintf(&b, "  %s AS slice,\n", qp.sliceSel)
+	fmt.Fprintf(&b, "  %s AS segment,\n", qp.segSel)
 	b.WriteString("  count(*) AS n,\n")
 	b.WriteString("  " + aggCols + "\n")
 	b.WriteString("FROM jai.fact_issue_flow f\n")
 	if m.join != "" {
 		b.WriteString(m.join + "\n")
 	}
-	if sliceJoin != "" {
-		b.WriteString(sliceJoin + "\n")
+	if qp.sliceJoin != "" {
+		b.WriteString(qp.sliceJoin + "\n")
 	}
-	if segJoin != "" {
-		b.WriteString(segJoin + "\n")
+	if qp.segJoin != "" {
+		b.WriteString(qp.segJoin + "\n")
 	}
-	b.WriteString("WHERE " + strings.Join(where, "\n  AND ") + "\n")
+	b.WriteString("WHERE " + strings.Join(qp.where, "\n  AND ") + "\n")
 	b.WriteString("GROUP BY slice, segment\n")
 	b.WriteString("ORDER BY n DESC\n")
 	b.WriteString("LIMIT 1000")
+	return b.String(), nil
+}
+
+// BuildIssues assembles a read-only SELECT listing the individual issues behind a
+// chart cell: the same cohort/measure/project/date/dim filters as Build, narrowed
+// to the clicked slice (and optional segment) value. sliceVal/segVal are DATA,
+// emitted as escaped SQL string literals (never identifiers), so there is no
+// injection surface and the query stays SELECT-only. Returns issue_key, project,
+// summary and the per-issue measure value (NULL for count-only measures).
+func (w *Whitelist) BuildIssues(raw QueryParams, sliceVal, segVal string, limit int) (string, error) {
+	qp, err := w.parts(raw)
+	if err != nil {
+		return "", err
+	}
+	m := qp.measure
+	where := append([]string(nil), qp.where...)
+	// Narrow to the clicked cell; a dimNone slice/segment ("''") carries no filter.
+	if qp.sliceSel != "''" {
+		where = append(where, qp.sliceSel+" = '"+sqlEscape(sliceVal)+"'")
+	}
+	if qp.segSel != "''" && segVal != "" {
+		where = append(where, qp.segSel+" = '"+sqlEscape(segVal)+"'")
+	}
+
+	valueCol := "NULL AS value"
+	order := "f.issue_key"
+	if m.valueExpr != "" {
+		valueCol = "round(" + m.valueExpr + ", 3) AS value"
+		order = "value DESC NULLS LAST, f.issue_key"
+	}
+	if limit <= 0 || limit > 2000 {
+		limit = 500
+	}
+
+	var b strings.Builder
+	// DISTINCT collapses any membership fan-out (an issue with multiple matching
+	// intervals in the same member) to one row per issue.
+	b.WriteString("SELECT DISTINCT\n")
+	b.WriteString("  f.issue_key AS issue_key,\n")
+	b.WriteString("  f.project AS project,\n")
+	b.WriteString("  CAST(iss.summary AS VARCHAR) AS summary,\n")
+	b.WriteString("  " + valueCol + "\n")
+	b.WriteString("FROM jai.fact_issue_flow f\n")
+	b.WriteString("JOIN jai.issues iss ON iss.key = f.issue_key\n")
+	if m.join != "" {
+		b.WriteString(m.join + "\n")
+	}
+	if qp.sliceJoin != "" {
+		b.WriteString(qp.sliceJoin + "\n")
+	}
+	if qp.segJoin != "" {
+		b.WriteString(qp.segJoin + "\n")
+	}
+	b.WriteString("WHERE " + strings.Join(where, "\n  AND ") + "\n")
+	fmt.Fprintf(&b, "ORDER BY %s\n", order)
+	fmt.Fprintf(&b, "LIMIT %d", limit)
 	return b.String(), nil
 }
 
@@ -420,6 +502,7 @@ var dimensionLabels = map[string]string{
 	"component":        "Component",
 	"label":            "Label",
 	"sprint":           "Sprint",
+	"team":             "Team",
 }
 
 // cohortLabels maps each cohort token to its human-readable name.
