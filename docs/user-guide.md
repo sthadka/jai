@@ -638,28 +638,38 @@ In `jai tui`, press `m` to open the read-only metrics pane. It renders the same
 computed metrics through the shared service; scroll with the usual vim-style
 keys. It never writes the fact store.
 
-### Offline dashboard
+### Dashboard
 
 ```sh
-jai metrics dashboard                               # writes ./dashboard.html
-jai metrics dashboard --output flow.html --project ENG
-jai metrics dashboard --from 2024-01-01 --to 2024-07-01 --as-of 2024-07-01
-jai metrics dashboard --title "Platform Flow"
+jai metrics dashboard                               # serve the live, interactive dashboard
+jai metrics dashboard --port 8099
+jai metrics dashboard --snapshot flow.html --project ENG
+jai metrics dashboard --snapshot flow.html --from 2024-01-01 --to 2024-07-01 --as-of 2024-07-01
 ```
 
-`jai metrics dashboard` exports ONE self-contained HTML file: the computed
-metric data is embedded as JSON and the visualization layer is an inlined,
-pure-SVG renderer. There are no CDN references, no `<script src>` and no network
-or file-fetch requests at runtime — open it from disk with networking disabled
-and every chart renders. Metrics that are unconfigured or have no data render as
-explicit "unavailable" cards rather than fabricated charts.
+By default `jai metrics dashboard` starts a localhost-only HTTP server backed by
+one persistent DuckDB process (`jai.db` ATTACHed READ_ONLY) and opens your
+browser at it. Every control (measure / slice / segment / time-grain / project /
+date-window / cohort) re-queries the live fact store and re-renders with a
+vendored Vega-Lite SPA — no CDN, no export step. The one dependency is the
+`duckdb` binary on `PATH`.
 
-Dashboard flags: `-o`/`--output` (default `dashboard.html`), `--title`
+Pass `--snapshot <file>` to instead freeze the current view to ONE self-contained
+HTML file and exit without serving: the computed metric data is embedded as JSON
+and the visualization layer is an inlined, pure-SVG renderer. There are no CDN
+references, no `<script src>` and no network or file-fetch requests at runtime —
+open it from disk with networking disabled and every chart renders. It is a
+portable artifact for stakeholders without `jai`/`duckdb`. Metrics that are
+unconfigured or have no data render as explicit "unavailable" cards rather than
+fabricated charts.
+
+Snapshot flags: `--snapshot <file>` (the offline artifact path), `--title`
 (default `Flow Metrics`), `--from`/`--to` (trend window; default `as_of − 6
-months` .. `as_of`), plus the inherited `--project`/`--as-of`.
+months` .. `as_of`), plus the inherited `--project`/`--as-of`. The `--port` flag
+applies to the live server.
 
-**Privacy.** The artifact embeds the selected Jira issue data. Share it only
-with viewers authorized to see those issues.
+**Privacy.** The snapshot artifact embeds the selected Jira issue data. Share it
+only with viewers authorized to see those issues.
 
 ### Known limitations / future work
 
