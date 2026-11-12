@@ -1,0 +1,56 @@
+id: flow
+title: Flow
+description: >-
+  How does work move? Completed vs created trend (net flow), flow occupancy by
+  component, and per-sprint eventual resolution. CFD (burn-up) and daily WIP need a
+  date-spine running-total query shape the group-by /q template does not serve, so
+  they render as explicit unavailable cards (available on the CLI).
+panels:
+  - title: Issues Completed
+    measure: throughput
+    slice: none
+    segment: none
+    chart: number
+    stat: n
+    defaults: { cohort: delivered }
+  - title: Completed by Month
+    measure: throughput
+    slice: period
+    segment: none
+    chart: line
+    defaults: { cohort: delivered, grain: month }
+  - title: Created by Month (net flow vs completed)
+    metric: net_flow
+    measure: throughput
+    slice: created_period
+    segment: none
+    chart: line
+    defaults: { cohort: all, grain: month }
+  - title: Flow Occupancy by Component
+    metric: flow_occupancy
+    measure: flow_occupancy
+    slice: component
+    segment: none
+    chart: bar
+    stat: p50
+    defaults: { cohort: delivered }
+  - title: Sprint resolution (eventual resolution of ever-members)
+    metric: sprint_resolution
+    measure: throughput
+    slice: sprint
+    segment: resolution
+    chart: bar
+    stat: n
+    defaults: { cohort: resolved }
+  - title: Work in progress (daily WIP)
+    metric: wip
+    chart: line
+    unavailable: >-
+      daily WIP is a date-spine snapshot series not served by the group-by /q
+      template; run `jai metrics wip`.
+  - title: Cumulative flow (CFD / burn-up)
+    metric: cfd
+    chart: line
+    unavailable: >-
+      cumulative flow / burn-up needs a date-spine running-total query shape not
+      served by the group-by /q template; run `jai metrics cfd`.

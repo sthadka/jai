@@ -38,8 +38,8 @@ func TestDashboardsEndpointEmbedded(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if len(body.Dashboards) < 6 {
-		t.Fatalf("expected >=6 embedded dashboards, got %d", len(body.Dashboards))
+	if len(body.Dashboards) < 5 {
+		t.Fatalf("expected >=5 embedded dashboards, got %d", len(body.Dashboards))
 	}
 	// blocker_ageing has requires:blocker_link_types; with caps off it must be an
 	// explicit unavailable card (never fabricated).

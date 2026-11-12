@@ -1,35 +1,64 @@
 id: delivery
-title: Delivery
+title: Delivery speed
 description: >-
-  Cycle, lead, occupancy and triage distributions. Each panel renders through the
-  shared /q template and inherits the control bar, so every measure is explorable
-  across the dimensions and windows it supports.
+  How fast do we ship? Headline cycle/lead time and completed volume, then
+  distributions by priority and type and the completion trend. Every panel renders
+  through the shared /q template and obeys the global filter bar (project + date
+  range).
 panels:
-  - title: Cycle time (p50/p85/p95) by priority
+  - title: Cycle Time (p50)
     metric: cycle_time
+    measure: cycle_time
+    slice: none
+    segment: none
+    chart: number
+    stat: p50
+    defaults: { cohort: delivered }
+  - title: Cycle Time (p95)
+    measure: cycle_time
+    slice: none
+    segment: none
+    chart: number
+    stat: p95
+    defaults: { cohort: delivered }
+  - title: Lead Time (p50)
+    metric: lead_time
+    measure: lead_time
+    slice: none
+    segment: none
+    chart: number
+    stat: p50
+    defaults: { cohort: delivered }
+  - title: Issues Completed
+    metric: throughput
+    measure: throughput
+    slice: none
+    segment: none
+    chart: number
+    stat: n
+    defaults: { cohort: delivered }
+  - title: Cycle Time by Priority
     measure: cycle_time
     slice: priority
     segment: none
     chart: scatter
+    defaults: { cohort: delivered }
+  - title: Issues Completed by Month
+    measure: throughput
+    slice: period
+    segment: none
+    chart: line
     defaults: { cohort: delivered, grain: month }
-  - title: Lead time (p50/p85/p95) by type
-    metric: lead_time
+  - title: Lead Time by Type
     measure: lead_time
     slice: type
     segment: none
-    chart: scatter
-    defaults: { cohort: delivered, grain: month }
-  - title: Flow occupancy by component
-    metric: flow_occupancy
-    measure: flow_occupancy
-    slice: component
-    segment: none
-    chart: scatter
-    defaults: { cohort: delivered, grain: month }
-  - title: Triage latency (created -> first active) by priority
+    chart: bar
+    defaults: { cohort: delivered }
+  - title: Triage Time by Priority
     metric: triage_latency
     measure: triage_latency
     slice: priority
     segment: none
     chart: scatter
-    defaults: { cohort: all, grain: month }
+    defaults: { cohort: all }

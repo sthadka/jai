@@ -1,0 +1,82 @@
+id: backlog
+title: Backlog health
+description: >-
+  Is the backlog under control? Open count and age up top, then age and churn by
+  priority/type/status, plus the config-dependent blocker ageing and the shape-
+  limited stage-dwell / security-SLA cards. Age panels use the open cohort, so the
+  global date range narrows which open issues are shown by creation window.
+panels:
+  - title: Open Issues
+    metric: aged_open
+    measure: aged_open
+    slice: none
+    segment: none
+    chart: number
+    stat: n
+    defaults: { cohort: open }
+  - title: Median Age
+    measure: aged_open
+    slice: none
+    segment: none
+    chart: number
+    stat: p50
+    defaults: { cohort: open }
+  - title: Oldest (p95)
+    measure: aged_open
+    slice: none
+    segment: none
+    chart: number
+    stat: p95
+    defaults: { cohort: open }
+  - title: Issue Age by Priority
+    measure: aged_open
+    slice: priority
+    segment: none
+    chart: bar
+    stat: p50
+    defaults: { cohort: open }
+  - title: Open by Status
+    measure: aged_open
+    slice: status
+    segment: none
+    chart: bar
+    stat: n
+    defaults: { cohort: open }
+  - title: Priority Changes by Priority
+    metric: priority_changes
+    measure: priority_changes
+    slice: priority
+    segment: none
+    chart: bar
+    stat: p50
+    defaults: { cohort: all }
+  - title: Rank Changes by Type
+    metric: rank_volatility
+    measure: rank_volatility
+    slice: type
+    segment: none
+    chart: bar
+    stat: p50
+    defaults: { cohort: all }
+  - title: Blocked Age by Project
+    metric: blocker_ageing
+    measure: blocker_ageing
+    slice: project
+    segment: none
+    chart: bar
+    stat: p50
+    requires: blocker_link_types
+    defaults: { cohort: open }
+  - title: Stage dwell (time-in-stage)
+    metric: stage_dwell
+    chart: scatter
+    unavailable: >-
+      per-stage interval durations have base table fact_field_interval, not the
+      issue-grouped /q template; run `jai metrics stage_dwell`.
+  - title: Security SLA (remediation timing + compliance buckets)
+    metric: security_sla
+    chart: bar
+    unavailable: >-
+      security SLA needs configured deadlines (metrics.sla.security) and a
+      remediation-timing / compliance-bucket query shape not served by the /q
+      template; run `jai metrics security_sla`.

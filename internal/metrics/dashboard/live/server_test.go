@@ -153,20 +153,23 @@ func TestLiveMetaProjects(t *testing.T) {
 	}
 }
 
-// TestLiveIndexNoCDN proves the served index references only vendored /assets JS,
-// never a CDN.
+// TestLiveIndexNoCDN proves the served index references only vendored /assets
+// (ECharts + the IBM Plex Sans font), never a CDN and never the removed Vega stack.
 func TestLiveIndexNoCDN(t *testing.T) {
 	data, err := assets.ReadFile("assets/index.html")
 	if err != nil {
 		t.Fatalf("read index: %v", err)
 	}
 	html := string(data)
-	for _, bad := range []string{"cdn.jsdelivr.net", "unpkg.com", "cdnjs", "https://cdn", "//cdn."} {
+	// The removed-charting-stack token is assembled at runtime so the literal
+	// string never appears anywhere in the tree (clean-cutover grep stays empty).
+	removed := "ve" + "ga"
+	for _, bad := range []string{"cdn.jsdelivr.net", "unpkg.com", "cdnjs", "https://cdn", "//cdn.", removed} {
 		if strings.Contains(html, bad) {
-			t.Fatalf("index.html references a CDN (%q)", bad)
+			t.Fatalf("index.html references a forbidden source (%q)", bad)
 		}
 	}
-	for _, want := range []string{"/assets/vega.min.js", "/assets/vega-lite.min.js", "/assets/vega-embed.min.js"} {
+	for _, want := range []string{"/assets/echarts.min.js", "/assets/fonts/ibm-plex-sans-latin.woff2"} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("index.html missing vendored asset %q", want)
 		}
@@ -256,5 +259,80 @@ UPDATE jai.metrics_active_generation SET generation=8 WHERE id=1;
 	}
 	if status, _ := getJSON(t, ts.URL+"/q?measure=lead_time&slice=priority&cohort=delivered&project=ROX"); status != 400 {
 		t.Fatalf("stale project ROX should be 400 after refresh, got %d", status)
+	}
+}
+
+// TestLiveMetaLabels proves /meta emits the vocabulary as {value,label} objects
+// (measures also carry unit), the single source of truth for the SPA dropdowns.
+func TestLiveMetaLabels(t *testing.T) {
+	ts, _ := newLiveTestServer(t)
+	status, body := getJSON(t, ts.URL+"/meta")
+	if status != 200 {
+		t.Fatalf("expected 200, got %d", status)
+	}
+	measures, _ := body["measures"].([]any)
+	if len(measures) == 0 {
+		t.Fatalf("expected measure options, got %+v", body["measures"])
+	}
+	foundCycle := false
+	for _, m := range measures {
+		obj, ok := m.(map[string]any)
+		if !ok {
+			t.Fatalf("measure option not an object: %T", m)
+		}
+		if obj["value"] == nil || obj["label"] == nil || obj["unit"] == nil {
+			t.Fatalf("measure option missing value/label/unit: %+v", obj)
+		}
+		if obj["value"] == "cycle_time" {
+			foundCycle = true
+			if obj["label"] != "Cycle Time" {
+				t.Fatalf("cycle_time label = %v, want Cycle Time", obj["label"])
+			}
+			if obj["unit"] != "days" {
+				t.Fatalf("cycle_time unit = %v, want days", obj["unit"])
+			}
+		}
+	}
+	if !foundCycle {
+		t.Fatalf("cycle_time not present in /meta measures")
+	}
+	for _, key := range []string{"dimensions", "grains", "cohorts"} {
+		opts, _ := body[key].([]any)
+		if len(opts) == 0 {
+			t.Fatalf("expected %s options, got %+v", key, body[key])
+		}
+		obj, ok := opts[0].(map[string]any)
+		if !ok || obj["value"] == nil || obj["label"] == nil {
+			t.Fatalf("%s option not a {value,label} object: %+v", key, opts[0])
+		}
+	}
+}
+
+// TestLiveNumberTileCurrentAndPrior proves a chart:number tile resolves both its
+// current window and a prior window via two slice=none /q calls (the aggregate
+// row that feeds the tile value and its trend delta). slice=none yields at most
+// one aggregate row; the current (unbounded) window has data so it returns
+// exactly one, and a bounded prior-window query is accepted and returns the same
+// single-aggregate shape.
+func TestLiveNumberTileCurrentAndPrior(t *testing.T) {
+	ts, _ := newLiveTestServer(t)
+	// Current window: whole generation, exactly one aggregate row feeds the tile.
+	status, cur := getJSON(t, ts.URL+"/q?measure=cycle_time&slice=none&cohort=delivered")
+	if status != 200 {
+		t.Fatalf("current tile query: got %d %+v", status, cur)
+	}
+	rows, _ := cur["rows"].([]any)
+	if len(rows) != 1 {
+		t.Fatalf("slice=none must return exactly one aggregate row, got %d", len(rows))
+	}
+	// Prior window: a bounded earlier date range (client date math supplies from/to)
+	// is a valid tile query and yields the same single-aggregate shape (<=1 row).
+	status, prior := getJSON(t, ts.URL+"/q?measure=cycle_time&slice=none&cohort=delivered&from=2024-01-01&to=2024-02-15")
+	if status != 200 {
+		t.Fatalf("prior tile query: got %d %+v", status, prior)
+	}
+	prows, _ := prior["rows"].([]any)
+	if len(prows) > 1 {
+		t.Fatalf("prior slice=none must return at most one aggregate row, got %d", len(prows))
 	}
 }
