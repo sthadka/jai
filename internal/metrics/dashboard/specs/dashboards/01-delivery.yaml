@@ -1,0 +1,35 @@
+id: delivery
+title: Delivery
+description: >-
+  Cycle, lead, occupancy and triage distributions. Each panel renders through the
+  shared /q template and inherits the control bar, so every measure is explorable
+  across the dimensions and windows it supports.
+panels:
+  - title: Cycle time (p50/p85/p95) by priority
+    metric: cycle_time
+    measure: cycle_time
+    slice: priority
+    segment: none
+    chart: scatter
+    defaults: { cohort: delivered, grain: month }
+  - title: Lead time (p50/p85/p95) by type
+    metric: lead_time
+    measure: lead_time
+    slice: type
+    segment: none
+    chart: scatter
+    defaults: { cohort: delivered, grain: month }
+  - title: Flow occupancy by component
+    metric: flow_occupancy
+    measure: flow_occupancy
+    slice: component
+    segment: none
+    chart: scatter
+    defaults: { cohort: delivered, grain: month }
+  - title: Triage latency (created -> first active) by priority
+    metric: triage_latency
+    measure: triage_latency
+    slice: priority
+    segment: none
+    chart: scatter
+    defaults: { cohort: all, grain: month }

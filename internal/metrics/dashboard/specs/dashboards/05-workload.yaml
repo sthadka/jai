@@ -1,0 +1,34 @@
+id: workload
+title: Workload
+description: >-
+  Owner load and throughput. Event-time throughput attributes completed work to
+  the owner AT completion; current throughput and open load use the CURRENT owner.
+  Days-held-per-owner needs a per-interval base table the /q template cannot serve.
+panels:
+  - title: Open item-load by current assignee
+    metric: workload_by_assignee
+    measure: throughput
+    slice: assignee_current
+    segment: none
+    chart: bar
+    defaults: { cohort: open }
+  - title: Throughput by owner-at-completion (event-time)
+    metric: workload_throughput
+    measure: throughput
+    slice: assignee
+    segment: none
+    chart: bar
+    defaults: { cohort: delivered, grain: month }
+  - title: Throughput by current owner
+    metric: workload_throughput_current
+    measure: throughput
+    slice: assignee_current
+    segment: none
+    chart: bar
+    defaults: { cohort: delivered, grain: month }
+  - title: Time on owner (event-time days held per owner)
+    metric: workload_time_on_owner
+    chart: bar
+    unavailable: >-
+      event-time days-held summed per owner has base table fact_field_interval,
+      not the issue-grouped /q template; run `jai metrics workload_time_on_owner`.

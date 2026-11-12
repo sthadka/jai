@@ -57,7 +57,6 @@ INSERT INTO jai.fact_issue_membership VALUES
 	return dbPath
 }
 
-
 // newLiveTestServer spins up a real engine over the fixture DB behind httptest.
 func newLiveTestServer(t *testing.T) (*httptest.Server, *Engine) {
 	t.Helper()
