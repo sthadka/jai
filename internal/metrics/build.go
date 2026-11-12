@@ -55,6 +55,7 @@ type issueSource struct {
 	resolved   *time.Time
 	resolution string
 	itype      string
+	estimate   *float64
 	scalar     map[string]*ScalarHistory
 	membership map[string]*MembershipHistory
 }
@@ -229,8 +230,9 @@ func (b *Builder) writeFacts(tx *sql.Tx, gen int64, sources []issueSource, asOf 
 	flowStmt, err := tx.Prepare(
 		`INSERT INTO fact_issue_flow
 		   (generation, issue_key, project, type, created, first_active_at, resolved, resolution,
-		    lead_seconds, cycle_seconds, reopen_count, current_stage, has_active, has_unknown)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		    lead_seconds, cycle_seconds, reopen_count, current_stage, has_active, has_unknown,
+		    flow_occupancy, estimate)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return 0, err
 	}
@@ -314,6 +316,7 @@ func (b *Builder) writeFacts(tx *sql.Tx, gen int64, sources []issueSource, asOf 
 			dbTimePtr(flow.Created), dbTimePtr(flow.FirstActiveAt), dbTimePtr(flow.Resolved), nullStr(flow.Resolution),
 			nullInt64(flow.LeadSeconds), nullInt64(flow.CycleSeconds), flow.ReopenCount,
 			nullStr(flow.CurrentStage), flow.HasActive, flow.HasUnknown,
+			nullFloat64(flow.FlowOccupancy), nullFloat64(flow.Estimate),
 		); err != nil {
 			return 0, err
 		}
@@ -368,6 +371,28 @@ func deriveFlow(result ReplayResult, src issueSource, pol *Policy) FlowRow {
 		s := int64(fr.Resolved.Sub(*fr.FirstActiveAt).Seconds())
 		fr.CycleSeconds = &s
 	}
+
+	// estimate: the issue's story-point value where present (NULL when absent), enabling
+	// the Effort (sum of estimate) measure. Absent across ROX; that is fine.
+	fr.Estimate = src.estimate
+
+	// flow_occupancy: persist the active-status occupancy proxy (active ÷ lead) using the
+	// SAME definition as flowOccupancyProvider — delivered cohort, defined lead (resolved
+	// strictly after created), active WIP seconds clipped to [created, resolved], bounded
+	// to [0,1]. Left NULL (never a fabricated occupancy) for issues the provider excludes:
+	// not delivered, or undefined lead. Persisting it lets BI/notebook users query
+	// occupancy without a per-row windowed active-seconds aggregation.
+	delivered := fr.Resolved != nil && (!pol.DoneResolutionsConfigured() || pol.IsDoneResolution(fr.Resolution))
+	if delivered && fr.Created != nil && fr.Resolved.After(*fr.Created) {
+		total := fr.Resolved.Sub(*fr.Created).Seconds()
+		var active float64
+		for i := range result.Intervals {
+			iv := result.Intervals[i]
+			active += wipSeconds(iv.Stage, iv.EnteredAt, iv.ExitedAt, *fr.Created, *fr.Resolved, pol)
+		}
+		ratio, _ := occupancyRatio(active, total)
+		fr.FlowOccupancy = &ratio
+	}
 	return fr
 }
 
@@ -375,7 +400,7 @@ func deriveFlow(result ReplayResult, src issueSource, pol *Policy) FlowRow {
 // by projects or by explicit keys (mutually exclusive; both empty = all issues). It also
 // returns the source watermark: the latest issue-update / changelog time observed.
 func (b *Builder) loadSources(projects, keys []string) ([]issueSource, *time.Time, error) {
-	iq := `SELECT key, project, type, created, status, status_category, changelog_synced_at, updated, resolved, resolution FROM issues`
+	iq := `SELECT key, project, type, created, status, status_category, changelog_synced_at, updated, resolved, resolution, story_points FROM issues`
 	var iargs []any
 	switch {
 	case len(keys) > 0:
@@ -405,8 +430,9 @@ func (b *Builder) loadSources(projects, keys []string) ([]issueSource, *time.Tim
 			key, project                      string
 			itype, created, status, category  sql.NullString
 			synced, updated, resolved, resltn sql.NullString
+			storyPoints                       sql.NullFloat64
 		)
-		if err := rows.Scan(&key, &project, &itype, &created, &status, &category, &synced, &updated, &resolved, &resltn); err != nil {
+		if err := rows.Scan(&key, &project, &itype, &created, &status, &category, &synced, &updated, &resolved, &resltn, &storyPoints); err != nil {
 			return nil, nil, err
 		}
 		src := issueSource{
@@ -424,6 +450,10 @@ func (b *Builder) loadSources(projects, keys []string) ([]issueSource, *time.Tim
 			src.hist.CreatedAt = *t
 		}
 		src.resolved = nullTime(resolved)
+		if storyPoints.Valid {
+			v := storyPoints.Float64
+			src.estimate = &v
+		}
 		if t := nullTime(updated); t != nil && t.After(watermark) {
 			watermark = *t
 		}
@@ -904,6 +934,13 @@ func nullStr(s string) any {
 }
 
 func nullInt64(v *int64) any {
+	if v == nil {
+		return nil
+	}
+	return *v
+}
+
+func nullFloat64(v *float64) any {
 	if v == nil {
 		return nil
 	}

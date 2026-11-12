@@ -198,12 +198,8 @@ func (flowOccupancyProvider) Compute(s *Service, q Query) (*Result, error) {
 		}
 		total := fr.Resolved.Sub(*fr.Created).Seconds()
 		active := activeSeconds(ix, fr.IssueKey, *fr.Created, *fr.Resolved, s.pol)
-		ratio := active / total
-		if ratio < 0 {
-			ratio = 0
-		}
-		if ratio > 1 {
-			ratio = 1
+		ratio, cl := occupancyRatio(active, total)
+		if cl {
 			clamped++
 		}
 		occ = append(occ, ratio)
@@ -224,20 +220,45 @@ func (flowOccupancyProvider) Compute(s *Service, q Query) (*Result, error) {
 func activeSeconds(ix *IntervalIndex, key string, from, to time.Time, pol *Policy) float64 {
 	var secs float64
 	for _, iv := range ix.Intervals(key) {
-		if !pol.IsWIPStage(iv.Stage) {
-			continue
-		}
-		start := iv.EnteredAt
-		if start.Before(from) {
-			start = from
-		}
-		end := to
-		if iv.ExitedAt != nil && iv.ExitedAt.Before(end) {
-			end = *iv.ExitedAt
-		}
-		if end.After(start) {
-			secs += end.Sub(start).Seconds()
-		}
+		secs += wipSeconds(iv.Stage, iv.EnteredAt, iv.ExitedAt, from, to, pol)
 	}
 	return secs
+}
+
+// wipSeconds returns the seconds a single status interval contributes to active WIP time
+// within [from, to]: zero unless stage is a WIP stage, otherwise the clipped overlap of
+// [EnteredAt, ExitedAt||to] with [from, to]. This is the single clipping definition shared
+// by the flow_occupancy provider (live metric) and the persisted
+// fact_issue_flow.flow_occupancy column (writeFacts), so the two never diverge.
+func wipSeconds(stage string, entered time.Time, exited *time.Time, from, to time.Time, pol *Policy) float64 {
+	if !pol.IsWIPStage(stage) {
+		return 0
+	}
+	start := entered
+	if start.Before(from) {
+		start = from
+	}
+	end := to
+	if exited != nil && exited.Before(end) {
+		end = *exited
+	}
+	if end.After(start) {
+		return end.Sub(start).Seconds()
+	}
+	return 0
+}
+
+// occupancyRatio bounds the active-status occupancy proxy (active ÷ lead) to [0,1] and
+// reports whether it was clamped above 1 (overlapping/rounded intervals exceeding lead).
+// Single definition shared by the provider and the persisted column.
+func occupancyRatio(activeSecs, totalSecs float64) (ratio float64, clamped bool) {
+	ratio = activeSecs / totalSecs
+	if ratio < 0 {
+		ratio = 0
+	}
+	if ratio > 1 {
+		ratio = 1
+		clamped = true
+	}
+	return ratio, clamped
 }
