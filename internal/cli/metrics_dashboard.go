@@ -16,11 +16,11 @@ import (
 
 // Dashboard-local flags. --project / --as-of are inherited (persistent) from metricsCmd.
 var (
-	dashboardOutput string
-	dashboardTitle  string
-	dashboardFrom   string
-	dashboardTo     string
-	dashboardPort   int
+	dashboardSnapshot string
+	dashboardTitle    string
+	dashboardFrom     string
+	dashboardTo       string
+	dashboardPort     int
 )
 
 var metricsDashboardCmd = &cobra.Command{
@@ -39,17 +39,17 @@ The data endpoint (/q) is read-only, SELECT-only, and parameterized from a fixed
 SQL template plus whitelisted identifiers — never raw client SQL, so there is no
 injection or write surface.
 
-Pass --output to instead write the self-contained offline snapshot (pure-SVG,
-inlined JSON, no server, no deps) — a portable artifact for stakeholders without
-jai/duckdb.
+Pass --snapshot <file> to instead freeze the current view to a self-contained
+offline HTML artifact (pure-SVG, inlined JSON, no server, no deps) and exit
+without serving — a portable artifact for stakeholders without jai/duckdb.
 
 Examples:
   jai metrics dashboard
   jai metrics dashboard --port 8099
-  jai metrics dashboard --output flow.html --project ENG`,
+  jai metrics dashboard --snapshot flow.html --project ENG`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if dashboardOutput != "" {
-			return runMetricsDashboardStatic()
+		if dashboardSnapshot != "" {
+			return runMetricsDashboardSnapshot()
 		}
 		return runMetricsDashboardLive()
 	},
@@ -69,7 +69,7 @@ func runMetricsDashboardLive() error {
 			fmt.Fprintln(os.Stderr, "error: the live dashboard requires the `duckdb` binary on your PATH.")
 			fmt.Fprintln(os.Stderr, "  Install it with:  brew install duckdb")
 			fmt.Fprintln(os.Stderr, "  Or download from: https://duckdb.org/docs/installation/")
-			fmt.Fprintln(os.Stderr, "  (Alternatively, `jai metrics dashboard --output dashboard.html` writes an offline snapshot with no duckdb dependency.)")
+			fmt.Fprintln(os.Stderr, "  (Alternatively, `jai metrics dashboard --snapshot dashboard.html` writes an offline snapshot with no duckdb dependency.)")
 			return metricErr("DuckDBNotFound", err)
 		}
 		return metricErr("DashboardError", err)
@@ -125,9 +125,10 @@ func dashboardCapabilities(pol *metrics.Policy) map[string]bool {
 	return caps
 }
 
-// runMetricsDashboardStatic writes the self-contained offline snapshot. Reachable
-// via --output; jai-2lc.5 promotes this to --snapshot.
-func runMetricsDashboardStatic() error {
+// runMetricsDashboardSnapshot freezes the current view to a self-contained offline HTML
+// artifact (pure-SVG, inlined JSON, no server, no deps) and exits without serving. Reachable
+// via --snapshot.
+func runMetricsDashboardSnapshot() error {
 	svc, pol, _ := metricsService()
 
 	asOf, err := parseMetricTime(metricAsOf)
@@ -161,7 +162,7 @@ func runMetricsDashboardStatic() error {
 	// unavailable); surface them on the JSON path so the export is never silently partial.
 	rejections := sortedRejectionKeys(pol.Rejections())
 
-	path := dashboardOutput
+	path := dashboardSnapshot
 	if err := os.WriteFile(path, html, 0o644); err != nil {
 		return metricErr("DashboardError", fmt.Errorf("write %s: %w", path, err))
 	}
@@ -184,16 +185,16 @@ func runMetricsDashboardStatic() error {
 }
 
 func init() {
-	metricsDashboardCmd.Flags().StringVarP(&dashboardOutput, "output", "o", "",
-		"write the self-contained offline snapshot to this path instead of serving live")
+	metricsDashboardCmd.Flags().StringVar(&dashboardSnapshot, "snapshot", "",
+		"freeze the current view to this self-contained offline HTML file and exit (default: serve live)")
 	metricsDashboardCmd.Flags().IntVar(&dashboardPort, "port", 0,
 		"localhost port for the live server (0 = ephemeral)")
 	metricsDashboardCmd.Flags().StringVar(&dashboardTitle, "title", "Flow Metrics",
-		"snapshot heading (--output only)")
+		"snapshot heading (--snapshot only)")
 	metricsDashboardCmd.Flags().StringVar(&dashboardFrom, "from", "",
-		"snapshot trend window start (--output only; RFC3339 or YYYY-MM-DD)")
+		"snapshot trend window start (--snapshot only; RFC3339 or YYYY-MM-DD)")
 	metricsDashboardCmd.Flags().StringVar(&dashboardTo, "to", "",
-		"snapshot trend window end (--output only; RFC3339 or YYYY-MM-DD)")
+		"snapshot trend window end (--snapshot only; RFC3339 or YYYY-MM-DD)")
 
 	metricsCmd.AddCommand(metricsDashboardCmd)
 }
