@@ -2,6 +2,7 @@ package metrics
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -670,6 +671,21 @@ func (b *Builder) loadMembershipCurrent(projects, keys, fields []string, index m
 		}
 	}
 	return rows.Err()
+}
+
+// parseJSONArray decodes a denormalized array column (the issues table's components
+// and labels, which sync stores as a JSON array of strings) into its member names.
+// A null, empty, or non-array value yields nil so callers treat it as an empty set.
+func parseJSONArray(s string) []string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil
+	}
+	var names []string
+	if err := json.Unmarshal([]byte(s), &names); err != nil {
+		return nil
+	}
+	return names
 }
 
 // loadMembershipEvents appends the set-valued changelog transitions for the membership
