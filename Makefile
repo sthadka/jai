@@ -41,7 +41,7 @@ CYAN   := \033[36m
 .DEFAULT_GOAL := help
 
 .PHONY: help \
-        build install run clean \
+        build install run dashboard clean \
         mcp mcp-stdio mcp-http \
         fmt vet test test-race lint check ci \
         setup hooks doctor
@@ -89,6 +89,10 @@ mcp-http: build ## Run the MCP server over HTTP (default :8947, override PORT=�
 	@printf "  $(CYAN)→$(RESET) MCP server on $(BOLD)http://localhost:$(PORT)/mcp$(RESET)$(SERVE_FLAGS)\n"
 	@printf "  $(DIM)Ctrl-C to stop · override with PORT=… TOOLSETS=… READONLY=1$(RESET)\n"
 	@./$(BINARY) serve --transport http --port $(PORT) $(SERVE_FLAGS)
+
+dashboard: build ## Launch the live flow-metrics dashboard (override with ARGS="--port 9000")
+	@printf "  $(CYAN)→$(RESET) jai metrics dashboard $(ARGS)\n"
+	@./$(BINARY) metrics dashboard $(ARGS)
 
 ##@ Quality
 
