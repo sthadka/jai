@@ -61,6 +61,10 @@
     background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
   }
   .filters .hide { display: none; }
+  .viewtabs { display: flex; flex-wrap: wrap; gap: 6px; }
+  .viewtabs button { font: inherit; font-size: 13px; cursor: pointer; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border); background: var(--panel); color: var(--fg); text-transform: none; letter-spacing: normal; }
+  .viewtabs button:hover { border-color: var(--accent); }
+  .viewtabs button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
   main { padding: 18px 20px 40px; }
   #desc { font-size: 12.5px; color: var(--muted); max-width: 80ch; margin: 0 0 16px; }
   #tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; margin-bottom: 20px; }
@@ -91,7 +95,6 @@
   #explore .ex-controls label { display: flex; flex-direction: column; gap: 4px; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
   #explore .ex-controls select { font: inherit; font-size: 13px; padding: 5px 8px; min-width: 130px; color: var(--fg); background: var(--panel); border: 1px solid var(--border); border-radius: 6px; }
   #explore .pchart { width: 100%; height: 440px; }
-  #explore .ex-mode { margin-bottom: 14px; }
   #explore textarea { font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; width: 100%; min-height: 76px; padding: 8px 10px; color: var(--fg); background: var(--panel); border: 1px solid var(--border); border-radius: 6px; resize: vertical; }
   #explore .sql-query { display: flex; gap: 10px; align-items: stretch; margin-bottom: 8px; }
   #explore .sql-query textarea { flex: 1; }
@@ -133,9 +136,7 @@
     <span class="gen" id="gen"></span>
   </div>
   <div class="filters">
-    <label>Dashboard
-      <select id="fDashboard"></select>
-    </label>
+    <label class="vtabs-label">View<div class="viewtabs" id="viewTabs" role="tablist"></div></label>
     <label>Project
       <select id="fProject"></select>
     </label>
@@ -167,15 +168,6 @@
   <div id="tiles"></div>
   <div id="grid"></div>
   <section id="explore" style="display:none">
-    <div class="ex-controls ex-mode">
-      <label>Mode
-        <select id="exMode">
-          <option value="curated">Curated</option>
-          <option value="sql">SQL</option>
-          <option value="jql">JQL</option>
-        </select>
-      </label>
-    </div>
     <div id="exCurated">
       <div class="ex-controls">
         <label>Measure <select id="exMeasure"></select></label>
@@ -275,6 +267,7 @@ const state = {
   customFrom: "",
   customTo: "",
   segment: "none",
+  exMode: "curated",
 };
 
 let META = null;
@@ -705,15 +698,6 @@ async function refreshExplore() {
 }
 
 // SQL explore (query-driven: paste SQL → introspect columns → chart client-side)
-function applyExMode() {
-  const m = $("exMode").value;
-  $("exCurated").style.display = m === "curated" ? "" : "none";
-  $("exSqlPanel").style.display = m === "sql" ? "" : "none";
-  $("exJqlPanel").style.display = m === "jql" ? "" : "none";
-  $("exResult").style.display = (m === "sql" || m === "jql") ? "" : "none";
-  if (m === "curated") { refreshExplore(); if (exploreChart) exploreChart.resize(); }
-  else { renderSqlChart(); if (sqlChartInst) sqlChartInst.resize(); }
-}
 
 function classifySqlCols(columns) {
   const cat = [], num = [];
@@ -1040,6 +1024,19 @@ function renderIssues(panel, j) {
 function closeIssues() { $("issuesModal").classList.remove("show"); }
 
 // View orchestration --------------------------------------------------------
+function viewTabClick(view, mode) { state.view = view; if (view === EXPLORE) state.exMode = mode; setActiveTab(); buildCurrentView(); }
+function renderViewTabs() {
+  const box = $("viewTabs"); box.innerHTML = "";
+  const mk = (label, view, mode) => { const b = document.createElement("button"); b.type = "button"; b.textContent = label; b.dataset.view = view; if (mode) b.dataset.mode = mode; b.addEventListener("click", () => viewTabClick(view, mode || "")); box.appendChild(b); };
+  DASHBOARDS.forEach(d => mk(d.title, d.id, ""));
+  mk("Explore", EXPLORE, "curated"); mk("Explore (JQL)", EXPLORE, "jql"); mk("Explore (SQL)", EXPLORE, "sql");
+}
+function setActiveTab() {
+  $("viewTabs").querySelectorAll("button").forEach(b => {
+    const active = b.dataset.view === EXPLORE ? (state.view === EXPLORE && b.dataset.mode === state.exMode) : (state.view === b.dataset.view);
+    b.classList.toggle("active", active);
+  });
+}
 function buildCurrentView() {
   if (state.view === EXPLORE) {
     $("desc").style.display = "none";
@@ -1051,7 +1048,7 @@ function buildCurrentView() {
       exploreChart = echarts.init($("exChartDiv"), null, { renderer: "canvas" });
       exploreChart.on("click", p => openIssues(explorePanel(), p));
     }
-    const m = $("exMode").value;
+    const m = state.exMode;
     $("exCurated").style.display = m === "curated" ? "" : "none";
     $("exSqlPanel").style.display = m === "sql" ? "" : "none";
     $("exJqlPanel").style.display = m === "jql" ? "" : "none";
@@ -1069,7 +1066,7 @@ function buildCurrentView() {
 }
 function refreshCurrent() {
   if (state.view === EXPLORE) {
-    const m = $("exMode").value;
+    const m = state.exMode;
     if (m === "sql" || m === "jql") renderSqlChart();
     else refreshExplore();
     return;
@@ -1091,9 +1088,7 @@ function populateControls() {
 
   $("gen").textContent = META.generation != null ? ("generation " + META.generation) : "";
 
-  const fd = $("fDashboard");
-  DASHBOARDS.forEach(d => fd.appendChild(opt(d.id, d.title)));
-  fd.appendChild(opt(EXPLORE, "Explore (ad-hoc)"));
+  renderViewTabs();
 
   const fp = $("fProject");
   fp.appendChild(opt("all", "All projects"));
@@ -1115,7 +1110,6 @@ function populateControls() {
 }
 
 function wireEvents() {
-  $("fDashboard").addEventListener("change", e => { state.view = e.target.value; buildCurrentView(); });
   $("fProject").addEventListener("change", e => { state.project = e.target.value; refreshCurrent(); });
   $("fSegment").addEventListener("change", e => { state.segment = e.target.value; refreshCurrent(); });
   $("fPreset").addEventListener("change", e => {
@@ -1131,7 +1125,6 @@ function wireEvents() {
   ["exMeasure", "exSlice", "exCohort", "exGrain", "exChart"].forEach(id =>
     $(id).addEventListener("change", () => { if (state.view === EXPLORE) refreshExplore(); }));
 
-  $("exMode").addEventListener("change", applyExMode);
   $("sqlRun").addEventListener("click", runSql);
   $("jqlRun").addEventListener("click", runJql);
   ["sqlChart", "sqlX", "sqlY", "sqlAgg", "sqlSeg"].forEach(id =>
@@ -1166,7 +1159,7 @@ async function boot() {
     wireEvents();
     try { await document.fonts.load('14px "IBM Plex Sans"'); } catch (e) {}
     state.view = DASHBOARDS.length ? DASHBOARDS[0].id : EXPLORE;
-    $("fDashboard").value = state.view;
+    setActiveTab();
     buildCurrentView();
   } catch (e) {
     $("globalErr").textContent = "Failed to load dashboard: " + e.message;
