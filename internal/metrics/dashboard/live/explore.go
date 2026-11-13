@@ -22,6 +22,8 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	"github.com/sthadka/jai/internal/jql"
 )
 
 // exploreRowCap bounds how many rows /explore/sql returns. We fetch one past the
@@ -281,6 +283,11 @@ type exploreRequest struct {
 	SQL string `json:"sql"`
 }
 
+// exploreJQLRequest is the POST /explore/jql body.
+type exploreJQLRequest struct {
+	JQL string `json:"jql"`
+}
+
 // newCSRFToken mints a 128-bit, hex-encoded same-origin token at server startup.
 // It is echoed to the page via /meta (csrf_token) and required on POST
 // /explore/* via the X-Jai-CSRF header. crypto/rand.Read does not fail on the
@@ -365,4 +372,208 @@ func (s *Server) runExplore(sql string) ([]exploreColumn, []map[string]any, bool
 		truncated = true
 	}
 	return inferColumns(names, rows), rows, truncated, nil
+}
+
+// handleExploreJQL is the read-only free-form JQL endpoint. It mirrors
+// handleExploreSQL (POST + matching X-Jai-CSRF), accepts {"jql": "…"}, translates
+// the JQL to parameter-safe DuckDB SQL via the internal/jql pipeline, and runs
+// the compiled statement through the SAME runExplore helper as /explore/sql.
+// Returns {columns:[{name,type}], rows, truncated, sql, compiled_sql}. 403 on a
+// CSRF mismatch, 400 on a translation error (parse / unknown field / unsupported
+// function, carrying the translator's precise offset+token message), 500 on an
+// engine execution error. A compiled statement that fails the SELECT-only guard
+// is a translator bug, not user input, so it surfaces as 500.
+func (s *Server) handleExploreJQL(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
+		return
+	}
+	if r.Header.Get("X-Jai-CSRF") != s.exploreToken() {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "invalid or missing CSRF token"})
+		return
+	}
+	var req exploreJQLRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON body"})
+		return
+	}
+	fm := s.exploreFieldMap()
+	res, err := jql.Translate(req.JQL, jql.Options{
+		Dialect:    jql.DuckDB,
+		FieldMap:   fm,
+		IDResolver: s.makeIDResolver(fm),
+		Now:        time.Now(),
+	})
+	if err != nil {
+		// Parse / resolve errors (unknown field, unsupported function, …) are user
+		// input problems carrying a precise message; report them as 400.
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		return
+	}
+	// Belt-and-braces: the translator only ever emits a single SELECT. If this
+	// ever fails it is a translator defect, never user input, so report 500.
+	if err := validateSelectSQL(res.SQL); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "translator produced a non-SELECT statement: " + err.Error()})
+		return
+	}
+	cols, rows, truncated, err := s.runExplore(res.SQL)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"columns":      cols,
+		"rows":         rows,
+		"truncated":    truncated,
+		"sql":          res.SQL,
+		"compiled_sql": res.SQL,
+	})
+}
+
+// exploreFieldMap returns the cached JQL field map, building it from the live DB
+// on first use. The map is rebuilt alongside /meta's generation refresh (see
+// refreshFieldMap) so a resync that adds fields is picked up without a restart.
+func (s *Server) exploreFieldMap() jql.FieldMap {
+	s.mu.RLock()
+	fm := s.jqlFields
+	s.mu.RUnlock()
+	if fm != nil {
+		return fm
+	}
+	return s.refreshFieldMap()
+}
+
+// refreshFieldMap rebuilds the JQL field map from jai.field_map and caches it.
+// It is called on first use and on every /meta refresh so a resync is honored
+// live. On a build error (or an empty map) it keeps and returns any previously
+// cached map; the translator falls back to its built-in alias table regardless.
+func (s *Server) refreshFieldMap() jql.FieldMap {
+	fm := buildFieldMap(s.engine)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if fm != nil {
+		s.jqlFields = fm
+	}
+	return s.jqlFields
+}
+
+// buildFieldMap reads jai.field_map and builds the JQL name→column map the
+// translator needs. Both the local column name and the Jira display name are
+// registered (case-insensitive) for every column-backed field. The storage kind
+// is derived from the field's type (datetime→date, number→number, array→array,
+// else string); labels/components are always arrays. User-typed fields are marked
+// as entities so their id values run through the IDResolver (design §8.5).
+//
+// The engine scans jai.db with sqlite_all_varchar, so every value arrives as a
+// string. A missing field_map table (e.g. a bare fixture) yields zero rows via
+// Query (which does not error on a failed statement), leaving the built-in alias
+// table to handle the common fields.
+func buildFieldMap(engine *Engine) jql.FieldMap {
+	rows, err := engine.Query("SELECT jira_name, name, type, item_type, is_column FROM jai.field_map")
+	if err != nil || len(rows) == 0 {
+		return jql.FieldMap{}
+	}
+	fm := make(jql.FieldMap, len(rows)*2)
+	for _, row := range rows {
+		if !truthy(row["is_column"]) {
+			continue
+		}
+		col := strValue(row["name"])
+		if col == "" {
+			continue
+		}
+		typ := strValue(row["type"])
+		fd := jql.FieldDef{
+			Column: col,
+			Kind:   fieldKind(typ, col),
+			Entity: strings.EqualFold(typ, "user"),
+		}
+		fm[strings.ToLower(col)] = fd
+		if jiraName := strValue(row["jira_name"]); jiraName != "" {
+			fm[strings.ToLower(jiraName)] = fd
+		}
+	}
+	return fm
+}
+
+// fieldKind maps a field_map type (and column name) to the translator's storage
+// kind. datetime→date, number→number, array (or the labels/components columns)→
+// array, everything else→string.
+func fieldKind(typ, col string) jql.FieldKind {
+	switch strings.ToLower(typ) {
+	case "datetime", "date":
+		return jql.KindDate
+	case "number":
+		return jql.KindNumber
+	case "array":
+		return jql.KindArray
+	}
+	switch strings.ToLower(col) {
+	case "labels", "components":
+		return jql.KindArray
+	}
+	return jql.KindString
+}
+
+// makeIDResolver returns an IDResolver (design §8.5) that maps an entity id to its
+// single display name by scanning jai.issues: an id present in raw_json pins the
+// row, and the entity column on that row carries the display name. It returns
+// ok=false when the id is unknown (0 rows) or ambiguous (>1 distinct name), so
+// the translator rejects the clause rather than guessing. The id is emitted as an
+// escaped string literal; the column comes from the resolved field map (falling
+// back to the lower-cased field name, which matches the built-in entity columns).
+func (s *Server) makeIDResolver(fm jql.FieldMap) jql.IDResolver {
+	return func(field, id string) (string, bool, error) {
+		col := strings.ToLower(field)
+		if fd, ok := fm[strings.ToLower(field)]; ok && fd.Column != "" {
+			col = fd.Column
+		}
+		q := fmt.Sprintf(
+			"SELECT DISTINCT %s FROM jai.issues WHERE raw_json LIKE '%%'||%s||'%%' AND %s IS NOT NULL AND %s <> '' LIMIT 2",
+			col, sqlLiteral(id), col, col,
+		)
+		rows, err := s.engine.Query(q)
+		if err != nil {
+			return "", false, err
+		}
+		if len(rows) != 1 {
+			return "", false, nil
+		}
+		name := strValue(rows[0][col])
+		if name == "" {
+			return "", false, nil
+		}
+		return name, true, nil
+	}
+}
+
+// sqlLiteral renders s as a single-quoted SQL string literal with embedded quotes
+// doubled. Used for the IDResolver's raw_json containment probe.
+func sqlLiteral(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
+}
+
+// strValue renders an engine cell (which arrives as a string under
+// sqlite_all_varchar, but may decode as a JSON number for INTEGER columns) as a
+// trimmed string.
+func strValue(v any) string {
+	switch t := v.(type) {
+	case string:
+		return strings.TrimSpace(t)
+	case nil:
+		return ""
+	default:
+		return strings.TrimSpace(fmt.Sprintf("%v", t))
+	}
+}
+
+// truthy reports whether an engine cell represents a true boolean/flag. SQLite
+// booleans arrive as "1"/"0" strings (sqlite_all_varchar) or JSON numbers.
+func truthy(v any) bool {
+	switch strValue(v) {
+	case "1", "true", "TRUE", "True":
+		return true
+	default:
+		return false
+	}
 }

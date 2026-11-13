@@ -172,7 +172,7 @@
         <select id="exMode">
           <option value="curated">Curated</option>
           <option value="sql">SQL</option>
-          <!-- JQL sub-mode added by jai-2lc.14.6 -->
+          <option value="jql">JQL</option>
         </select>
       </label>
     </div>
@@ -202,6 +202,16 @@
         <textarea id="sqlText" spellcheck="false" placeholder="SELECT key, status, priority, created FROM jai.issues LIMIT 200"></textarea>
         <button id="sqlRun" type="button">Run</button>
       </div>
+      <details class="sqlbox"><summary>Executed SQL (read-only)</summary><pre id="sqlEcho"></pre></details>
+    </div>
+    <div id="exJqlPanel" style="display:none">
+      <div class="sql-query">
+        <textarea id="jqlText" spellcheck="false" placeholder="project = ROX AND status IS NOT EMPTY ORDER BY created DESC"></textarea>
+        <button id="jqlRun" type="button">Run</button>
+      </div>
+      <details class="sqlbox" open><summary>Compiled SQL (read-only)</summary><pre id="jqlCompiled"></pre></details>
+    </div>
+    <div id="exResult" style="display:none">
       <div id="sqlStatus" class="pstatus"></div>
       <div id="sqlNotice" style="display:none">Truncated to 5000 rows — refine the query (add WHERE/LIMIT) for a complete view.</div>
       <div id="sqlShape" class="ex-controls" style="display:none">
@@ -232,7 +242,6 @@
       <div class="panel">
         <div id="sqlChartDiv" class="pchart"></div>
         <div id="sqlTableWrap" style="display:none"></div>
-        <details class="sqlbox"><summary>Executed SQL (read-only)</summary><pre id="sqlEcho"></pre></details>
       </div>
       <div id="sqlIssues"></div>
     </div>
@@ -700,6 +709,8 @@ function applyExMode() {
   const m = $("exMode").value;
   $("exCurated").style.display = m === "curated" ? "" : "none";
   $("exSqlPanel").style.display = m === "sql" ? "" : "none";
+  $("exJqlPanel").style.display = m === "jql" ? "" : "none";
+  $("exResult").style.display = (m === "sql" || m === "jql") ? "" : "none";
   if (m === "curated") { refreshExplore(); if (exploreChart) exploreChart.resize(); }
   else { renderSqlChart(); if (sqlChartInst) sqlChartInst.resize(); }
 }
@@ -708,6 +719,33 @@ function classifySqlCols(columns) {
   const cat = [], num = [];
   (columns || []).forEach(c => { (c.type === "number" ? num : cat).push(c); });
   return { cat, num };   // cat = string/date columns, num = number columns
+}
+
+// showExploreResult feeds a /explore/{sql,jql} response into the shared
+// introspection → shape → chart → filter → issue-table pipeline. Both the SQL
+// and JQL sub-modes call this so the rendering path is written once.
+function showExploreResult(j) {
+  sqlResult = j;
+  const cols = j.columns || [], rows = j.rows || [];
+  populateSqlShape(cols);
+  const status = $("sqlStatus");
+  status.textContent = rows.length + " row" + (rows.length === 1 ? "" : "s") + ", " + cols.length + " column" + (cols.length === 1 ? "" : "s");
+  status.className = "pstatus";
+  $("sqlNotice").style.display = j.truncated ? "" : "none";
+  $("sqlShape").style.display = cols.length ? "" : "none";
+  renderSqlChart();
+}
+
+// clearExploreResult resets the shared result area after a failed run.
+function clearExploreResult(message) {
+  sqlResult = null;
+  $("sqlShape").style.display = "none";
+  $("sqlNotice").style.display = "none";
+  if (sqlChartInst) sqlChartInst.clear();
+  $("sqlTableWrap").innerHTML = "";
+  $("sqlIssues").innerHTML = "";
+  const status = $("sqlStatus");
+  status.textContent = message; status.className = "pstatus err";
 }
 
 async function runSql() {
@@ -725,23 +763,33 @@ async function runSql() {
     });
     const j = await r.json();
     if (!r.ok) throw new Error(j && j.error ? j.error : ("HTTP " + r.status));
-    sqlResult = j;
     $("sqlEcho").textContent = j.sql || sql;
-    const cols = j.columns || [], rows = j.rows || [];
-    populateSqlShape(cols);
-    status.textContent = rows.length + " row" + (rows.length === 1 ? "" : "s") + ", " + cols.length + " column" + (cols.length === 1 ? "" : "s");
-    status.className = "pstatus";
-    $("sqlNotice").style.display = j.truncated ? "" : "none";
-    $("sqlShape").style.display = cols.length ? "" : "none";
-    renderSqlChart();
+    showExploreResult(j);
   } catch (e) {
-    sqlResult = null;
-    $("sqlShape").style.display = "none";
-    $("sqlNotice").style.display = "none";
-    if (sqlChartInst) sqlChartInst.clear();
-    $("sqlTableWrap").innerHTML = "";
-    $("sqlIssues").innerHTML = "";
-    status.textContent = e.message; status.className = "pstatus err";
+    clearExploreResult(e.message);
+  }
+}
+
+async function runJql() {
+  const jql = $("jqlText").value.trim();
+  const status = $("sqlStatus");
+  if (!jql) { status.textContent = "enter a JQL query"; status.className = "pstatus err"; return; }
+  status.textContent = "running…"; status.className = "pstatus";
+  $("sqlShape").style.display = "none";
+  $("sqlNotice").style.display = "none";
+  try {
+    const r = await fetch("/explore/jql", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Jai-CSRF": (META && META.csrf_token) || "" },
+      body: JSON.stringify({ jql }),
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j && j.error ? j.error : ("HTTP " + r.status));
+    $("jqlCompiled").textContent = j.compiled_sql || "";
+    showExploreResult(j);
+  } catch (e) {
+    $("jqlCompiled").textContent = "";
+    clearExploreResult(e.message);
   }
 }
 
@@ -1006,6 +1054,8 @@ function buildCurrentView() {
     const m = $("exMode").value;
     $("exCurated").style.display = m === "curated" ? "" : "none";
     $("exSqlPanel").style.display = m === "sql" ? "" : "none";
+    $("exJqlPanel").style.display = m === "jql" ? "" : "none";
+    $("exResult").style.display = (m === "sql" || m === "jql") ? "" : "none";
   } else {
     $("desc").style.display = "";
     $("tiles").style.display = "";
@@ -1019,7 +1069,8 @@ function buildCurrentView() {
 }
 function refreshCurrent() {
   if (state.view === EXPLORE) {
-    if ($("exMode").value === "sql") renderSqlChart();
+    const m = $("exMode").value;
+    if (m === "sql" || m === "jql") renderSqlChart();
     else refreshExplore();
     return;
   }
@@ -1082,6 +1133,7 @@ function wireEvents() {
 
   $("exMode").addEventListener("change", applyExMode);
   $("sqlRun").addEventListener("click", runSql);
+  $("jqlRun").addEventListener("click", runJql);
   ["sqlChart", "sqlX", "sqlY", "sqlAgg", "sqlSeg"].forEach(id =>
     $(id).addEventListener("change", renderSqlChart));
 

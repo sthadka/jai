@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sthadka/jai/internal/jql"
 	"github.com/sthadka/jai/internal/metrics/dashboard/specs"
 )
 
@@ -44,6 +45,10 @@ type Server struct {
 	// /meta and required on POST /explore/* (X-Jai-CSRF header) so a cross-site
 	// page cannot drive the free-form SQL endpoint.
 	csrfToken string
+	// jqlFields caches the JQL field map built from jai.field_map. It is rebuilt
+	// lazily on first use and on every /meta refresh so a resync is picked up
+	// without a restart. Guarded by mu.
+	jqlFields jql.FieldMap
 	// mu guards the live-refreshed projects/generation metadata (updated on /meta
 	// so a rebuild is honored without a restart).
 	mu sync.RWMutex
@@ -92,6 +97,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/dashboards", s.handleDashboards)
 	s.mux.HandleFunc("/issues", s.handleIssues)
 	s.mux.HandleFunc("/explore/sql", s.handleExploreSQL)
+	s.mux.HandleFunc("/explore/jql", s.handleExploreJQL)
 }
 
 // handleDashboards serves the embedded default dashboards merged with custom specs
@@ -158,6 +164,8 @@ func (s *Server) handleMeta(w http.ResponseWriter, r *http.Request) {
 		s.generation = gen
 		s.mu.Unlock()
 	}
+	// Rebuild the JQL field map so a resync that added fields is picked up live.
+	s.refreshFieldMap()
 	s.mu.RLock()
 	projects := append([]string(nil), s.projects...)
 	gen := s.generation
