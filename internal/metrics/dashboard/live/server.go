@@ -40,6 +40,10 @@ type Server struct {
 	// jiraBaseURL is the Jira site root (trailing slash trimmed) used by the SPA to
 	// build /browse/<key> links for drill-through issue lists. Empty = no links.
 	jiraBaseURL string
+	// csrfToken is a same-origin token minted at startup, emitted to the page via
+	// /meta and required on POST /explore/* (X-Jai-CSRF header) so a cross-site
+	// page cannot drive the free-form SQL endpoint.
+	csrfToken string
 	// mu guards the live-refreshed projects/generation metadata (updated on /meta
 	// so a rebuild is honored without a restart).
 	mu sync.RWMutex
@@ -55,6 +59,7 @@ func NewServer(engine *Engine, projects []string, generation any) *Server {
 		mux:        http.NewServeMux(),
 		specDirs:   specs.DefaultDirs(),
 		caps:       map[string]bool{},
+		csrfToken:  newCSRFToken(),
 	}
 	s.routes()
 	return s
@@ -86,6 +91,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/q", s.handleQuery)
 	s.mux.HandleFunc("/dashboards", s.handleDashboards)
 	s.mux.HandleFunc("/issues", s.handleIssues)
+	s.mux.HandleFunc("/explore/sql", s.handleExploreSQL)
 }
 
 // handleDashboards serves the embedded default dashboards merged with custom specs
@@ -165,6 +171,7 @@ func (s *Server) handleMeta(w http.ResponseWriter, r *http.Request) {
 		"grains":        GrainOptions(),
 		"cohorts":       CohortOptions(),
 		"jira_base_url": s.jiraBaseURL,
+		"csrf_token":    s.exploreToken(),
 	})
 }
 
