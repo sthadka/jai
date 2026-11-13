@@ -17,26 +17,26 @@ func TestEmitOperatorTable(t *testing.T) {
 		{
 			name:   "eq",
 			jql:    `project = ROX`,
-			duck:   "project = 'ROX'",
-			sqlite: "project = 'ROX'",
+			duck:   "lower(project) = lower('ROX')",
+			sqlite: "lower(project) = lower('ROX')",
 		},
 		{
 			name:   "neq excludes empty",
 			jql:    `project != ROX`,
-			duck:   "COALESCE(project,'') NOT IN ('', 'ROX')",
-			sqlite: "COALESCE(project,'') NOT IN ('', 'ROX')",
+			duck:   "lower(COALESCE(project,'')) NOT IN ('', lower('ROX'))",
+			sqlite: "lower(COALESCE(project,'')) NOT IN ('', lower('ROX'))",
 		},
 		{
 			name:   "in",
 			jql:    `status in (New, "To Do")`,
-			duck:   "status IN ('New','To Do')",
-			sqlite: "status IN ('New','To Do')",
+			duck:   "lower(status) IN (lower('New'),lower('To Do'))",
+			sqlite: "lower(status) IN (lower('New'),lower('To Do'))",
 		},
 		{
 			name:   "not in excludes empty",
 			jql:    `status not in (New, Done)`,
-			duck:   "COALESCE(status,'') NOT IN ('', 'New','Done')",
-			sqlite: "COALESCE(status,'') NOT IN ('', 'New','Done')",
+			duck:   "lower(COALESCE(status,'')) NOT IN ('', lower('New'),lower('Done'))",
+			sqlite: "lower(COALESCE(status,'')) NOT IN ('', lower('New'),lower('Done'))",
 		},
 		{
 			name:   "contains",
@@ -102,17 +102,17 @@ func TestEmitOperatorTable(t *testing.T) {
 // column must never match (design §8.3).
 func TestEmitNeqEmptySemantics(t *testing.T) {
 	r := mustTranslate(t, `priority != High`, translateOpts(SQLite))
-	wantFragments(t, r.SQL, "COALESCE(priority,'') NOT IN ('', 'High')")
+	wantFragments(t, r.SQL, "lower(COALESCE(priority,'')) NOT IN ('', lower('High'))")
 
 	r = mustTranslate(t, `priority not in (High, Low)`, translateOpts(DuckDB))
-	wantFragments(t, r.SQL, "COALESCE(priority,'') NOT IN ('', 'High','Low')")
+	wantFragments(t, r.SQL, "lower(COALESCE(priority,'')) NOT IN ('', lower('High'),lower('Low'))")
 }
 
 // TestEmitLiteralEscaping verifies single quotes in literals are doubled and an
 // injection attempt stays quoted data, never breaking out of the string.
 func TestEmitLiteralEscaping(t *testing.T) {
 	r := mustTranslate(t, `project = "O'Brien"`, translateOpts(SQLite))
-	wantFragments(t, r.SQL, "project = 'O''Brien'")
+	wantFragments(t, r.SQL, "lower(project) = lower('O''Brien')")
 
 	inj := `summary ~ "x'; DROP TABLE issues; --"`
 	r = mustTranslate(t, inj, translateOpts(DuckDB))

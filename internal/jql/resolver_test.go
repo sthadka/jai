@@ -137,7 +137,7 @@ func TestInjectedFieldMapCannotDisableEntity(t *testing.T) {
 		FieldMap:   FieldMap{"team": {Column: "team", Kind: KindString, Entity: false}},
 		IDResolver: resolveID,
 	})
-	wantFragments(t, r.SQL, "COALESCE(team,'') NOT IN ('', 'ACS Docs')")
+	wantFragments(t, r.SQL, "lower(COALESCE(team,'')) NOT IN ('', lower('ACS Docs'))")
 	if strings.Contains(r.SQL, guid) {
 		t.Errorf("SQL leaked raw GUID %q: %s", guid, r.SQL)
 	}

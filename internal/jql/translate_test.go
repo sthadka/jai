@@ -62,13 +62,13 @@ func TestTranslateExample89DuckDB(t *testing.T) {
 
 	wantFragments(t, r.SQL,
 		"FROM jai.issues",
-		"project = 'ROX'",
-		"type = 'Bug'",
-		"COALESCE(team,'') NOT IN ('', 'ACS Docs')",
-		"(priority IN ('Critical','Blocker') OR TRY_CAST(px_impact_score AS DOUBLE) >= 10000)",
+		"lower(project) = lower('ROX')",
+		"lower(type) = lower('Bug')",
+		"lower(COALESCE(team,'')) NOT IN ('', lower('ACS Docs'))",
+		"(lower(priority) IN (lower('Critical'),lower('Blocker')) OR TRY_CAST(px_impact_score AS DOUBLE) >= 10000)",
 		"TRY_CAST(created AS TIMESTAMP) < (CURRENT_TIMESTAMP - INTERVAL 90 DAY)",
 		"(resolved IS NULL OR resolved = '')",
-		"status IN ('New','Backlog','Refinement','To Do')",
+		"lower(status) IN (lower('New'),lower('Backlog'),lower('Refinement'),lower('To Do'))",
 	)
 
 	// standardIssueTypes() was redundant and dropped: it never reaches the SQL.
@@ -87,13 +87,13 @@ func TestTranslateExample89SQLite(t *testing.T) {
 
 	wantFragments(t, r.SQL,
 		"FROM issues",
-		"project = 'ROX'",
-		"type = 'Bug'",
-		"COALESCE(team,'') NOT IN ('', 'ACS Docs')",
-		"(priority IN ('Critical','Blocker') OR CAST(px_impact_score AS REAL) >= 10000)",
+		"lower(project) = lower('ROX')",
+		"lower(type) = lower('Bug')",
+		"lower(COALESCE(team,'')) NOT IN ('', lower('ACS Docs'))",
+		"(lower(priority) IN (lower('Critical'),lower('Blocker')) OR CAST(px_impact_score AS REAL) >= 10000)",
 		"created < datetime('now','-90 day')",
 		"(resolved IS NULL OR resolved = '')",
-		"status IN ('New','Backlog','Refinement','To Do')",
+		"lower(status) IN (lower('New'),lower('Backlog'),lower('Refinement'),lower('To Do'))",
 	)
 
 	if strings.Contains(r.SQL, "INTERVAL") {
@@ -131,7 +131,7 @@ func TestTranslateSelectColumnsOverride(t *testing.T) {
 func TestTranslateBareMultiWordValue(t *testing.T) {
 	for _, d := range []Dialect{SQLite, DuckDB} {
 		r := mustTranslate(t, `status = To Do`, translateOpts(d))
-		wantFragments(t, r.SQL, "status = 'To Do'")
+		wantFragments(t, r.SQL, "lower(status) = lower('To Do')")
 	}
 }
 
@@ -139,7 +139,46 @@ func TestTranslateBareMultiWordValue(t *testing.T) {
 // value still runs through the IDResolver (display-name substitution).
 func TestTranslateBareGUIDStillResolves(t *testing.T) {
 	r := mustTranslate(t, `Team = ec74d716-af36-4b3c-950f-f79213d08f71-1819`, translateOpts(DuckDB))
-	wantFragments(t, r.SQL, "team = 'ACS Docs'")
+	wantFragments(t, r.SQL, "lower(team) = lower('ACS Docs')")
+}
+
+// TestTranslateCaseInsensitiveStrings pins that equality/IN over textual fields
+// is case-insensitive (lower()-wrapped on both sides) so lowercase user input
+// matches mixed-case stored values (design §8.3).
+func TestTranslateCaseInsensitiveStrings(t *testing.T) {
+	for _, d := range []Dialect{SQLite, DuckDB} {
+		r := mustTranslate(t, `status = new`, translateOpts(d))
+		wantFragments(t, r.SQL, "lower(status) = lower('new')")
+
+		r = mustTranslate(t, `priority in (blocker, critical)`, translateOpts(d))
+		wantFragments(t, r.SQL, "lower(priority) IN (lower('blocker'),lower('critical'))")
+	}
+}
+
+// TestTranslateNonStringKindsStayExact pins that numeric, date, and JSON-array
+// predicates are NOT wrapped in lower(): numbers/dates compare exactly and Jira
+// labels/components remain case-sensitive (design §8.3).
+func TestTranslateNonStringKindsStayExact(t *testing.T) {
+	// Numeric: bare comparison, no lower().
+	r := mustTranslate(t, `px_impact_score >= 10000`, translateOpts(SQLite))
+	wantFragments(t, r.SQL, "CAST(px_impact_score AS REAL) >= 10000")
+	if strings.Contains(norm(r.SQL), "lower(") {
+		t.Errorf("numeric clause should not use lower(): %s", r.SQL)
+	}
+
+	// Date: relative-date comparison, no lower().
+	r = mustTranslate(t, `created < -90d`, translateOpts(SQLite))
+	wantFragments(t, r.SQL, "created < datetime('now','-90 day')")
+	if strings.Contains(norm(r.SQL), "lower(") {
+		t.Errorf("date clause should not use lower(): %s", r.SQL)
+	}
+
+	// Array: containment test, case-sensitive, no lower().
+	r = mustTranslate(t, `labels in (x)`, translateOpts(SQLite))
+	wantFragments(t, r.SQL, "EXISTS (SELECT 1 FROM json_each(labels) WHERE value = 'x')")
+	if strings.Contains(norm(r.SQL), "lower(") {
+		t.Errorf("array clause should not use lower(): %s", r.SQL)
+	}
 }
 
 func containsStr(xs []string, want string) bool {
