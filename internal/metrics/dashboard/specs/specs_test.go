@@ -3,6 +3,7 @@ package specs
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -153,5 +154,125 @@ func TestResolveAvailability(t *testing.T) {
 	on := ResolveAvailability(dbs, map[string]bool{"blocker_link_types": true})
 	if on[0].Panels[0].Unavailable != "" {
 		t.Fatalf("expected live panel when capability on, got %q", on[0].Panels[0].Unavailable)
+	}
+}
+
+// TestLoadQueryPanel proves a kind:query panel round-trips through Load/parse into
+// the expected Panel fields (source/query + client-side shaping).
+func TestLoadQueryPanel(t *testing.T) {
+	dir := t.TempDir()
+	custom := `id: my-explore
+title: My Explore
+panels:
+  - title: Open by status
+    kind: query
+    source: jql
+    query: project = JAI AND statusCategory != Done
+    chart: bar
+    x: status
+    y: "**count**"
+    agg: count
+    segment: priority
+    filters:
+      status: [New, Backlog]
+`
+	if err := os.WriteFile(filepath.Join(dir, "explore.yaml"), []byte(custom), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dbs, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	var p *Panel
+	for i := range dbs {
+		if dbs[i].ID == "my-explore" && len(dbs[i].Panels) == 1 {
+			p = &dbs[i].Panels[0]
+		}
+	}
+	if p == nil {
+		t.Fatalf("kind:query dashboard not loaded; got %d dashboards", len(dbs))
+	}
+	if p.Kind != "query" {
+		t.Errorf("Kind = %q, want %q", p.Kind, "query")
+	}
+	if p.Source != "jql" {
+		t.Errorf("Source = %q, want %q", p.Source, "jql")
+	}
+	if p.Query != "project = JAI AND statusCategory != Done" {
+		t.Errorf("Query = %q", p.Query)
+	}
+	if p.Chart != "bar" {
+		t.Errorf("Chart = %q, want %q", p.Chart, "bar")
+	}
+	if p.X != "status" {
+		t.Errorf("X = %q, want %q", p.X, "status")
+	}
+	if p.Y != "**count**" {
+		t.Errorf("Y = %q, want %q", p.Y, "**count**")
+	}
+	if p.Agg != "count" {
+		t.Errorf("Agg = %q, want %q", p.Agg, "count")
+	}
+	if p.Segment != "priority" {
+		t.Errorf("Segment = %q, want %q", p.Segment, "priority")
+	}
+	if got := p.Filters["status"]; len(got) != 2 || got[0] != "New" || got[1] != "Backlog" {
+		t.Errorf("Filters[status] = %v, want [New Backlog]", got)
+	}
+}
+
+// TestLoadMetricPanelUnaffected proves a plain metric panel still parses with its
+// metric fields and no stray kind:query fields (regression for the new fields).
+func TestLoadMetricPanelUnaffected(t *testing.T) {
+	dir := t.TempDir()
+	custom := `id: my-metric
+title: My Metric
+panels:
+  - title: Lead by project
+    metric: lead_time
+    measure: lead_time
+    slice: project
+    chart: scatter
+    defaults: { cohort: delivered }
+`
+	if err := os.WriteFile(filepath.Join(dir, "metric.yaml"), []byte(custom), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dbs, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	var p *Panel
+	for i := range dbs {
+		if dbs[i].ID == "my-metric" && len(dbs[i].Panels) == 1 {
+			p = &dbs[i].Panels[0]
+		}
+	}
+	if p == nil {
+		t.Fatalf("metric dashboard not loaded; got %d dashboards", len(dbs))
+	}
+	if p.Kind != "" {
+		t.Errorf("Kind = %q, want empty", p.Kind)
+	}
+	if p.Measure != "lead_time" || p.Slice != "project" || p.Chart != "scatter" {
+		t.Errorf("metric fields mangled: measure=%q slice=%q chart=%q", p.Measure, p.Slice, p.Chart)
+	}
+	if p.Defaults.Cohort != "delivered" {
+		t.Errorf("Defaults.Cohort = %q, want %q", p.Defaults.Cohort, "delivered")
+	}
+	if p.Source != "" || p.Query != "" || p.X != "" || p.Y != "" || p.Agg != "" || p.Filters != nil {
+		t.Errorf("unexpected kind:query fields set on metric panel: %+v", p)
+	}
+}
+
+// TestUserDashboardDir proves the save-target dir resolves under ~/.config/jai.
+func TestUserDashboardDir(t *testing.T) {
+	dir, err := UserDashboardDir()
+	if err != nil {
+		t.Fatalf("UserDashboardDir: %v", err)
+	}
+	want := filepath.Join(".config", "jai", "dashboards")
+	if !strings.HasSuffix(dir, want) {
+		t.Errorf("UserDashboardDir = %q, want suffix %q", dir, want)
 	}
 }
