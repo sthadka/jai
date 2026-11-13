@@ -18,12 +18,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 	"unicode"
 
 	"github.com/sthadka/jai/internal/jql"
+	"github.com/sthadka/jai/internal/metrics/dashboard/specs"
+	"gopkg.in/yaml.v3"
 )
 
 // exploreRowCap bounds how many rows /explore/sql returns. We fetch one past the
@@ -576,4 +580,180 @@ func truthy(v any) bool {
 	default:
 		return false
 	}
+}
+
+// explorePanelRequest is the POST /explore/panel body: an Explore widget's state
+// plus the destination board and a save flag. It mirrors the kind:query fields of
+// specs.Panel. save==false previews the dashboard YAML (copy-to-clipboard);
+// save==true persists it to the user dashboards dir.
+type explorePanelRequest struct {
+	BoardID    string              `json:"board_id"`
+	BoardTitle string              `json:"board_title"`
+	Title      string              `json:"title"`
+	Source     string              `json:"source"`
+	Query      string              `json:"query"`
+	Chart      string              `json:"chart"`
+	X          string              `json:"x"`
+	Y          string              `json:"y"`
+	Agg        string              `json:"agg"`
+	Segment    string              `json:"segment"`
+	Filters    map[string][]string `json:"filters"`
+	Save       bool                `json:"save"`
+}
+
+// handleExplorePanel turns an Explore widget's state into a dashboard-panel spec
+// and either returns the dashboard YAML (save==false, for copy-to-clipboard) or
+// persists it under the user dashboards dir (save==true). It requires POST + a
+// matching X-Jai-CSRF header (same as /explore/{sql,jql}). It validates source
+// (sql|jql) and a non-empty query, and sanitizes board_id to a path-safe slug;
+// it NEVER executes the query (rendering validates it through /explore/* at view
+// time). 403 on CSRF mismatch, 400 on a validation error, 500 on a write error.
+func (s *Server) handleExplorePanel(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
+		return
+	}
+	if r.Header.Get("X-Jai-CSRF") != s.exploreToken() {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "invalid or missing CSRF token"})
+		return
+	}
+	var req explorePanelRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON body"})
+		return
+	}
+	if req.Source != "sql" && req.Source != "jql" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": `source must be "sql" or "jql"`})
+		return
+	}
+	if strings.TrimSpace(req.Query) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "query must not be empty"})
+		return
+	}
+	slug := slugifyBoardID(req.BoardID)
+	if slug == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "board_id must contain at least one path-safe character"})
+		return
+	}
+
+	panel := specs.Panel{
+		Kind:    "query",
+		Title:   req.Title,
+		Source:  req.Source,
+		Query:   req.Query,
+		Chart:   req.Chart,
+		X:       req.X,
+		Y:       req.Y,
+		Agg:     req.Agg,
+		Segment: req.Segment,
+		Filters: req.Filters,
+	}
+	boardTitle := req.BoardTitle
+	if strings.TrimSpace(boardTitle) == "" {
+		boardTitle = slug
+	}
+
+	if !req.Save {
+		dash := specs.Dashboard{ID: slug, Title: boardTitle, Panels: []specs.Panel{panel}}
+		out, err := yaml.Marshal(dash)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"yaml": string(out)})
+		return
+	}
+
+	dir, err := specs.UserDashboardDir()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+	content, file, err := savePanelToDir(dir, slug, boardTitle, panel)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"yaml":         content,
+		"file":         file,
+		"dashboard_id": slug,
+	})
+}
+
+// slugifyBoardID reduces board_id to a path-safe slug: lowercase, keep [a-z0-9],
+// and collapse every run of other characters (including '-') to a single '-',
+// then trim leading/trailing '-'. The result is always within [a-z0-9-] with no
+// consecutive dashes, so a path built from it (slug+".yaml") can never traverse
+// out of the target dir — "../evil" becomes "evil". Empty is a caller-rejected
+// 400.
+func slugifyBoardID(id string) string {
+	var b strings.Builder
+	prevDash := false
+	for _, r := range strings.ToLower(id) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			prevDash = false
+			continue
+		}
+		if !prevDash {
+			b.WriteByte('-')
+			prevDash = true
+		}
+	}
+	return strings.Trim(b.String(), "-")
+}
+
+// savePanelToDir writes (or upserts) panel into the dashboard spec file
+// <slug>.yaml under dir, returning the written file content and its path. dir is
+// a parameter so tests target a temp dir instead of the real ~/.config; slug is
+// assumed already sanitized by the caller. When the file exists, the board's
+// Title/ID are preserved and the panel is upserted by Title (replace a same-Title
+// panel, else append); otherwise a new single-panel dashboard is created. The dir
+// is created 0755 and the file written 0644.
+func savePanelToDir(dir, slug, boardTitle string, panel specs.Panel) (content, file string, err error) {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", "", fmt.Errorf("create dashboards dir: %w", err)
+	}
+	file = filepath.Join(dir, slug+".yaml")
+
+	dash := specs.Dashboard{ID: slug, Title: boardTitle, Panels: []specs.Panel{}}
+	if data, rerr := os.ReadFile(file); rerr == nil {
+		var existing specs.Dashboard
+		if uerr := yaml.Unmarshal(data, &existing); uerr != nil {
+			return "", "", fmt.Errorf("parse existing dashboard %s: %w", file, uerr)
+		}
+		dash = existing
+		if strings.TrimSpace(dash.ID) == "" {
+			dash.ID = slug
+		}
+		if strings.TrimSpace(dash.Title) == "" {
+			dash.Title = boardTitle
+		}
+	} else if !os.IsNotExist(rerr) {
+		return "", "", fmt.Errorf("read existing dashboard %s: %w", file, rerr)
+	}
+
+	upsertPanel(&dash, panel)
+
+	out, err := yaml.Marshal(dash)
+	if err != nil {
+		return "", "", fmt.Errorf("marshal dashboard: %w", err)
+	}
+	if err := os.WriteFile(file, out, 0o644); err != nil {
+		return "", "", fmt.Errorf("write dashboard %s: %w", file, err)
+	}
+	return string(out), file, nil
+}
+
+// upsertPanel replaces the first panel sharing panel.Title in dash, else appends
+// it. Title is the stable identity of a saved widget within a board.
+func upsertPanel(dash *specs.Dashboard, panel specs.Panel) {
+	for i := range dash.Panels {
+		if dash.Panels[i].Title == panel.Title {
+			dash.Panels[i] = panel
+			return
+		}
+	}
+	dash.Panels = append(dash.Panels, panel)
 }

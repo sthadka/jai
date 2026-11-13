@@ -98,6 +98,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/issues", s.handleIssues)
 	s.mux.HandleFunc("/explore/sql", s.handleExploreSQL)
 	s.mux.HandleFunc("/explore/jql", s.handleExploreJQL)
+	s.mux.HandleFunc("/explore/panel", s.handleExplorePanel)
 }
 
 // handleDashboards serves the embedded default dashboards merged with custom specs
