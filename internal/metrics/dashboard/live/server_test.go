@@ -48,6 +48,12 @@ CREATE TABLE jai.fact_issue_membership (
 INSERT INTO jai.fact_issue_membership VALUES
   (7,'ROX-1','ROX','component',0,'c1','auth', TIMESTAMP '2024-01-01', NULL, 1),
   (7,'ROX-2','ROX','component',0,'c2','ui',   TIMESTAMP '2024-02-01', NULL, 1);
+CREATE TABLE jai.issues (key VARCHAR, summary VARCHAR, team VARCHAR);
+INSERT INTO jai.issues VALUES
+  ('ROX-1','Fix login','platform'),
+  ('ROX-2','Add report','platform'),
+  ('ROX-3','Tune index','data'),
+  ('ROX-4','Retire API','data');
 `
 	cmd := exec.Command(bin, ":memory:")
 	cmd.Stdin = strings.NewReader(script)

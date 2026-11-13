@@ -291,9 +291,12 @@ func (s *Server) ActiveGeneration() any {
 	return s.generation
 }
 
-// FetchGeneration returns the active fact generation id from the live DB.
+// FetchGeneration returns the active fact generation id from the live DB. The id
+// is TRY_CAST to BIGINT because the engine scans jai.db with sqlite_all_varchar
+// (every SQLite column arrives as VARCHAR); without the cast /meta would emit the
+// generation as a JSON string instead of a number.
 func FetchGeneration(engine *Engine) (any, error) {
-	rows, err := engine.Query("SELECT generation FROM jai.metrics_active_generation WHERE id = 1")
+	rows, err := engine.Query("SELECT TRY_CAST(generation AS BIGINT) AS generation FROM jai.metrics_active_generation WHERE id = 1")
 	if err != nil {
 		return nil, err
 	}

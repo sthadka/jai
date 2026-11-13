@@ -124,6 +124,19 @@ func (e *Engine) setup(cfg EngineConfig) error {
 	b.WriteString("SET VARIABLE g = (SELECT generation FROM jai.metrics_active_generation WHERE id = 1);\n")
 	b.WriteString("SET VARIABLE done_res = " + sqlStringList(cfg.DoneResolutions) + ";\n")
 	b.WriteString("SET VARIABLE blocker_links = " + sqlStringList(cfg.BlockerLinkTypes) + ";\n")
+	// Session hardening for the free-form /explore/* SQL path (see
+	// docs/query-driven-explore-design.md §6, §10.1). Order matters: the ATTACH
+	// above already happened, so disabling external access cannot break it.
+	//   - sqlite_all_varchar: read every SQLite column as VARCHAR. Empty-string
+	//     '' values in TIMESTAMP columns otherwise throw on scan; the /q template
+	//     TRY_CASTs the columns it needs typed, so the fixed path stays correct.
+	//   - enable_external_access=false: blocks local-file reads/writes, COPY…TO,
+	//     httpfs, and further ATTACH, so free-form SQL cannot escape to the host.
+	//   - lock_configuration=true: prevents a query re-enabling the above. Must be
+	//     last — once locked no further SET (including these) is accepted.
+	b.WriteString("SET GLOBAL sqlite_all_varchar = true;\n")
+	b.WriteString("SET enable_external_access = false;\n")
+	b.WriteString("SET lock_configuration = true;\n")
 	if _, err := io.WriteString(e.stdin, b.String()); err != nil {
 		return fmt.Errorf("duckdb setup write: %w", err)
 	}
