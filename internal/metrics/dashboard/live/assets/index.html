@@ -104,6 +104,10 @@
   #sqlNotice { font-size: 11.5px; color: var(--c3); margin: 0 0 10px; }
   #sqlTableWrap, #sqlIssues { overflow: auto; max-height: 520px; margin-top: 12px; }
   #sqlIssues { border-top: 1px solid var(--border); padding-top: 4px; }
+  #sqlSaveBar { align-items: center; gap: 10px; margin: 12px 0 0; }
+  #sqlSaveBar button#sqlCopyBtn { background: var(--panel); color: var(--fg); border: 1px solid var(--border); }
+  #sqlSaveBar .pstatus { margin: 0; }
+  #sqlYamlBox textarea { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; width: 100%; min-height: 160px; margin-top: 6px; padding: 8px 10px; color: var(--fg); background: var(--panel); border: 1px solid var(--border); border-radius: 6px; resize: vertical; }
   #globalErr { padding: 10px 20px; color: #d14b4b; font-weight: 600; font-size: 13px; }
   .panel .pchart, #explore .pchart { cursor: pointer; }
   .hint { font-size: 11.5px; color: var(--muted); padding: 2px 20px 12px; }
@@ -231,6 +235,12 @@
         <label>Segment <select id="sqlSeg"></select></label>
       </div>
       <div id="sqlFilters" class="ex-controls"></div>
+      <div id="sqlSaveBar" class="ex-controls" style="display:none">
+        <button id="sqlSaveBtn" type="button">Save as panel</button>
+        <button id="sqlCopyBtn" type="button">Copy config</button>
+        <span id="sqlSaveStatus" class="pstatus"></span>
+      </div>
+      <details id="sqlYamlBox" class="sqlbox" style="display:none"><summary>Panel YAML</summary><textarea id="sqlYamlText" readonly spellcheck="false"></textarea></details>
       <div class="panel">
         <div id="sqlChartDiv" class="pchart"></div>
         <div id="sqlTableWrap" style="display:none"></div>
@@ -275,6 +285,7 @@ let DASHBOARDS = [];
 const MEASURE_LABEL = {}, MEASURE_UNIT = {}, DIM_LABEL = {}, COHORT_LABEL = {};
 let chartPanels = [];   // [{panel, chart, statusEl, sqlPre}]  persistent ECharts instances
 let tilePanels = [];    // [{panel, el}]
+let queryPanels = [];   // [{panel, chart, statusEl, el, chartDiv, tableWrap, sqlPre}] for kind:query panels
 let exploreChart = null;
 let sqlResult = null;      // {columns, rows, truncated, sql} from /explore/sql
 let sqlChartInst = null;   // persistent ECharts instance for SQL mode
@@ -573,8 +584,10 @@ const $ = id => document.getElementById(id);
 
 function disposeAll() {
   chartPanels.forEach(p => { try { p.chart.dispose(); } catch (e) {} });
+  queryPanels.forEach(p => { try { p.chart.dispose(); } catch (e) {} });
   chartPanels = [];
   tilePanels = [];
+  queryPanels = [];
   $("tiles").innerHTML = "";
   $("grid").innerHTML = "";
 }
@@ -590,6 +603,23 @@ function buildDashboard(d) {
       el.innerHTML = `<div class="tile-val">…</div><div class="tile-label">${measureLabel(panel.measure)} · ${statLabel(panel)}</div>`;
       tilesRow.appendChild(el);
       tilePanels.push({ panel, el });
+      continue;
+    }
+    if (panel.kind === "query") {
+      const card = document.createElement("div");
+      card.className = "panel";
+      const h = document.createElement("h3"); h.textContent = panel.title || "Query"; card.appendChild(h);
+      const meta = document.createElement("div"); meta.className = "pmeta";
+      meta.textContent = queryPanelMeta(panel); card.appendChild(meta);
+      const chartDiv = document.createElement("div"); chartDiv.className = "pchart"; card.appendChild(chartDiv);
+      const tableWrap = document.createElement("div"); tableWrap.style.display = "none"; tableWrap.style.overflow = "auto"; card.appendChild(tableWrap);
+      const status = document.createElement("div"); status.className = "pstatus"; card.appendChild(status);
+      const det = document.createElement("details"); det.className = "sqlbox";
+      det.innerHTML = "<summary>" + (panel.source === "jql" ? "Compiled SQL (read-only)" : "Executed SQL (read-only)") + "</summary><pre></pre>";
+      card.appendChild(det);
+      grid.appendChild(card);
+      const chart = echarts.init(chartDiv, null, { renderer: "canvas" });
+      queryPanels.push({ panel, chart, statusEl: status, el: card, chartDiv, tableWrap, sqlPre: det.querySelector("pre") });
       continue;
     }
     const card = document.createElement("div");
@@ -622,6 +652,74 @@ function panelMeta(panel) {
   const d = panel.defaults || {};
   if (d.cohort) parts.push(COHORT_LABEL[d.cohort] || d.cohort);
   return parts.join(" · ");
+}
+
+function queryPanelMeta(panel) {
+  const parts = [(panel.source || "sql").toUpperCase()];
+  if (panel.chart) parts.push(panel.chart);
+  if (panel.x) parts.push("by " + panel.x);
+  return parts.join(" · ");
+}
+
+// Convert a saved {col:[vals]} filter map into the {col:Set} shape readFilters
+// produces and passFilters/aggregate consume.
+function toFilterSets(filters) {
+  const f = {};
+  if (filters) for (const col in filters) f[col] = new Set(filters[col] || []);
+  return f;
+}
+
+// refreshQueryPanels re-runs each kind:query panel's saved SQL/JQL and renders
+// it through the shared aggregate → option-builder pipeline.
+async function refreshQueryPanels() {
+  await Promise.all(queryPanels.map(async qp => {
+    const panel = qp.panel;
+    qp.statusEl.textContent = "loading…"; qp.statusEl.className = "pstatus";
+    try {
+      const source = panel.source === "jql" ? "jql" : "sql";
+      const body = source === "jql" ? { jql: panel.query } : { sql: panel.query };
+      const r = await fetch("/explore/" + source, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Jai-CSRF": (META && META.csrf_token) || "" },
+        body: JSON.stringify(body),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j && j.error ? j.error : ("HTTP " + r.status));
+      if (qp.sqlPre) qp.sqlPre.textContent = j.compiled_sql || j.sql || "";
+      const rows = j.rows || [];
+      const spec = {
+        x: panel.x,
+        y: (panel.y && panel.y !== "count") ? panel.y : Y_COUNT,
+        seg: (panel.segment && panel.segment !== "none") ? panel.segment : SEG_NONE,
+        agg: panel.agg || "count",
+        filters: toFilterSets(panel.filters),
+      };
+      const pts = aggregate(rows, spec);
+      const hasSeg = spec.seg !== SEG_NONE && new Set(pts.map(p => p.series)).size > 1;
+      const chartType = panel.chart || "bar";
+      if (chartType === "table") {
+        qp.chart.clear();
+        qp.chartDiv.style.display = "none";
+        qp.tableWrap.style.display = "";
+        qp.tableWrap.innerHTML = renderAggTable(pts, hasSeg);
+      } else {
+        qp.tableWrap.style.display = "none"; qp.tableWrap.innerHTML = "";
+        qp.chartDiv.style.display = "";
+        if (!pts.length) { qp.chart.clear(); qp.statusEl.textContent = "no data in scope"; return; }
+        let option;
+        if (chartType === "line" || chartType === "area") option = catLineOption(pts, hasSeg, chartType === "area");
+        else if (chartType === "scatter") option = sqlScatterOption(pts, hasSeg);
+        else if (chartType === "pie") option = pieOption(pts);
+        else option = catBarOption(pts, hasSeg);
+        qp.chart.setOption(option, true);
+        qp.chart.resize();
+      }
+      qp.statusEl.textContent = "";
+    } catch (e) {
+      qp.chart.clear();
+      qp.statusEl.textContent = e.message; qp.statusEl.className = "pstatus err";
+    }
+  }));
 }
 
 async function refreshTiles() {
@@ -728,6 +826,8 @@ function clearExploreResult(message) {
   if (sqlChartInst) sqlChartInst.clear();
   $("sqlTableWrap").innerHTML = "";
   $("sqlIssues").innerHTML = "";
+  $("sqlSaveBar").style.display = "none";
+  $("sqlYamlBox").style.display = "none";
   const status = $("sqlStatus");
   status.textContent = message; status.className = "pstatus err";
 }
@@ -891,6 +991,103 @@ function renderSqlChart() {
     sqlChartInst.resize();
   }
   renderSqlIssues(rows, spec.filters);
+  updateSaveBar();
+}
+
+// --- Save / Copy the current Explore widget as a dashboard panel ------------
+function updateSaveBar() {
+  const show = !!(sqlResult && $("sqlX").value && (state.exMode === "sql" || state.exMode === "jql"));
+  $("sqlSaveBar").style.display = show ? "" : "none";
+  if (!show) $("sqlYamlBox").style.display = "none";
+}
+
+function slug(s) {
+  return String(s || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "board";
+}
+
+// gatherPanelConfig reads the live Explore widgets into the /explore/panel body.
+function gatherPanelConfig() {
+  const source = state.exMode === "jql" ? "jql" : "sql";
+  const query = (source === "jql" ? $("jqlText").value : $("sqlText").value).trim();
+  const filters = {};
+  $("sqlFilters").querySelectorAll("select[data-col]").forEach(sel => {
+    const vals = [...sel.selectedOptions].map(o => o.value);
+    if (vals.length) filters[sel.getAttribute("data-col")] = vals;
+  });
+  return {
+    source, query,
+    chart: $("sqlChart").value,
+    x: $("sqlX").value,
+    y: $("sqlY").value,
+    agg: $("sqlAgg").value,
+    segment: $("sqlSeg").value,
+    filters,
+  };
+}
+
+async function postExplorePanel(body) {
+  const r = await fetch("/explore/panel", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Jai-CSRF": (META && META.csrf_token) || "" },
+    body: JSON.stringify(body),
+  });
+  const j = await r.json();
+  if (!r.ok) throw new Error(j && j.error ? j.error : ("HTTP " + r.status));
+  return j;
+}
+
+function defaultPanelTitle(query) {
+  return (query || "").replace(/\s+/g, " ").trim().slice(0, 40) || "Query";
+}
+
+async function saveSqlPanel() {
+  const cfg = gatherPanelConfig();
+  if (!cfg.query || !cfg.x) return;
+  const boardName = window.prompt("Dashboard name for the new panel:", "My dashboard");
+  if (!boardName) return;
+  const panelTitle = window.prompt("Panel title:", defaultPanelTitle(cfg.query));
+  if (!panelTitle) return;
+  const status = $("sqlSaveStatus");
+  status.textContent = "saving…"; status.className = "pstatus";
+  try {
+    const j = await postExplorePanel(Object.assign({
+      board_id: slug(boardName), board_title: boardName, title: panelTitle, save: true,
+    }, cfg));
+    status.textContent = "Saved to " + (j.file || "dashboard"); status.className = "pstatus";
+    const dash = await fetch("/dashboards").then(r => r.json());
+    DASHBOARDS = (dash && dash.dashboards) || [];
+    renderViewTabs();
+    setActiveTab();
+  } catch (e) {
+    status.textContent = e.message; status.className = "pstatus err";
+  }
+}
+
+async function copySqlPanel() {
+  const cfg = gatherPanelConfig();
+  if (!cfg.query || !cfg.x) return;
+  const status = $("sqlSaveStatus");
+  status.textContent = "generating…"; status.className = "pstatus";
+  try {
+    const title = defaultPanelTitle(cfg.query);
+    const j = await postExplorePanel(Object.assign({
+      board_id: slug(title), board_title: title, title, save: false,
+    }, cfg));
+    const yaml = j.yaml || "";
+    try {
+      if (!navigator.clipboard) throw new Error("no clipboard");
+      await navigator.clipboard.writeText(yaml);
+      status.textContent = "Copied!"; status.className = "pstatus";
+      $("sqlYamlBox").style.display = "none";
+    } catch (err) {
+      $("sqlYamlText").value = yaml;
+      $("sqlYamlBox").style.display = "";
+      $("sqlYamlBox").open = true;
+      status.textContent = "Clipboard unavailable — YAML shown below"; status.className = "pstatus";
+    }
+  } catch (e) {
+    status.textContent = e.message; status.className = "pstatus err";
+  }
 }
 
 function renderAggTable(pts, hasSeg) {
@@ -1073,6 +1270,7 @@ function refreshCurrent() {
   }
   refreshTiles();
   refreshCharts();
+  refreshQueryPanels();
 }
 
 // ---------------------------------------------------------------------------
@@ -1127,11 +1325,14 @@ function wireEvents() {
 
   $("sqlRun").addEventListener("click", runSql);
   $("jqlRun").addEventListener("click", runJql);
+  $("sqlSaveBtn").addEventListener("click", saveSqlPanel);
+  $("sqlCopyBtn").addEventListener("click", copySqlPanel);
   ["sqlChart", "sqlX", "sqlY", "sqlAgg", "sqlSeg"].forEach(id =>
     $(id).addEventListener("change", renderSqlChart));
 
   window.addEventListener("resize", () => {
     chartPanels.forEach(c => c.chart.resize());
+    queryPanels.forEach(c => c.chart.resize());
     if (exploreChart) exploreChart.resize();
     if (sqlChartInst) sqlChartInst.resize();
   });
