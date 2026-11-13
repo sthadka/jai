@@ -48,23 +48,29 @@ func changelogCountJoin(alias, field string) string {
 // measures is the whitelist of measure tokens. All SQL fragments are constant,
 // server-authored strings over the `f` (fact_issue_flow) alias.
 var measures = map[string]measureSpec{
-	"cycle_time":     {valueExpr: "f.cycle_seconds / 86400.0", filter: "f.cycle_seconds IS NOT NULL", unit: "days"},
-	"lead_time":      {valueExpr: "f.lead_seconds / 86400.0", filter: "f.lead_seconds IS NOT NULL", unit: "days"},
-	"flow_occupancy": {valueExpr: "f.flow_occupancy", filter: "f.flow_occupancy IS NOT NULL", unit: "ratio"},
-	"triage_latency": {valueExpr: "(epoch(f.first_active_at) - epoch(f.created)) / 86400.0", filter: "f.first_active_at IS NOT NULL AND f.created IS NOT NULL AND f.first_active_at >= f.created", unit: "days"},
-	"estimate":       {valueExpr: "f.estimate", filter: "f.estimate IS NOT NULL", unit: "points"},
+	// Numeric/timestamp fact columns are TRY_CAST because the engine scans jai.db
+	// with sqlite_all_varchar=true (session hardening for the free-form /explore
+	// path): every SQLite column arrives as VARCHAR, so the measure math must cast
+	// it back. TRY_CAST yields NULL (not an error) for any unparseable value, which
+	// the aggregates ignore — identical to the pre-hardening typed-scan behavior.
+	"cycle_time":     {valueExpr: "TRY_CAST(f.cycle_seconds AS DOUBLE) / 86400.0", filter: "f.cycle_seconds IS NOT NULL", unit: "days"},
+	"lead_time":      {valueExpr: "TRY_CAST(f.lead_seconds AS DOUBLE) / 86400.0", filter: "f.lead_seconds IS NOT NULL", unit: "days"},
+	"flow_occupancy": {valueExpr: "TRY_CAST(f.flow_occupancy AS DOUBLE)", filter: "f.flow_occupancy IS NOT NULL", unit: "ratio"},
+	"triage_latency": {valueExpr: "(epoch(TRY_CAST(f.first_active_at AS TIMESTAMP)) - epoch(TRY_CAST(f.created AS TIMESTAMP))) / 86400.0", filter: "f.first_active_at IS NOT NULL AND f.created IS NOT NULL AND f.first_active_at >= f.created", unit: "days"},
+	"estimate":       {valueExpr: "TRY_CAST(f.estimate AS DOUBLE)", filter: "f.estimate IS NOT NULL", unit: "points"},
 	"throughput":     {valueExpr: "", filter: "", unit: "count"},
 
 	// Reopen-count distribution (per-issue reopen tally; 0 for never-reopened).
-	"reopen_count": {valueExpr: "f.reopen_count", unit: "count"},
+	"reopen_count": {valueExpr: "TRY_CAST(f.reopen_count AS DOUBLE)", unit: "count"},
 
 	// Age of OPEN issues as-of now, in days. Pair with cohort=open; defaults leave
 	// the date window unset so open issues (resolved IS NULL) are not filtered out.
-	"aged_open": {valueExpr: "(epoch(CURRENT_TIMESTAMP) - epoch(f.created)) / 86400.0", filter: "f.resolved IS NULL AND f.created IS NOT NULL", unit: "days"},
+	"aged_open": {valueExpr: "(epoch(CURRENT_TIMESTAMP) - epoch(TRY_CAST(f.created AS TIMESTAMP))) / 86400.0", filter: "f.resolved IS NULL AND f.created IS NOT NULL", unit: "days"},
 
 	// Per-issue change-count distributions over the changelog. Each uses a
 	// pre-aggregated grouped join (changelogCountJoin) — a server-authored constant
-	// fragment, never client SQL.
+	// fragment, never client SQL. mj.cnt is a DuckDB count(*) (BIGINT), so it needs
+	// no cast.
 	"priority_changes":    {valueExpr: "COALESCE(mj.cnt, 0)", unit: "count", join: changelogCountJoin("mj", "priority")},
 	"rank_volatility":     {valueExpr: "COALESCE(mj.cnt, 0)", unit: "count", join: changelogCountJoin("mj", "Rank")},
 	"reassignment_count":  {valueExpr: "COALESCE(mj.cnt, 0)", unit: "count", join: changelogCountJoin("mj", "assignee")},
@@ -77,7 +83,7 @@ var measures = map[string]measureSpec{
 	// so zero rows are returned and nothing is fabricated. The dashboard marks the
 	// panel explicitly unavailable in that case (requires: blocker_link_types).
 	"blocker_ageing": {
-		valueExpr: "(epoch(CURRENT_TIMESTAMP) - epoch(f.created)) / 86400.0",
+		valueExpr: "(epoch(CURRENT_TIMESTAMP) - epoch(TRY_CAST(f.created AS TIMESTAMP))) / 86400.0",
 		filter:    "f.resolved IS NULL AND f.created IS NOT NULL AND EXISTS (SELECT 1 FROM jai.issue_links bl WHERE bl.issue_key = f.issue_key AND list_contains(getvariable('blocker_links'), bl.link_type))",
 		unit:      "days",
 	},
@@ -215,9 +221,9 @@ func dimSelect(spec dimSpec, alias, grainPart string) (sel, join string) {
 	case dimColumn:
 		return "CAST(" + spec.expr + " AS VARCHAR)", ""
 	case dimPeriod:
-		return "CAST(date_trunc('" + grainPart + "', f.resolved) AS VARCHAR)", ""
+		return "CAST(date_trunc('" + grainPart + "', TRY_CAST(f.resolved AS TIMESTAMP)) AS VARCHAR)", ""
 	case dimCreatedPeriod:
-		return "CAST(date_trunc('" + grainPart + "', f.created) AS VARCHAR)", ""
+		return "CAST(date_trunc('" + grainPart + "', TRY_CAST(f.created AS TIMESTAMP)) AS VARCHAR)", ""
 	case dimMembership:
 		// Event-time membership as-of resolution; for still-open issues (resolved
 		// IS NULL) fall back to the CURRENTLY-open interval (exited_at IS NULL) so
@@ -301,9 +307,12 @@ func (w *Whitelist) parts(raw QueryParams) (queryParts, error) {
 	// applies to the cohort's time basis: completion time for delivered/resolved,
 	// but CREATION time for the open cohort (open issues have resolved IS NULL, so a
 	// resolved-based window would wipe them) and for the catch-all cohort.
-	dateCol := "f.resolved"
+	// The fact timestamp columns scan as VARCHAR under sqlite_all_varchar, so the
+	// window bound is TRY_CAST to TIMESTAMP before the DATE comparison (a bare
+	// VARCHAR >= DATE would be a binder error).
+	dateCol := "TRY_CAST(f.resolved AS TIMESTAMP)"
 	if p.Cohort == "open" || p.Cohort == "all" {
-		dateCol = "f.created"
+		dateCol = "TRY_CAST(f.created AS TIMESTAMP)"
 	}
 	if p.From != "" {
 		d, err := parseDate(p.From)

@@ -98,7 +98,7 @@ func TestBuildAcceptsValidTemplate(t *testing.T) {
 		"f.generation = getvariable('g')",
 		"list_contains(getvariable('done_res')",
 		"fact_field_interval",
-		"quantile_cont(f.lead_seconds / 86400.0, 0.95)",
+		"quantile_cont(TRY_CAST(f.lead_seconds AS DOUBLE) / 86400.0, 0.95)",
 		"GROUP BY slice, segment",
 	} {
 		if !strings.Contains(sql, want) {
@@ -129,14 +129,14 @@ func TestBuildDateWindowCohortBasis(t *testing.T) {
 	if err != nil {
 		t.Fatalf("delivered build: %v", err)
 	}
-	if !strings.Contains(delivered, "f.resolved >= DATE '2025-01-01'") || !strings.Contains(delivered, "f.resolved < DATE '2025-04-01'") {
+	if !strings.Contains(delivered, "TRY_CAST(f.resolved AS TIMESTAMP) >= DATE '2025-01-01'") || !strings.Contains(delivered, "TRY_CAST(f.resolved AS TIMESTAMP) < DATE '2025-04-01'") {
 		t.Fatalf("delivered cohort should window on f.resolved:\n%s", delivered)
 	}
 	open, err := w.Build(QueryParams{Measure: "aged_open", Cohort: "open", From: "2025-01-01", To: "2025-04-01"})
 	if err != nil {
 		t.Fatalf("open build: %v", err)
 	}
-	if !strings.Contains(open, "f.created >= DATE '2025-01-01'") || !strings.Contains(open, "f.created < DATE '2025-04-01'") {
+	if !strings.Contains(open, "TRY_CAST(f.created AS TIMESTAMP) >= DATE '2025-01-01'") || !strings.Contains(open, "TRY_CAST(f.created AS TIMESTAMP) < DATE '2025-04-01'") {
 		t.Fatalf("open cohort should window on f.created:\n%s", open)
 	}
 	if strings.Contains(open, "f.resolved >= DATE") {
