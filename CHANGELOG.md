@@ -1,5 +1,76 @@
 # Changelog
 
+## [5.2.0](https://github.com/sthadka/jai/compare/v5.1.0...v5.2.0) (2026-11-13)
+
+
+### Features
+
+* **cli:** auto-detect bare JQL in jai query, translate to local SQL ([94bc084](https://github.com/sthadka/jai/commit/94bc0846b8fc5df4f40e5ca381e838d1382fe063))
+* **jql:** accept multi-word bare values in scalar/IN positions ([360b7e4](https://github.com/sthadka/jai/commit/360b7e49c390661adcaf7bc34318870bf8fc0532))
+* **jql:** add JQL lexer, parser, AST and resolvers ([f90c241](https://github.com/sthadka/jai/commit/f90c241d6cd64a5f752cc4e9f593bd5918fd59e1))
+* **jql:** add SQLite + DuckDB emitters and Translate API ([56e1440](https://github.com/sthadka/jai/commit/56e1440a6c1ef9ed7f38d64b7f830b384159ee6b))
+* **jql:** case-insensitive value matching for textual fields ([4774783](https://github.com/sthadka/jai/commit/477478303a2648e77fc09d315709b153b660b4ec))
+* **metrics:** add /explore/jql endpoint and JQL sub-tab ([8c684f0](https://github.com/sthadka/jai/commit/8c684f01b9ba334c7795e028bfd15a368db95563))
+* **metrics:** add honest blocker-ageing proxies (relationship-age + waiting-dwell) ([a408691](https://github.com/sthadka/jai/commit/a4086912173b5f8579a5f8e60677766380791656))
+* **metrics:** add kind:query panel fields + UserDashboardDir to dashboard specs ([5248413](https://github.com/sthadka/jai/commit/52484133760b924610bf66d4ce65c343cd2f8576))
+* **metrics:** add policy-driven security remediation timing and SLA reporting ([2ce01f2](https://github.com/sthadka/jai/commit/2ce01f2bc3a31d6c2a9669897c4d4687a8b39523))
+* **metrics:** add read-only /explore/sql endpoint with SELECT-only guard + CSRF ([db6dc04](https://github.com/sthadka/jai/commit/db6dc04634dc4d6caf4db31d2b590fc23ba1598e))
+* **metrics:** add SQL Query sub-tab to dashboard Explore ([c5bb7b8](https://github.com/sthadka/jai/commit/c5bb7b848175fb4a7f2a1cc8873aa267077e20a0))
+* **metrics:** batteries-included dashboard specs + custom local loading ([5def36d](https://github.com/sthadka/jai/commit/5def36d13edbbd92486343d6af191b2b3efb3fb4))
+* **metrics:** dashboard Team dimension + drill-through to affected issues ([4b54e9e](https://github.com/sthadka/jai/commit/4b54e9e7cdf2411ac0e589009bdc6b0ffad7e392))
+* **metrics:** deterministic status-only interval replay ([e0306ef](https://github.com/sthadka/jai/commit/e0306ef7d5781f7d3a1b2df19cee7597fb6e95aa))
+* **metrics:** ECharts dashboard redesign (tiles, global filters, human labels) ([c73b603](https://github.com/sthadka/jai/commit/c73b603bbf5cd72c09de5f4c9cd178b1350f840e))
+* **metrics:** event-time cohorts + assignee workload attribution ([56bae69](https://github.com/sthadka/jai/commit/56bae69a9082bbce8518116ddaa7a839a955b975))
+* **metrics:** export offline static dashboard ([2c67df9](https://github.com/sthadka/jai/commit/2c67df9c38f44818ce3f9e68e614cfe17f0758dd))
+* **metrics:** expose metrics, coverage and rebuild via CLI ([b856289](https://github.com/sthadka/jai/commit/b85628906d7c1340e4d700b05d309f9b83e35976))
+* **metrics:** expose shared metrics service through MCP ([40ac327](https://github.com/sthadka/jai/commit/40ac32784b20dfde686c2895a46467b9e2e60799))
+* **metrics:** generalize scalar interval replay to tracked fields ([43d581d](https://github.com/sthadka/jai/commit/43d581d73e576803f6eb570f573466ca8faba7e3))
+* **metrics:** generate shared SQL fragments and wire metrics into view/snippet ([39138e9](https://github.com/sthadka/jai/commit/39138e9c841dfa6e47623607f2e188a412a8a65e))
+* **metrics:** harden DuckDB engine session for free-form explore SQL ([381b95f](https://github.com/sthadka/jai/commit/381b95f3ac528715c147f6bd0616ac6144439bd1))
+* **metrics:** integrate changelog sync and prune with metric refresh ([a2de4c4](https://github.com/sthadka/jai/commit/a2de4c42de0dcbf9d656a26566d982209ea9eccd))
+* **metrics:** issues-only net flow, ageing, resolution mix and configured ratio ([8e92899](https://github.com/sthadka/jai/commit/8e92899e8e48e60bc44039c3062d65a351e5320f))
+* **metrics:** live interactive dashboard server ([f5bfc59](https://github.com/sthadka/jai/commit/f5bfc59beeddb97244babd208df4f7c7176cf096))
+* **metrics:** model Sprint/label/component membership intervals ([dd8e3fa](https://github.com/sthadka/jai/commit/dd8e3fa414ceef9fbe292c60b4d49064a92b4764))
+* **metrics:** per-project history and source-data coverage ([72cc246](https://github.com/sthadka/jai/commit/72cc24672aec1ebbb796712d423d0e0dd99ad8f7))
+* **metrics:** persist fact_issue_membership ([85ded31](https://github.com/sthadka/jai/commit/85ded311cee103e58a38e8f51e51b5e68a68fba2))
+* **metrics:** persist flow_occupancy/estimate + attach.sql views + parquet recipe ([36c87f0](https://github.com/sthadka/jai/commit/36c87f05a3a6bdeb657e752345dd936b5b9c8025))
+* **metrics:** persist status facts with atomic generations and cross-process locking ([d774e9b](https://github.com/sthadka/jai/commit/d774e9bb583f00aba3561465ec7aad2671f1ed4e))
+* **metrics:** portable metrics config and fail-closed validation ([9917300](https://github.com/sthadka/jai/commit/9917300f2d5d4043eb7809c2ae388da5f9cf29f3))
+* **metrics:** POST /explore/panel to save Explore widgets as dashboard specs ([47d9c23](https://github.com/sthadka/jai/commit/47d9c239b60a0effc283e3338f7c0283270cf157))
+* **metrics:** priority/rank/reassignment/triage signals via changelog index ([15c6958](https://github.com/sthadka/jai/commit/15c695834d86bc353406d2e6a5bdc5733fc89a6c))
+* **metrics:** read-only TUI metrics pane ([31082c0](https://github.com/sthadka/jai/commit/31082c0802da49aa31affd28859f696139e65484))
+* **metrics:** reconcile current WIP correctness gate ([c33606f](https://github.com/sthadka/jai/commit/c33606f0e5fddd3805e60e2fc6feec7ffcd23749))
+* **metrics:** render kind:query dashboard panels + Save/Copy Explore widget ([3522b47](https://github.com/sthadka/jai/commit/3522b4755f2b1abd54704990d9f595cb9902d6c8))
+* **metrics:** shared snapshot delivery service and duration distributions ([0c90283](https://github.com/sthadka/jai/commit/0c90283652828cfdc8a012f72fb5a9abeeafdcf2))
+* **metrics:** sprint eventual resolution of ever-members ([bfbe06f](https://github.com/sthadka/jai/commit/bfbe06f9c08ebd116dae14a6115b3137c2b892e8))
+* **metrics:** view tab buttons + split Explore into Curated/JQL/SQL tabs ([c3315bf](https://github.com/sthadka/jai/commit/c3315bfc529da161e20a20fdb047f1f105e3a409))
+* **metrics:** WIP, CFD, dwell, reopen and flow-occupancy metrics ([caa7541](https://github.com/sthadka/jai/commit/caa7541413d47b7877be3047dc0068472d2b82dc))
+* **metrics:** wire sync and deletions into the metric writer ([156f9e4](https://github.com/sthadka/jai/commit/156f9e41f47e13eaf9eb3fdde9685e604ae5f23b))
+
+
+### Bug Fixes
+
+* **jql:** keep built-in Entity flag when injected FieldMap overrides a field ([db43466](https://github.com/sthadka/jai/commit/db434662a988dcb72ce5821fe0dbd4b19ed49659))
+* **metrics:** dashboard open-cohort filters (date basis + event-time dim fallback) ([c76bd62](https://github.com/sthadka/jai/commit/c76bd624c5186ad5dee536066d5299f033928ecc))
+* **metrics:** live dashboard renders data (container width, live generation + sort) ([5686a9c](https://github.com/sthadka/jai/commit/5686a9c5f3fc44394c8f9ef427737d56d7a3bc56))
+* **metrics:** treat empty DATETIME (zero time) as absent in fact loaders ([0e3d47c](https://github.com/sthadka/jai/commit/0e3d47c31c63128da447cd357bd344a9bd5b7885))
+
+
+### Refactoring
+
+* **metrics:** demote static renderer to --snapshot ([d0474da](https://github.com/sthadka/jai/commit/d0474daa608408583bf02a4084b1618da32c2152))
+* **metrics:** remove throwaway validation exporter ([eac0395](https://github.com/sthadka/jai/commit/eac0395e3f146f7b7620b611bd3afda303b6791c))
+
+
+### Documentation
+
+* **metrics:** duckdb reconciliation of membership + event-time drills ([8dd1fdb](https://github.com/sthadka/jai/commit/8dd1fdbcd6bbcac2c63b068c38e8fbe78baf59e1))
+* **metrics:** flow-metrics user guide, readme and changelog ([8f6b75e](https://github.com/sthadka/jai/commit/8f6b75ebde941ff91442394fbacab95844858885))
+* **metrics:** lock Phase-0 replay contract and fixture cohorts ([e7c2aa2](https://github.com/sthadka/jai/commit/e7c2aa2e7661f820fc174b00b2c7ca71515b5df4))
+* **metrics:** make config.example metrics block jira-agnostic ([1a15469](https://github.com/sthadka/jai/commit/1a154693ad98e023cb67bc8ed5f74250184d2ce7))
+* review metrics feasibility proposal inline ([f389c1a](https://github.com/sthadka/jai/commit/f389c1a5c452b2afd3851c9b6babbf6938f2f09e))
+* review product strategy and engineering quality ([d816d37](https://github.com/sthadka/jai/commit/d816d37a7916b1ebba378e93fd3c52af03a9b633))
+
 ## [Unreleased]
 
 
