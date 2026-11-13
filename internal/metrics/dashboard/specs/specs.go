@@ -2,7 +2,10 @@
 // batteries-included default dashboards (embedded) plus custom dashboards from
 // local directories at runtime.
 //
-// A dashboard is a titled set of panels. A panel is purely declarative —
+// A dashboard is a titled set of panels. A panel is EITHER a metric panel or a
+// kind:query panel.
+//
+// A metric panel ("" kind, today's behavior) is purely declarative —
 // {title, measure, slice, segment, chart, defaults} — and renders THROUGH the
 // existing whitelisted /q template: measure/slice/segment/cohort/grain are the
 // same tokens the /q whitelist validates, never raw SQL. The SPA picks an ECharts
@@ -11,6 +14,13 @@
 // cannot serve, or that need unconfigured taxonomy, carry an explicit
 // `unavailable` reason (or a `requires` capability resolved at serve time) so
 // they render an honest "unavailable" card — never fabricated data.
+//
+// A kind:query panel ("query" kind) carries a saved Explore query and renders
+// THROUGH /explore/{sql,jql} plus client-side shaping: {source, query, chart, x,
+// y, agg, segment, filters} drive the fetch and the ECharts render. The
+// metric-only fields (measure/slice/stat/unit/metric/requires and the
+// cohort/grain defaults) are ignored for kind:query panels, and the query fields
+// are ignored for metric panels.
 package specs
 
 import (
@@ -49,7 +59,9 @@ type PanelDefaults struct {
 	To      string `yaml:"to,omitempty" json:"to,omitempty"`
 }
 
-// Panel is one declarative chart. It renders through the shared /q template.
+// Panel is one declarative chart. A metric panel ("" kind) renders through the
+// shared /q template; a kind:query panel renders through /explore/{sql,jql} plus
+// client-side shaping.
 type Panel struct {
 	Title   string `yaml:"title" json:"title"`
 	Measure string `yaml:"measure" json:"measure"`
@@ -84,6 +96,31 @@ type Panel struct {
 	// "unavailable: <reason>" card and fetch no data. Set statically in the spec
 	// (query-shape not served by /q) or injected at serve time (missing config).
 	Unavailable string `yaml:"unavailable,omitempty" json:"unavailable,omitempty"`
+
+	// Kind selects the panel family: "" (a metric panel, today's behavior) or
+	// "query" (an Explore query widget rendered through /explore/{sql,jql}).
+	Kind string `yaml:"kind,omitempty" json:"kind,omitempty"`
+
+	// Source is the Explore backend for a kind:query panel: sql|jql.
+	Source string `yaml:"source,omitempty" json:"source,omitempty"`
+
+	// Query is the raw SQL or JQL text executed for a kind:query panel.
+	Query string `yaml:"query,omitempty" json:"query,omitempty"`
+
+	// X is the result column used as the group-by/category axis (kind:query).
+	X string `yaml:"x,omitempty" json:"x,omitempty"`
+
+	// Y is the result column used as the measure, or "count"/"**count**"
+	// (kind:query).
+	Y string `yaml:"y,omitempty" json:"y,omitempty"`
+
+	// Agg is the client-side aggregation over Y: count|sum|avg|min|max
+	// (kind:query).
+	Agg string `yaml:"agg,omitempty" json:"agg,omitempty"`
+
+	// Filters are optional client-side per-column value filters applied to the
+	// Explore result before shaping (kind:query).
+	Filters map[string][]string `yaml:"filters,omitempty" json:"filters,omitempty"`
 }
 
 // Dashboard is a titled set of panels.
@@ -138,6 +175,18 @@ func DefaultDirs() []string {
 	}
 	dirs = append(dirs, filepath.Join(".jai", "dashboards"))
 	return dirs
+}
+
+// UserDashboardDir returns the user-level custom-spec directory
+// (~/.config/jai/dashboards), using the same resolution as DefaultDirs. The save
+// endpoint writes saved query widgets here. It errors when the home directory
+// cannot be resolved.
+func UserDashboardDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve user home: %w", err)
+	}
+	return filepath.Join(home, ".config", "jai", "dashboards"), nil
 }
 
 // Load returns the merged dashboard set: embedded defaults first, then each dir
