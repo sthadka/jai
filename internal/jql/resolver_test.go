@@ -94,6 +94,55 @@ func TestResolveExample89(t *testing.T) {
 	}
 }
 
+// TestInjectedFieldMapCannotDisableEntity is the §8.9 regression: consumers
+// (dashboard 14.6 / CLI 14.7) build their injected FieldMap from the DB
+// field_map, where team is not a user-typed field and so arrives with
+// Entity:false. That injected false must NOT be able to turn OFF the built-in
+// entity flag; otherwise `Team != <GUID>` skips id → display-name resolution and
+// the raw GUID leaks into the SQL (never excluding the resolved "ACS Docs" rows).
+func TestInjectedFieldMapCannotDisableEntity(t *testing.T) {
+	const guid = "ec74d716-af36-4b3c-950f-f79213d08f71-1819"
+	resolveID := func(field, id string) (string, bool, error) {
+		if field == "Team" && id == guid {
+			return "ACS Docs", true, nil
+		}
+		return "", false, nil
+	}
+
+	// Inject team with Entity:false, mimicking the DB-sourced consumer FieldMap.
+	q := mustParse(t, "Team != "+guid)
+	rq, err := Resolve(q, ResolveOptions{
+		Fields:    FieldMap{"team": {Column: "team", Kind: KindString, Entity: false}},
+		ResolveID: resolveID,
+	})
+	if err != nil {
+		t.Fatalf("resolve error: %v", err)
+	}
+	clauses := collectResolved(rq.Where)
+	if len(clauses) != 1 {
+		t.Fatalf("got %d clauses, want 1: %+v", len(clauses), clauses)
+	}
+	c := clauses[0]
+	if c.Column != "team" || c.Op != OpNeq || len(c.Values) != 1 {
+		t.Fatalf("team clause = %+v", c)
+	}
+	v := c.Values[0]
+	if !v.ResolvedFromID || v.Str != "ACS Docs" {
+		t.Fatalf("team value = %+v, want resolved 'ACS Docs' (ResolvedFromID true)", v)
+	}
+
+	// End-to-end: the emitted SQL must use the resolved name, not the raw GUID.
+	r := mustTranslate(t, "Team != "+guid, Options{
+		Dialect:    SQLite,
+		FieldMap:   FieldMap{"team": {Column: "team", Kind: KindString, Entity: false}},
+		IDResolver: resolveID,
+	})
+	wantFragments(t, r.SQL, "COALESCE(team,'') NOT IN ('', 'ACS Docs')")
+	if strings.Contains(r.SQL, guid) {
+		t.Errorf("SQL leaked raw GUID %q: %s", guid, r.SQL)
+	}
+}
+
 func TestResolveUnknownFieldNamed(t *testing.T) {
 	q := mustParse(t, `bogusField = 1`)
 	_, err := Resolve(q, ResolveOptions{})

@@ -306,6 +306,14 @@ func normalizeFields(in FieldMap) FieldMap {
 func (r *resolver) lookupField(name string) (FieldDef, bool) {
 	key := strings.ToLower(name)
 	if fd, ok := r.fields[key]; ok {
+		// The injected map wins on Column/Kind, but it must not be able to
+		// turn OFF a known-entity field (team/assignee/reporter/creator):
+		// consumers build their FieldMap from the DB field_map, where these
+		// are not user-typed fields and so arrive with Entity:false. Forcing
+		// Entity true keeps id → display-name resolution working (§8.9).
+		if b, ok := builtinAliases[key]; ok {
+			fd.Entity = fd.Entity || b.Entity
+		}
 		return fd, true
 	}
 	if fd, ok := builtinAliases[key]; ok {
