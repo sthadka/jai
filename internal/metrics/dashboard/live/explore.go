@@ -143,7 +143,7 @@ func scanSQL(sql string) (words []string, multiStatement bool) {
 		case c == '/' && i+1 < len(rs) && rs[i+1] == '*': // block comment
 			flush()
 			i += 2
-			for i+1 < len(rs) && !(rs[i] == '*' && rs[i+1] == '/') {
+			for i+1 < len(rs) && (rs[i] != '*' || rs[i+1] != '/') {
 				i++
 			}
 			i++ // land on the closing '/'; the loop's i++ steps past it
