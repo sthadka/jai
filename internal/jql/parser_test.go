@@ -185,6 +185,127 @@ func TestParseErrorsHaveOffset(t *testing.T) {
 	}
 }
 
+// TestParseBareMultiWordValue covers the lenient auto-quoting of unquoted
+// multi-word scalar values: consecutive bare-word tokens are gathered into a
+// single unquoted StringValue, stopping at boundary tokens.
+func TestParseBareMultiWordValue(t *testing.T) {
+	t.Run("to do", func(t *testing.T) {
+		c := mustClause(t, `status = To Do`)
+		wantBareValue(t, c, "To Do")
+	})
+
+	t.Run("in progress with soft keyword", func(t *testing.T) {
+		// `In` lexes as the IN keyword but must be gathered as a value word.
+		c := mustClause(t, `status = In Progress`)
+		wantBareValue(t, c, "In Progress")
+	})
+
+	t.Run("assignee john smith", func(t *testing.T) {
+		c := mustClause(t, `assignee = John Smith`)
+		wantBareValue(t, c, "John Smith")
+	})
+
+	t.Run("and boundary respected", func(t *testing.T) {
+		q, err := Parse(`project = ROX AND status = To Do`)
+		if err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		clauses := collectClauses(q.Where)
+		if len(clauses) != 2 {
+			t.Fatalf("got %d clauses, want 2", len(clauses))
+		}
+		byField := map[string]*Clause{}
+		for _, c := range clauses {
+			byField[c.Field] = c
+		}
+		wantBareValue(t, byField["project"], "ROX")
+		wantBareValue(t, byField["status"], "To Do")
+	})
+
+	t.Run("order by boundary respected", func(t *testing.T) {
+		q, err := Parse(`status = To Do ORDER BY created`)
+		if err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		wantBareValue(t, q.Where.(*Clause), "To Do")
+		if len(q.OrderBy) != 1 || q.OrderBy[0].Field != "created" {
+			t.Fatalf("order = %+v, want [created]", q.OrderBy)
+		}
+	})
+
+	t.Run("in list elements", func(t *testing.T) {
+		q, err := Parse(`status in (New, To Do, "In Progress")`)
+		if err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		c := q.Where.(*Clause)
+		lv, ok := c.Value.(*ListValue)
+		if !ok || len(lv.Items) != 3 {
+			t.Fatalf("value = %+v, want 3-item list", c.Value)
+		}
+		want := []struct {
+			val    string
+			quoted bool
+		}{{"New", false}, {"To Do", false}, {"In Progress", true}}
+		for i, w := range want {
+			sv, ok := lv.Items[i].(*StringValue)
+			if !ok || sv.Val != w.val || sv.Quoted != w.quoted {
+				t.Errorf("item %d = %+v, want %q quoted=%v", i, lv.Items[i], w.val, w.quoted)
+			}
+		}
+	})
+}
+
+// TestParseBareValueRegressions pins the single-token behaviors that must be
+// preserved: single bare words, quoted multi-word values and single-token GUIDs.
+func TestParseBareValueRegressions(t *testing.T) {
+	t.Run("single bare word", func(t *testing.T) {
+		wantBareValue(t, mustClause(t, `status = New`), "New")
+	})
+
+	t.Run("quoted multi-word", func(t *testing.T) {
+		c := mustClause(t, `status = "To Do"`)
+		sv, ok := c.Value.(*StringValue)
+		if !ok || sv.Val != "To Do" || !sv.Quoted {
+			t.Fatalf("value = %+v, want quoted 'To Do'", c.Value)
+		}
+	})
+
+	t.Run("guid is single token", func(t *testing.T) {
+		c := mustClause(t, `Team = ec74d716-af36-4b3c-950f-f79213d08f71-1819`)
+		sv, ok := c.Value.(*StringValue)
+		if !ok || sv.Quoted || sv.Val != "ec74d716-af36-4b3c-950f-f79213d08f71-1819" {
+			t.Fatalf("value = %+v, want single unquoted GUID token", c.Value)
+		}
+	})
+}
+
+// mustClause parses src expecting a single top-level clause.
+func mustClause(t *testing.T, src string) *Clause {
+	t.Helper()
+	q, err := Parse(src)
+	if err != nil {
+		t.Fatalf("parse %q: %v", src, err)
+	}
+	c, ok := q.Where.(*Clause)
+	if !ok {
+		t.Fatalf("parse %q: where = %T, want *Clause", src, q.Where)
+	}
+	return c
+}
+
+// wantBareValue asserts the clause holds an unquoted StringValue equal to want.
+func wantBareValue(t *testing.T, c *Clause, want string) {
+	t.Helper()
+	if c == nil {
+		t.Fatalf("missing clause for value %q", want)
+	}
+	sv, ok := c.Value.(*StringValue)
+	if !ok || sv.Quoted || sv.Val != want {
+		t.Fatalf("value = %+v, want unquoted %q", c.Value, want)
+	}
+}
+
 // collectClauses flattens all clauses in a raw boolean tree.
 func collectClauses(e Expr) []*Clause {
 	switch n := e.(type) {

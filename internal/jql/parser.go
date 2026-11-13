@@ -300,7 +300,11 @@ func (p *parser) skipHistoryTail() {
 }
 
 // parseScalarValue parses the right-hand side of a scalar operator: a string,
-// number, relative date, function call or bare word.
+// number, relative date, function call or bare word. Bare words are gathered
+// greedily so that unquoted multi-word values (e.g. `To Do`, `In Progress`,
+// `John Smith`) are accepted as a single unquoted StringValue, matching the
+// leniency users expect in the dashboard JQL tab even though strict Jira JQL
+// would require quotes.
 func (p *parser) parseScalarValue() (Value, error) {
 	t := p.cur()
 	switch t.kind {
@@ -317,14 +321,40 @@ func (p *parser) parseScalarValue() (Value, error) {
 	case tRelDate:
 		p.advance()
 		return parseRelativeDate(t)
-	case tIdent:
-		if p.peek(1).kind == tLParen {
-			return p.parseFuncCall()
-		}
+	}
+	// Function call takes precedence over bare-word gathering.
+	if t.kind == tIdent && p.peek(1).kind == tLParen {
+		return p.parseFuncCall()
+	}
+	// Bare-word case: greedily gather a run of consecutive value-word tokens
+	// into a single unquoted StringValue, joined by single spaces. This lets
+	// multi-word values be written without quotes; gathering stops at the first
+	// boundary token (AND/OR/ORDER/paren/comma/operator/EOF or a typed value),
+	// which are the only legal continuations after a value.
+	if isValueWord(t.kind) {
+		off := t.off
+		parts := []string{t.text}
 		p.advance()
-		return &StringValue{Val: t.text, Quoted: false, Offset: t.off}, nil
+		for isValueWord(p.cur().kind) {
+			parts = append(parts, p.advance().text)
+		}
+		return &StringValue{Val: strings.Join(parts, " "), Quoted: false, Offset: off}, nil
+	}
+	return nil, p.errf("expected a value, got %q", t.text)
+}
+
+// isValueWord reports whether a token kind can be gathered into an unquoted
+// multi-word scalar value. Besides plain identifiers, the "soft" keywords may
+// appear as literal value words (e.g. `In` in `In Progress`); the hard
+// boundaries (AND/OR/ORDER, parens, comma, comparison operators) and typed
+// values (string/number/relative-date) are excluded so gathering stops there.
+func isValueWord(k tokenKind) bool {
+	switch k {
+	case tIdent, tIn, tNot, tIs, tEmpty, tNull, tBy, tAsc, tDesc,
+		tDuring, tBefore, tAfter, tWas, tChanged:
+		return true
 	default:
-		return nil, p.errf("expected a value, got %q", t.text)
+		return false
 	}
 }
 

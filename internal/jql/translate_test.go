@@ -126,6 +126,22 @@ func TestTranslateSelectColumnsOverride(t *testing.T) {
 	wantFragments(t, r.SQL, "SELECT key, summary FROM jai.issues")
 }
 
+// TestTranslateBareMultiWordValue verifies an unquoted multi-word value is
+// emitted as a single quoted SQL string literal.
+func TestTranslateBareMultiWordValue(t *testing.T) {
+	for _, d := range []Dialect{SQLite, DuckDB} {
+		r := mustTranslate(t, `status = To Do`, translateOpts(d))
+		wantFragments(t, r.SQL, "status = 'To Do'")
+	}
+}
+
+// TestTranslateBareGUIDStillResolves pins that a single-token unquoted GUID
+// value still runs through the IDResolver (display-name substitution).
+func TestTranslateBareGUIDStillResolves(t *testing.T) {
+	r := mustTranslate(t, `Team = ec74d716-af36-4b3c-950f-f79213d08f71-1819`, translateOpts(DuckDB))
+	wantFragments(t, r.SQL, "team = 'ACS Docs'")
+}
+
 func containsStr(xs []string, want string) bool {
 	for _, x := range xs {
 		if x == want {
