@@ -288,10 +288,16 @@ func (cp *compiler) clause(c *ResolvedClause) (string, error) {
 		if c.Kind == KindArray {
 			return cp.e.arrayContains(col, c.Values[0].Str), nil
 		}
+		if c.Kind == KindString {
+			return ciEq(col, c.Values[0]), nil
+		}
 		return col + " = " + scalarLiteral(c.Values[0]), nil
 	case OpNeq:
 		if c.Kind == KindArray {
 			return "NOT " + cp.e.arrayContains(col, c.Values[0].Str), nil
+		}
+		if c.Kind == KindString {
+			return ciNeq(col, c.Values[0]), nil
 		}
 		// JQL `!=` excludes EMPTY, so an empty/NULL column never matches.
 		return "COALESCE(" + col + ",'') NOT IN ('', " + scalarLiteral(c.Values[0]) + ")", nil
@@ -299,10 +305,16 @@ func (cp *compiler) clause(c *ResolvedClause) (string, error) {
 		if c.Kind == KindArray {
 			return cp.arrayIn(col, c.Values, false), nil
 		}
+		if c.Kind == KindString {
+			return ciIn(col, c.Values), nil
+		}
 		return col + " IN (" + literalList(c.Values) + ")", nil
 	case OpNotIn:
 		if c.Kind == KindArray {
 			return cp.arrayIn(col, c.Values, true), nil
+		}
+		if c.Kind == KindString {
+			return ciNotIn(col, c.Values), nil
 		}
 		return "COALESCE(" + col + ",'') NOT IN ('', " + literalList(c.Values) + ")", nil
 	default:
@@ -389,6 +401,40 @@ func literalList(values []ResolvedValue) string {
 	parts := make([]string, len(values))
 	for i, v := range values {
 		parts[i] = scalarLiteral(v)
+	}
+	return strings.Join(parts, ",")
+}
+
+// ciEq renders a case-insensitive equality test for a textual column:
+// lower(col) = lower(literal) (design §8.3, case-insensitive value matching).
+func ciEq(col string, v ResolvedValue) string {
+	return "lower(" + col + ") = lower(" + scalarLiteral(v) + ")"
+}
+
+// ciNeq renders a case-insensitive `!=` test for a textual column that still
+// excludes EMPTY: lower(COALESCE(col,”)) NOT IN (”, lower(literal)).
+func ciNeq(col string, v ResolvedValue) string {
+	return "lower(COALESCE(" + col + ",'')) NOT IN ('', lower(" + scalarLiteral(v) + "))"
+}
+
+// ciIn renders a case-insensitive IN test for a textual column:
+// lower(col) IN (lower(l1), lower(l2), ...).
+func ciIn(col string, values []ResolvedValue) string {
+	return "lower(" + col + ") IN (" + loweredLiteralList(values) + ")"
+}
+
+// ciNotIn renders a case-insensitive NOT IN test for a textual column that still
+// excludes EMPTY: lower(COALESCE(col,”)) NOT IN (”, lower(l1), ...).
+func ciNotIn(col string, values []ResolvedValue) string {
+	return "lower(COALESCE(" + col + ",'')) NOT IN ('', " + loweredLiteralList(values) + ")"
+}
+
+// loweredLiteralList renders a comma-joined list of lower()-wrapped scalar
+// literals for case-insensitive IN / NOT IN.
+func loweredLiteralList(values []ResolvedValue) string {
+	parts := make([]string, len(values))
+	for i, v := range values {
+		parts[i] = "lower(" + scalarLiteral(v) + ")"
 	}
 	return strings.Join(parts, ",")
 }
