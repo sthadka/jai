@@ -398,9 +398,10 @@ func parseRelativeDate(t token) (Value, error) {
 	text := t.text
 	sign := 1
 	i := 0
-	if text[0] == '+' {
+	switch text[0] {
+	case '+':
 		i = 1
-	} else if text[0] == '-' {
+	case '-':
 		sign = -1
 		i = 1
 	}
