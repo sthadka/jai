@@ -29,6 +29,12 @@ const markerLine = `[{"` + eoqMarker + `":"` + eoqMarker + `"}]`
 // pathological query can never hang the server forever.
 const queryTimeout = 60 * time.Second
 
+// stderrSettle bounds how long QueryCheck waits for the DuckDB stderr copier to
+// surface a diagnostic after a statement returned no stdout output. It is only
+// paid when a query yields zero rows (ambiguous: a legitimately empty result or
+// a failed statement whose error went only to stderr), never on the fast path.
+const stderrSettle = 150 * time.Millisecond
+
 // refreshActiveGen re-binds the `g` DuckDB variable to the currently-active fact
 // generation. It is prepended to every /q query so a `metrics rebuild` that
 // publishes a new generation (and DELETEs the obsolete one) is served live
@@ -65,7 +71,7 @@ type Engine struct {
 	cmd    *exec.Cmd
 	stdin  io.WriteCloser
 	out    *bufio.Reader
-	stderr *strings.Builder
+	stderr *syncBuffer
 	mu     sync.Mutex
 	closed bool
 }
@@ -91,8 +97,8 @@ func NewEngine(cfg EngineConfig) (*Engine, error) {
 	if err != nil {
 		return nil, fmt.Errorf("duckdb stdout: %w", err)
 	}
-	var stderrBuf strings.Builder
-	cmd.Stderr = &stderrBuf
+	stderrBuf := &syncBuffer{}
+	cmd.Stderr = stderrBuf
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start duckdb: %w", err)
 	}
@@ -101,7 +107,7 @@ func NewEngine(cfg EngineConfig) (*Engine, error) {
 		cmd:    cmd,
 		stdin:  stdin,
 		out:    bufio.NewReaderSize(stdout, 1<<20),
-		stderr: &stderrBuf,
+		stderr: stderrBuf,
 	}
 
 	if err := e.setup(cfg); err != nil {
@@ -161,6 +167,83 @@ func (e *Engine) Query(sql string) ([]map[string]any, error) {
 		return nil, errors.New("duckdb engine closed")
 	}
 	return e.query(refreshActiveGen + "\n" + sql)
+}
+
+// QueryCheck runs a single SELECT like Query but ALSO surfaces a DuckDB
+// execution error. The CLI (with .mode json, piped stdin) does not bail on a
+// failed statement: it writes the diagnostic only to stderr and emits nothing on
+// stdout, so Query returns empty rows with a NIL error. That is correct for the
+// fixed, always-valid /q template but wrong for the free-form /explore path,
+// which must report a bad user query. QueryCheck captures the stderr written
+// during this call and converts it into an error. The /q path keeps using Query,
+// so its behavior is unchanged.
+//
+// A statement that produced rows definitively ran, so the common path returns
+// immediately. Only a zero-row result is ambiguous; there we briefly wait for
+// the stderr copier goroutine (separate pipe) to flush any diagnostic for THIS
+// call before concluding the result was legitimately empty.
+func (e *Engine) QueryCheck(sql string) ([]map[string]any, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.closed {
+		return nil, errors.New("duckdb engine closed")
+	}
+	before := e.stderr.Len()
+	rows, err := e.query(refreshActiveGen + "\n" + sql)
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) > 0 {
+		return rows, nil
+	}
+	deadline := time.Now().Add(stderrSettle)
+	for {
+		if msg := strings.TrimSpace(e.stderr.TailFrom(before)); msg != "" {
+			return nil, errors.New(msg)
+		}
+		if time.Now().After(deadline) {
+			return rows, nil
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+}
+
+// syncBuffer is a goroutine-safe byte accumulator used to capture the DuckDB
+// subprocess stderr. The os/exec stderr copier writes from its own goroutine
+// while query paths read the captured diagnostics, so a plain strings.Builder
+// would race. TailFrom returns everything appended since an earlier Len offset,
+// letting QueryCheck isolate one call's diagnostic.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf []byte
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.buf = append(b.buf, p...)
+	return len(p), nil
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return string(b.buf)
+}
+
+func (b *syncBuffer) Len() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return len(b.buf)
+}
+
+func (b *syncBuffer) TailFrom(n int) string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if n < 0 || n > len(b.buf) {
+		n = 0
+	}
+	return string(b.buf[n:])
 }
 
 // query writes a statement plus the sentinel and reads rows until the sentinel.
