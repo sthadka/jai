@@ -91,6 +91,16 @@
   #explore .ex-controls label { display: flex; flex-direction: column; gap: 4px; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
   #explore .ex-controls select { font: inherit; font-size: 13px; padding: 5px 8px; min-width: 130px; color: var(--fg); background: var(--panel); border: 1px solid var(--border); border-radius: 6px; }
   #explore .pchart { width: 100%; height: 440px; }
+  #explore .ex-mode { margin-bottom: 14px; }
+  #explore textarea { font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; width: 100%; min-height: 76px; padding: 8px 10px; color: var(--fg); background: var(--panel); border: 1px solid var(--border); border-radius: 6px; resize: vertical; }
+  #explore .sql-query { display: flex; gap: 10px; align-items: stretch; margin-bottom: 8px; }
+  #explore .sql-query textarea { flex: 1; }
+  #explore button { font: inherit; font-size: 13px; cursor: pointer; background: var(--accent); color: #fff; border: 1px solid var(--accent); border-radius: 6px; padding: 7px 18px; align-self: flex-start; }
+  #explore .ex-controls select[multiple] { min-width: 150px; padding: 2px; }
+  #sqlStatus { margin-bottom: 10px; }
+  #sqlNotice { font-size: 11.5px; color: var(--c3); margin: 0 0 10px; }
+  #sqlTableWrap, #sqlIssues { overflow: auto; max-height: 520px; margin-top: 12px; }
+  #sqlIssues { border-top: 1px solid var(--border); padding-top: 4px; }
   #globalErr { padding: 10px 20px; color: #d14b4b; font-weight: 600; font-size: 13px; }
   .panel .pchart, #explore .pchart { cursor: pointer; }
   .hint { font-size: 11.5px; color: var(--muted); padding: 2px 20px 12px; }
@@ -157,24 +167,74 @@
   <div id="tiles"></div>
   <div id="grid"></div>
   <section id="explore" style="display:none">
-    <div class="ex-controls">
-      <label>Measure <select id="exMeasure"></select></label>
-      <label>Slice <select id="exSlice"></select></label>
-      <label>Cohort <select id="exCohort"></select></label>
-      <label>Grain <select id="exGrain"></select></label>
-      <label>Chart
-        <select id="exChart">
-          <option value="bar">Bar</option>
-          <option value="line">Line</option>
-          <option value="area">Area</option>
-          <option value="scatter">Scatter (p50/p85/p95)</option>
+    <div class="ex-controls ex-mode">
+      <label>Mode
+        <select id="exMode">
+          <option value="curated">Curated</option>
+          <option value="sql">SQL</option>
+          <!-- JQL sub-mode added by jai-2lc.14.6 -->
         </select>
       </label>
     </div>
-    <div class="panel">
-      <div id="exChartDiv" class="pchart"></div>
-      <div id="exStatus" class="pstatus"></div>
-      <details class="sqlbox"><summary>Generated SQL (read-only)</summary><pre id="exSql"></pre></details>
+    <div id="exCurated">
+      <div class="ex-controls">
+        <label>Measure <select id="exMeasure"></select></label>
+        <label>Slice <select id="exSlice"></select></label>
+        <label>Cohort <select id="exCohort"></select></label>
+        <label>Grain <select id="exGrain"></select></label>
+        <label>Chart
+          <select id="exChart">
+            <option value="bar">Bar</option>
+            <option value="line">Line</option>
+            <option value="area">Area</option>
+            <option value="scatter">Scatter (p50/p85/p95)</option>
+          </select>
+        </label>
+      </div>
+      <div class="panel">
+        <div id="exChartDiv" class="pchart"></div>
+        <div id="exStatus" class="pstatus"></div>
+        <details class="sqlbox"><summary>Generated SQL (read-only)</summary><pre id="exSql"></pre></details>
+      </div>
+    </div>
+    <div id="exSqlPanel" style="display:none">
+      <div class="sql-query">
+        <textarea id="sqlText" spellcheck="false" placeholder="SELECT key, status, priority, created FROM jai.issues LIMIT 200"></textarea>
+        <button id="sqlRun" type="button">Run</button>
+      </div>
+      <div id="sqlStatus" class="pstatus"></div>
+      <div id="sqlNotice" style="display:none">Truncated to 5000 rows — refine the query (add WHERE/LIMIT) for a complete view.</div>
+      <div id="sqlShape" class="ex-controls" style="display:none">
+        <label>Chart
+          <select id="sqlChart">
+            <option value="bar">Bar</option>
+            <option value="line">Line</option>
+            <option value="area">Area</option>
+            <option value="scatter">Scatter</option>
+            <option value="pie">Pie</option>
+            <option value="table">Table</option>
+          </select>
+        </label>
+        <label>Group by (X) <select id="sqlX"></select></label>
+        <label>Measure (Y) <select id="sqlY"></select></label>
+        <label>Aggregation
+          <select id="sqlAgg">
+            <option value="count">count</option>
+            <option value="sum">sum</option>
+            <option value="avg">avg</option>
+            <option value="min">min</option>
+            <option value="max">max</option>
+          </select>
+        </label>
+        <label>Segment <select id="sqlSeg"></select></label>
+      </div>
+      <div id="sqlFilters" class="ex-controls"></div>
+      <div class="panel">
+        <div id="sqlChartDiv" class="pchart"></div>
+        <div id="sqlTableWrap" style="display:none"></div>
+        <details class="sqlbox"><summary>Executed SQL (read-only)</summary><pre id="sqlEcho"></pre></details>
+      </div>
+      <div id="sqlIssues"></div>
     </div>
   </section>
 </main>
@@ -214,6 +274,10 @@ const MEASURE_LABEL = {}, MEASURE_UNIT = {}, DIM_LABEL = {}, COHORT_LABEL = {};
 let chartPanels = [];   // [{panel, chart, statusEl, sqlPre}]  persistent ECharts instances
 let tilePanels = [];    // [{panel, el}]
 let exploreChart = null;
+let sqlResult = null;      // {columns, rows, truncated, sql} from /explore/sql
+let sqlChartInst = null;   // persistent ECharts instance for SQL mode
+const Y_COUNT = "__count__";   // synthetic measure: row count
+const SEG_NONE = "__none__";   // segment: no split
 
 // ---------------------------------------------------------------------------
 // Fetch helpers
@@ -363,54 +427,99 @@ function baseOption(o) {
 function yVal(row, panel) { return row[statKey(panel)]; }
 
 function barOption(panel, rows) {
-  const pal = palette();
   const segs = [...new Set(rows.map(r => r.segment))];
   const hasSeg = state.segment && state.segment !== "none" && segs.length > 1 && segs.some(s => s !== "");
+  const pts = rows.map(r => ({ x: r.slice, series: r.segment, y: Number(yVal(r, panel) || 0) }));
+  return catBarOption(pts, hasSeg);
+}
+
+function lineOption(panel, rows) {
+  const area = panel.chart === "area";
+  const segs = [...new Set(rows.map(r => r.segment))];
+  const hasSeg = state.segment && state.segment !== "none" && segs.length > 1 && segs.some(s => s !== "");
+  const pts = rows.map(r => ({ x: r.slice, series: r.segment, y: Number(yVal(r, panel)) }));
+  return catLineOption(pts, hasSeg, area);
+}
+function gradient(color) {
+  return { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: color + "55" }, { offset: 1, color: color + "05" }]) };
+}
+
+// Generalized {x, series, y} option builders (shared by curated + SQL explore).
+function catBarOption(pts, hasSeg) {
+  const pal = palette();
+  const segs = [...new Set(pts.map(p => p.series))];
   const totals = {};
-  rows.forEach(r => { totals[r.slice] = (totals[r.slice] || 0) + Number(yVal(r, panel) || 0); });
+  pts.forEach(p => { totals[p.x] = (totals[p.x] || 0) + Number(p.y || 0); });
   const cats = Object.keys(totals).sort((a, b) => totals[b] - totals[a]).slice(0, 40);
   let series;
   if (hasSeg) {
     series = segs.map((s, i) => ({
       name: s === "" ? "(none)" : s, type: "bar", stack: "t",
       itemStyle: { borderRadius: [3, 3, 0, 0], color: pal[i % pal.length] },
-      data: cats.map(c => { const row = rows.find(r => r.slice === c && r.segment === s); return row ? Number(yVal(row, panel)) : 0; }),
+      data: cats.map(c => { const p = pts.find(p => p.x === c && p.series === s); return p ? Number(p.y) : 0; }),
     }));
   } else {
     series = [{
       type: "bar", itemStyle: { borderRadius: [4, 4, 0, 0], color: pal[0] },
-      data: cats.map(c => { const row = rows.find(r => r.slice === c); return row ? Number(yVal(row, panel)) : 0; }),
+      data: cats.map(c => { const p = pts.find(p => p.x === c); return p ? Number(p.y) : 0; }),
     }];
   }
   return baseOption({ xAxis: catAxis(cats), yAxis: valAxis(), series, legend: hasSeg ? {} : undefined });
 }
 
-function lineOption(panel, rows) {
+function catLineOption(pts, hasSeg, area) {
   const pal = palette();
-  const area = panel.chart === "area";
-  const segs = [...new Set(rows.map(r => r.segment))];
-  const hasSeg = state.segment && state.segment !== "none" && segs.length > 1 && segs.some(s => s !== "");
-  const cats = [...new Set(rows.map(r => r.slice))].sort();   // periods ascending
+  const segs = [...new Set(pts.map(p => p.series))];
+  const cats = [...new Set(pts.map(p => p.x))].sort();
   let series;
   if (hasSeg) {
     series = segs.map((s, i) => ({
       name: s === "" ? "(none)" : s, type: "line", showSymbol: false,
       lineStyle: { color: pal[i % pal.length] }, itemStyle: { color: pal[i % pal.length] },
       areaStyle: area ? { opacity: 0.18 } : undefined,
-      data: cats.map(c => { const row = rows.find(r => r.slice === c && r.segment === s); return row ? Number(yVal(row, panel)) : null; }),
+      data: cats.map(c => { const p = pts.find(p => p.x === c && p.series === s); return p ? Number(p.y) : null; }),
     }));
   } else {
     series = [{
       type: "line", showSymbol: true, symbolSize: 5,
       lineStyle: { color: pal[0], width: 2 }, itemStyle: { color: pal[0] },
       areaStyle: area ? gradient(pal[0]) : undefined,
-      data: cats.map(c => { const row = rows.find(r => r.slice === c); return row ? Number(yVal(row, panel)) : null; }),
+      data: cats.map(c => { const p = pts.find(p => p.x === c); return p ? Number(p.y) : null; }),
     }];
   }
   return baseOption({ xAxis: timeAxis(cats), yAxis: valAxis(), series, legend: hasSeg ? {} : undefined });
 }
-function gradient(color) {
-  return { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: color + "55" }, { offset: 1, color: color + "05" }]) };
+
+function pieOption(pts) {
+  const t = theme();
+  const totals = {};
+  pts.forEach(p => { totals[p.x] = (totals[p.x] || 0) + Number(p.y || 0); });
+  const data = Object.keys(totals).sort((a, b) => totals[b] - totals[a]).slice(0, 40)
+    .map(k => ({ name: k === "" ? "(none)" : k, value: totals[k] }));
+  return baseOption({
+    legend: { type: "scroll", orient: "vertical", left: 0, top: 20 },
+    tooltip: { trigger: "item", textStyle: { fontFamily: "IBM Plex Sans" }, formatter: "{b}: {c} ({d}%)" },
+    series: [{
+      type: "pie", radius: ["38%", "70%"], center: ["58%", "52%"],
+      itemStyle: { borderColor: cssVar("--panel"), borderWidth: 2 },
+      label: { color: t.fg }, data,
+    }],
+  });
+}
+
+function sqlScatterOption(pts, hasSeg) {
+  const pal = palette();
+  const cats = [...new Set(pts.map(p => p.x))].sort();
+  const segs = hasSeg ? [...new Set(pts.map(p => p.series))] : [""];
+  const series = segs.map((s, i) => ({
+    name: s === "" ? "(value)" : s, type: "scatter", symbolSize: 10,
+    itemStyle: { color: pal[i % pal.length] },
+    data: pts.filter(p => (hasSeg ? p.series === s : true)).map(p => [cats.indexOf(p.x), Number(p.y)]),
+  }));
+  return baseOption({
+    xAxis: catAxis(cats), yAxis: valAxis(), series, legend: hasSeg ? {} : undefined,
+    tooltip: { trigger: "item", textStyle: { fontFamily: "IBM Plex Sans" }, formatter: pt => cats[pt.value[0]] + "<br/>" + trimNum(pt.value[1]) },
+  });
 }
 
 function scatterOption(panel, rows) {
@@ -586,6 +695,224 @@ async function refreshExplore() {
   }
 }
 
+// SQL explore (query-driven: paste SQL → introspect columns → chart client-side)
+function applyExMode() {
+  const m = $("exMode").value;
+  $("exCurated").style.display = m === "curated" ? "" : "none";
+  $("exSqlPanel").style.display = m === "sql" ? "" : "none";
+  if (m === "curated") { refreshExplore(); if (exploreChart) exploreChart.resize(); }
+  else { renderSqlChart(); if (sqlChartInst) sqlChartInst.resize(); }
+}
+
+function classifySqlCols(columns) {
+  const cat = [], num = [];
+  (columns || []).forEach(c => { (c.type === "number" ? num : cat).push(c); });
+  return { cat, num };   // cat = string/date columns, num = number columns
+}
+
+async function runSql() {
+  const sql = $("sqlText").value.trim();
+  const status = $("sqlStatus");
+  if (!sql) { status.textContent = "enter a SQL query"; status.className = "pstatus err"; return; }
+  status.textContent = "running…"; status.className = "pstatus";
+  $("sqlShape").style.display = "none";
+  $("sqlNotice").style.display = "none";
+  try {
+    const r = await fetch("/explore/sql", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Jai-CSRF": (META && META.csrf_token) || "" },
+      body: JSON.stringify({ sql }),
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j && j.error ? j.error : ("HTTP " + r.status));
+    sqlResult = j;
+    $("sqlEcho").textContent = j.sql || sql;
+    const cols = j.columns || [], rows = j.rows || [];
+    populateSqlShape(cols);
+    status.textContent = rows.length + " row" + (rows.length === 1 ? "" : "s") + ", " + cols.length + " column" + (cols.length === 1 ? "" : "s");
+    status.className = "pstatus";
+    $("sqlNotice").style.display = j.truncated ? "" : "none";
+    $("sqlShape").style.display = cols.length ? "" : "none";
+    renderSqlChart();
+  } catch (e) {
+    sqlResult = null;
+    $("sqlShape").style.display = "none";
+    $("sqlNotice").style.display = "none";
+    if (sqlChartInst) sqlChartInst.clear();
+    $("sqlTableWrap").innerHTML = "";
+    $("sqlIssues").innerHTML = "";
+    status.textContent = e.message; status.className = "pstatus err";
+  }
+}
+
+function populateSqlShape(columns) {
+  const { cat, num } = classifySqlCols(columns);
+  const xSel = $("sqlX"), ySel = $("sqlY"), segSel = $("sqlSeg");
+  xSel.innerHTML = ""; ySel.innerHTML = ""; segSel.innerHTML = "";
+  cat.forEach(c => xSel.appendChild(opt(c.name, c.name)));
+  ySel.appendChild(opt(Y_COUNT, "(count)"));
+  num.forEach(c => ySel.appendChild(opt(c.name, c.name)));
+  segSel.appendChild(opt(SEG_NONE, "(none)"));
+  cat.forEach(c => segSel.appendChild(opt(c.name, c.name)));
+  xSel.value = cat.length ? cat[0].name : "";
+  ySel.value = Y_COUNT;
+  segSel.value = SEG_NONE;
+  $("sqlAgg").value = "count";
+  buildFilters(cat);
+}
+
+function buildFilters(cat) {
+  const wrap = $("sqlFilters");
+  wrap.innerHTML = "";
+  const rows = (sqlResult && sqlResult.rows) || [];
+  cat.forEach(c => {
+    const vals = [...new Set(rows.map(r => String(r[c.name] == null ? "" : r[c.name])))].sort().slice(0, 500);
+    if (!vals.length) return;
+    const label = document.createElement("label");
+    label.textContent = "Filter: " + c.name;
+    const sel = document.createElement("select");
+    sel.multiple = true;
+    sel.size = Math.min(6, vals.length);
+    sel.setAttribute("data-col", c.name);
+    vals.forEach(v => sel.appendChild(opt(v, v === "" ? "(empty)" : v)));
+    sel.addEventListener("change", renderSqlChart);
+    label.appendChild(sel);
+    wrap.appendChild(label);
+  });
+}
+
+function readFilters() {
+  const f = {};
+  $("sqlFilters").querySelectorAll("select[data-col]").forEach(sel => {
+    const vals = [...sel.selectedOptions].map(o => o.value);
+    if (vals.length) f[sel.getAttribute("data-col")] = new Set(vals);
+  });
+  return f;
+}
+
+function passFilters(row, filters) {
+  for (const col in filters) {
+    const sel = filters[col];
+    if (!sel || !sel.size) continue;
+    if (!sel.has(String(row[col] == null ? "" : row[col]))) return false;
+  }
+  return true;
+}
+
+function aggregate(rows, spec) {
+  const groups = new Map();
+  for (const row of rows) {
+    if (!passFilters(row, spec.filters)) continue;
+    const xv = String(row[spec.x] == null ? "" : row[spec.x]);
+    const sv = spec.seg && spec.seg !== SEG_NONE ? String(row[spec.seg] == null ? "" : row[spec.seg]) : "";
+    const key = xv + "\u0000" + sv;
+    let g = groups.get(key);
+    if (!g) { g = { x: xv, series: sv, count: 0, vals: [] }; groups.set(key, g); }
+    g.count++;
+    if (spec.y !== Y_COUNT) { const raw = row[spec.y]; if (raw != null && raw !== "") { const n = Number(raw); if (isFinite(n)) g.vals.push(n); } }
+  }
+  const pts = [];
+  groups.forEach(g => pts.push({ x: g.x, series: g.series, y: applyAgg(spec, g) }));
+  return pts;
+}
+
+function applyAgg(spec, g) {
+  if (spec.y === Y_COUNT || spec.agg === "count") return g.count;
+  const v = g.vals;
+  if (!v.length) return 0;
+  switch (spec.agg) {
+    case "sum": return v.reduce((a, b) => a + b, 0);
+    case "avg": return v.reduce((a, b) => a + b, 0) / v.length;
+    case "min": return Math.min.apply(null, v);
+    case "max": return Math.max.apply(null, v);
+    default: return g.count;
+  }
+}
+
+function aggLabelText() {
+  const y = $("sqlY").value, agg = $("sqlAgg").value;
+  return y === Y_COUNT ? "count" : agg + "(" + y + ")";
+}
+
+function renderSqlChart() {
+  if (!sqlResult) return;
+  const rows = sqlResult.rows || [];
+  const chartType = $("sqlChart").value;
+  const spec = { x: $("sqlX").value, y: $("sqlY").value, seg: $("sqlSeg").value, agg: $("sqlAgg").value, filters: readFilters() };
+  const pts = aggregate(rows, spec);
+  const hasSeg = spec.seg !== SEG_NONE && new Set(pts.map(p => p.series)).size > 1;
+  const chartDiv = $("sqlChartDiv"), tableWrap = $("sqlTableWrap");
+  if (chartType === "table") {
+    chartDiv.style.display = "none";
+    tableWrap.style.display = "";
+    tableWrap.innerHTML = renderAggTable(pts, hasSeg);
+  } else {
+    tableWrap.style.display = "none"; tableWrap.innerHTML = "";
+    chartDiv.style.display = "";
+    if (!sqlChartInst) sqlChartInst = echarts.init(chartDiv, null, { renderer: "canvas" });
+    let option;
+    if (chartType === "line" || chartType === "area") option = catLineOption(pts, hasSeg, chartType === "area");
+    else if (chartType === "scatter") option = sqlScatterOption(pts, hasSeg);
+    else if (chartType === "pie") option = pieOption(pts);
+    else option = catBarOption(pts, hasSeg);
+    sqlChartInst.setOption(option, true);
+    sqlChartInst.resize();
+  }
+  renderSqlIssues(rows, spec.filters);
+}
+
+function renderAggTable(pts, hasSeg) {
+  const cats = [...new Set(pts.map(p => p.x))];
+  const xLabel = ($("sqlX").selectedOptions[0] && $("sqlX").selectedOptions[0].text) || "group";
+  let html = '<table class="im-table"><thead><tr><th>' + escapeHTML(xLabel) + '</th>';
+  if (hasSeg) {
+    const segs = [...new Set(pts.map(p => p.series))];
+    segs.forEach(s => { html += '<th class="num">' + escapeHTML(s === "" ? "(none)" : s) + '</th>'; });
+    html += '</tr></thead><tbody>';
+    cats.forEach(c => {
+      html += '<tr><td>' + escapeHTML(c === "" ? "(empty)" : c) + '</td>';
+      segs.forEach(s => { const p = pts.find(p => p.x === c && p.series === s); html += '<td class="num">' + (p ? trimNum(p.y) : "") + '</td>'; });
+      html += '</tr>';
+    });
+  } else {
+    html += '<th class="num">' + escapeHTML(aggLabelText()) + '</th></tr></thead><tbody>';
+    cats.forEach(c => { const p = pts.find(p => p.x === c); html += '<tr><td>' + escapeHTML(c === "" ? "(empty)" : c) + '</td><td class="num">' + (p ? trimNum(p.y) : "") + '</td></tr>'; });
+  }
+  return html + '</tbody></table>';
+}
+
+function renderSqlIssues(rows, filters) {
+  const wrap = $("sqlIssues");
+  const cols = (sqlResult && sqlResult.columns) || [];
+  const keyCol = cols.find(c => c.name === "key" || c.name === "issue_key");
+  if (!keyCol) { wrap.innerHTML = ""; return; }
+  const base = (META && META.jira_base_url) || "";
+  const filtered = rows.filter(r => passFilters(r, filters));
+  const cap = 500, shown = filtered.slice(0, cap);
+  const more = filtered.length > cap ? " (showing first " + cap + ")" : "";
+  let html = '<div class="im-count">' + filtered.length + " issue" + (filtered.length === 1 ? "" : "s") + more + '</div>';
+  html += '<table class="im-table"><thead><tr>';
+  cols.forEach(c => { html += '<th' + (c.type === "number" ? ' class="num"' : "") + '>' + escapeHTML(c.name) + '</th>'; });
+  html += '</tr></thead><tbody>';
+  shown.forEach(row => {
+    html += '<tr>';
+    cols.forEach(c => {
+      const raw = row[c.name];
+      if (c === keyCol) {
+        const key = raw == null ? "" : String(raw);
+        const link = base
+          ? '<a href="' + base + '/browse/' + encodeURIComponent(key) + '" target="_blank" rel="noopener">' + escapeHTML(key) + '</a>'
+          : escapeHTML(key);
+        html += '<td class="key">' + link + '</td>';
+      } else {
+        html += '<td' + (c.type === "number" ? ' class="num"' : "") + '>' + escapeHTML(raw == null ? "" : String(raw)) + '</td>';
+      }
+    });
+    html += '</tr>';
+  });
+  wrap.innerHTML = html + '</tbody></table>';
+}
+
 // Drill-through: list the affected issues behind a clicked chart cell ----------
 function openIssues(panel, params) {
   if (!panel || panel.unavailable) return;
@@ -676,6 +1003,9 @@ function buildCurrentView() {
       exploreChart = echarts.init($("exChartDiv"), null, { renderer: "canvas" });
       exploreChart.on("click", p => openIssues(explorePanel(), p));
     }
+    const m = $("exMode").value;
+    $("exCurated").style.display = m === "curated" ? "" : "none";
+    $("exSqlPanel").style.display = m === "sql" ? "" : "none";
   } else {
     $("desc").style.display = "";
     $("tiles").style.display = "";
@@ -688,7 +1018,11 @@ function buildCurrentView() {
   refreshCurrent();
 }
 function refreshCurrent() {
-  if (state.view === EXPLORE) { refreshExplore(); return; }
+  if (state.view === EXPLORE) {
+    if ($("exMode").value === "sql") renderSqlChart();
+    else refreshExplore();
+    return;
+  }
   refreshTiles();
   refreshCharts();
 }
@@ -746,9 +1080,15 @@ function wireEvents() {
   ["exMeasure", "exSlice", "exCohort", "exGrain", "exChart"].forEach(id =>
     $(id).addEventListener("change", () => { if (state.view === EXPLORE) refreshExplore(); }));
 
+  $("exMode").addEventListener("change", applyExMode);
+  $("sqlRun").addEventListener("click", runSql);
+  ["sqlChart", "sqlX", "sqlY", "sqlAgg", "sqlSeg"].forEach(id =>
+    $(id).addEventListener("change", renderSqlChart));
+
   window.addEventListener("resize", () => {
     chartPanels.forEach(c => c.chart.resize());
     if (exploreChart) exploreChart.resize();
+    if (sqlChartInst) sqlChartInst.resize();
   });
   // Re-theme ECharts on light/dark switch (CSS vars drive colors read at build time).
   const mq = window.matchMedia("(prefers-color-scheme: dark)");
