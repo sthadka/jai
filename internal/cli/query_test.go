@@ -8,8 +8,8 @@ import (
 
 	"github.com/sthadka/jai/internal/config"
 	"github.com/sthadka/jai/internal/db"
-	"github.com/sthadka/jai/internal/jira"
 	"github.com/sthadka/jai/internal/query"
+	"github.com/sthadka/jai/pkg/jira"
 )
 
 // TestJQLIssueToRow_DescriptionPreservesLinks guards the JQL path against the

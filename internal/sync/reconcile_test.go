@@ -12,7 +12,7 @@ import (
 
 	"github.com/sthadka/jai/internal/config"
 	"github.com/sthadka/jai/internal/db"
-	"github.com/sthadka/jai/internal/jira"
+	"github.com/sthadka/jai/pkg/jira"
 )
 
 func TestNormalizeRawAndEqual(t *testing.T) {
@@ -106,7 +106,7 @@ func TestReconcileFields_DetectsAndRefreshesRank(t *testing.T) {
 	}
 
 	cfg := &config.Config{SyncSources: []config.SyncSource{{Name: "TEST", Projects: []string{"TEST"}}}}
-	client := jira.New(srv.URL, "test@test.com", "token", 100)
+	client := jira.NewBasicAuth(srv.URL, "test@test.com", "token", 100)
 	e := New(database, client, cfg)
 
 	ch, err := e.ReconcileFields(context.Background(), "", []string{"rank"})
@@ -188,7 +188,7 @@ func TestReconcileFields_NoChangeNoRefetch(t *testing.T) {
 	}
 
 	cfg := &config.Config{SyncSources: []config.SyncSource{{Name: "TEST", Projects: []string{"TEST"}}}}
-	client := jira.New(srv.URL, "test@test.com", "token", 100)
+	client := jira.NewBasicAuth(srv.URL, "test@test.com", "token", 100)
 	e := New(database, client, cfg)
 
 	ch, err := e.ReconcileFields(context.Background(), "", []string{"rank"})
@@ -288,7 +288,7 @@ func TestReconcileFields_CapExceededAppliesDirectly(t *testing.T) {
 	seedRankIssue(t, database, "TEST-2", "1|old2:")
 
 	cfg := &config.Config{SyncSources: []config.SyncSource{{Name: "TEST", Projects: []string{"TEST"}}}}
-	e := New(database, jira.New(srv.URL, "t@t.com", "tok", 100), cfg)
+	e := New(database, jira.NewBasicAuth(srv.URL, "t@t.com", "tok", 100), cfg)
 
 	ch, err := e.ReconcileFields(context.Background(), "", []string{"rank"})
 	if err != nil {
@@ -354,7 +354,7 @@ func TestReconcileFields_RefetchFailureSurfacesError(t *testing.T) {
 	seedRankIssue(t, database, "TEST-1", "1|old:")
 
 	cfg := &config.Config{SyncSources: []config.SyncSource{{Name: "TEST", Projects: []string{"TEST"}}}}
-	e := New(database, jira.New(srv.URL, "t@t.com", "tok", 100), cfg)
+	e := New(database, jira.NewBasicAuth(srv.URL, "t@t.com", "tok", 100), cfg)
 
 	ch, err := e.ReconcileFields(context.Background(), "", []string{"rank"})
 	if err != nil {
@@ -390,7 +390,7 @@ func TestReconcileFields_UnknownFieldSkipped(t *testing.T) {
 	defer database.Close()
 
 	cfg := &config.Config{SyncSources: []config.SyncSource{{Name: "TEST", Projects: []string{"TEST"}}}}
-	e := New(database, jira.New(srv.URL, "t@t.com", "tok", 100), cfg)
+	e := New(database, jira.NewBasicAuth(srv.URL, "t@t.com", "tok", 100), cfg)
 
 	ch, err := e.ReconcileFields(context.Background(), "", []string{"does_not_exist"})
 	if err != nil {
@@ -492,7 +492,7 @@ func TestReconcileFields_ScopeAppliedToJQL(t *testing.T) {
 		Sync:        config.SyncConfig{ReconcileScope: "statusCategory != Done"},
 		SyncSources: []config.SyncSource{{Name: "TEST", Projects: []string{"TEST"}}},
 	}
-	e := New(database, jira.New(srv.URL, "t@t.com", "tok", 100), cfg)
+	e := New(database, jira.NewBasicAuth(srv.URL, "t@t.com", "tok", 100), cfg)
 
 	ch, err := e.ReconcileFields(context.Background(), "", []string{"rank"})
 	if err != nil {
@@ -530,7 +530,7 @@ func TestReconcileFields_CadenceSkipsRecent(t *testing.T) {
 		Sync:        config.SyncConfig{ReconcileInterval: "24h"},
 		SyncSources: []config.SyncSource{{Name: "TEST", Projects: []string{"TEST"}}},
 	}
-	e := New(database, jira.New(srv.URL, "t@t.com", "tok", 100), cfg)
+	e := New(database, jira.NewBasicAuth(srv.URL, "t@t.com", "tok", 100), cfg)
 
 	ch, err := e.ReconcileFields(context.Background(), "", []string{"rank"})
 	if err != nil {

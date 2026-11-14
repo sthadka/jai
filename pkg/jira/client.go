@@ -45,32 +45,71 @@ func authError(statusCode int, body []byte) error {
 type Client struct {
 	baseURL    string
 	email      string
-	token      string
 	httpClient *http.Client
 	limiter    *rate.Limiter
 }
 
-// New creates a new Jira client.
-func New(baseURL, email, token string, ratePerSec float64) *Client {
+// BasicAuthTransport is an http.RoundTripper that injects HTTP Basic
+// Authentication into all outgoing requests.
+type BasicAuthTransport struct {
+	Email     string
+	APIToken  string
+	Transport http.RoundTripper
+}
+
+// RoundTrip executes a single HTTP transaction, returning a Response for the
+// provided Request. It adds the Authorization header before forwarding to the
+// underlying transport.
+func (t *BasicAuthTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	// clone the request to avoid modifying the caller's copy
+	req2 := req.Clone(req.Context())
+	req2.SetBasicAuth(t.Email, t.APIToken)
+
+	rt := t.Transport
+	if rt == nil {
+		rt = http.DefaultTransport
+	}
+	return rt.RoundTrip(req2)
+}
+
+// New creates a new Jira client with the given HTTP client and rate limiter.
+// Consumers are responsible for providing an *http.Client configured with
+// an appropriate authorization mechanism (e.g. BasicAuthTransport, or an OAuth
+// token source RoundTripper).
+func New(baseURL string, httpClient *http.Client, ratePerSec float64) *Client {
 	if ratePerSec <= 0 {
 		ratePerSec = 10
 	}
+	if httpClient == nil {
+		httpClient = http.DefaultClient
+	}
 	// Burst must be at least 1: int() truncation of a sub-1 rate (e.g. 0.5)
 	// would yield a zero burst, which blocks every request forever. Round up so
-	// the burst never starves and fractional rates still admit one request.
+	// small rates get at least 1 concurrent slot.
 	burst := int(math.Ceil(ratePerSec))
-	if burst < 1 {
-		burst = 1
-	}
+
+	// Ensure baseURL has no trailing slash.
+	baseURL = strings.TrimSuffix(baseURL, "/")
+
 	return &Client{
-		baseURL: strings.TrimRight(baseURL, "/"),
-		email:   email,
-		token:   token,
-		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
-		},
-		limiter: rate.NewLimiter(rate.Limit(ratePerSec), burst),
+		baseURL:    baseURL,
+		httpClient: httpClient,
+		limiter:    rate.NewLimiter(rate.Limit(ratePerSec), burst),
 	}
+}
+
+// NewBasicAuth creates a new Jira client configured with HTTP Basic Authentication.
+func NewBasicAuth(baseURL, email, token string, ratePerSec float64) *Client {
+	httpClient := &http.Client{
+		Transport: &BasicAuthTransport{
+			Email:    email,
+			APIToken: token,
+		},
+		// Jira occasionally hangs on bulk endpoints. 30s keeps the
+		// background worker moving instead of freezing a whole batch block.
+		Timeout: 30 * time.Second,
+	}
+	return New(baseURL, httpClient, ratePerSec)
 }
 
 // doRequest performs an authenticated request with rate limiting and retry.
@@ -99,7 +138,6 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body io.Rea
 		if err != nil {
 			return nil, err
 		}
-		req.SetBasicAuth(c.email, c.token)
 		req.Header.Set("Accept", "application/json")
 		req.Header.Set("Content-Type", "application/json")
 

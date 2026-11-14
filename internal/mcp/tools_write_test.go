@@ -16,9 +16,9 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/sthadka/jai/internal/config"
 	"github.com/sthadka/jai/internal/db"
-	"github.com/sthadka/jai/internal/jira"
 	"github.com/sthadka/jai/internal/query"
 	synce "github.com/sthadka/jai/internal/sync"
+	"github.com/sthadka/jai/pkg/jira"
 )
 
 // writeTestServer builds a Server whose Jira client points at the given base URL
@@ -36,7 +36,7 @@ func writeTestServer(t *testing.T, baseURL string) *Server {
 		Jira: config.JiraConfig{URL: baseURL, Email: "test@example.com", Token: "test-token"},
 		Me:   "test@example.com",
 	}
-	jiraClient := jira.New(baseURL, cfg.Jira.Email, cfg.Jira.Token, 1000)
+	jiraClient := jira.NewBasicAuth(baseURL, cfg.Jira.Email, cfg.Jira.Token, 1000)
 	queryEngine := query.New(database, cfg)
 	syncEngine := synce.New(database, jiraClient, cfg)
 	return New(cfg, database, jiraClient, queryEngine, syncEngine)

@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/sthadka/jai/internal/db"
-	"github.com/sthadka/jai/internal/jira"
+	"github.com/sthadka/jai/pkg/jira"
 )
 
 func TestDetectDeletions(t *testing.T) {
@@ -38,7 +38,7 @@ func TestDetectDeletions(t *testing.T) {
 		}
 	}
 
-	client := jira.New(srv.URL, "test@test.com", "token", 100)
+	client := jira.NewBasicAuth(srv.URL, "test@test.com", "token", 100)
 	deleted, err := DetectDeletions(context.Background(), database, client, "TEST")
 	if err != nil {
 		t.Fatalf("DetectDeletions: %v", err)

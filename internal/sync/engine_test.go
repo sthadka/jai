@@ -16,7 +16,7 @@ import (
 
 	"github.com/sthadka/jai/internal/config"
 	"github.com/sthadka/jai/internal/db"
-	"github.com/sthadka/jai/internal/jira"
+	"github.com/sthadka/jai/pkg/jira"
 )
 
 func newTestEngine(t *testing.T, srvURL string) *Engine {
@@ -26,7 +26,7 @@ func newTestEngine(t *testing.T, srvURL string) *Engine {
 		t.Fatalf("Open: %v", err)
 	}
 	t.Cleanup(func() { database.Close() })
-	client := jira.New(srvURL, "test@test.com", "token", 100)
+	client := jira.NewBasicAuth(srvURL, "test@test.com", "token", 100)
 	return New(database, client, &config.Config{})
 }
 
@@ -217,7 +217,7 @@ func TestEngineTimezoneConcurrentAuthAndSync(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := jira.New(srv.URL, "test@test.com", "token", 100)
+	client := jira.NewBasicAuth(srv.URL, "test@test.com", "token", 100)
 	e := New(nil, client, &config.Config{})
 	if err := e.VerifyAuth(context.Background()); err != nil {
 		t.Fatalf("VerifyAuth: %v", err)

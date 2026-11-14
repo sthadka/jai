@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/sthadka/jai/internal/db"
-	"github.com/sthadka/jai/internal/jira"
+	"github.com/sthadka/jai/pkg/jira"
 )
 
 // DetectDeletions identifies issues that exist locally but not in Jira and

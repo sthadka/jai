@@ -9,9 +9,9 @@ import (
 
 	"github.com/sthadka/jai/internal/config"
 	"github.com/sthadka/jai/internal/db"
-	"github.com/sthadka/jai/internal/jira"
 	"github.com/sthadka/jai/internal/query"
 	synce "github.com/sthadka/jai/internal/sync"
+	"github.com/sthadka/jai/pkg/jira"
 )
 
 // testServer creates a minimal Server instance for testing using a temp DB.
@@ -41,7 +41,7 @@ func testServer(t *testing.T, readOnly bool, toolsets []string) *Server {
 	}
 
 	// Create minimal Jira client (won't be used in these tests)
-	jiraClient := jira.New(cfg.Jira.URL, cfg.Jira.Email, cfg.Jira.Token, 10)
+	jiraClient := jira.NewBasicAuth(cfg.Jira.URL, cfg.Jira.Email, cfg.Jira.Token, 10)
 
 	// Create query engine
 	queryEngine := query.New(database, cfg)

@@ -11,9 +11,9 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/sthadka/jai/internal/config"
 	"github.com/sthadka/jai/internal/db"
-	"github.com/sthadka/jai/internal/jira"
 	"github.com/sthadka/jai/internal/query"
 	synce "github.com/sthadka/jai/internal/sync"
+	"github.com/sthadka/jai/pkg/jira"
 )
 
 // globals holds shared state passed to sub-commands.
@@ -104,7 +104,7 @@ func newRootCmd() *cobra.Command {
 			}
 			g.db = database
 
-			g.jira = jira.New(cfg.Jira.URL, cfg.Jira.Email, cfg.Jira.Token, cfg.Sync.RateLimit)
+			g.jira = jira.NewBasicAuth(cfg.Jira.URL, cfg.Jira.Email, cfg.Jira.Token, cfg.Sync.RateLimit)
 			g.query = query.New(database, cfg)
 			g.sync = synce.New(database, g.jira, cfg)
 

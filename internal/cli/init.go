@@ -12,8 +12,8 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/sthadka/jai/internal/config"
 	"github.com/sthadka/jai/internal/db"
-	"github.com/sthadka/jai/internal/jira"
 	synce "github.com/sthadka/jai/internal/sync"
+	"github.com/sthadka/jai/pkg/jira"
 )
 
 // ── ANSI helpers ──────────────────────────────────────────────────────────────
@@ -147,7 +147,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	initStep(2, "Test connection")
 
 	stepInfo("Connecting to " + bold(jiraURL) + "...")
-	jiraClient := jira.New(jiraURL, email, token, 10)
+	jiraClient := jira.NewBasicAuth(jiraURL, email, token, 10)
 	me, err := jiraClient.MySelf(ctx)
 	if err != nil {
 		stepFail("Connection failed: " + err.Error())

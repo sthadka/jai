@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/sthadka/jai/internal/db"
-	"github.com/sthadka/jai/internal/jira"
+	"github.com/sthadka/jai/pkg/jira"
 )
 
 func marshalJSONArray(items []string) string {

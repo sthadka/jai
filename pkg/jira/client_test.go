@@ -10,7 +10,7 @@ import (
 )
 
 func newTestClient(srv *httptest.Server) *Client {
-	return New(srv.URL, "test@example.com", "token123", 100)
+	return NewBasicAuth(srv.URL, "test@example.com", "token123", 100)
 }
 
 func TestMySelf(t *testing.T) {

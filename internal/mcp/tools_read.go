@@ -8,8 +8,8 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
-	"github.com/sthadka/jai/internal/jira"
 	"github.com/sthadka/jai/internal/output"
+	"github.com/sthadka/jai/pkg/jira"
 )
 
 // registerReadTools registers all read toolset tools with the MCP server.

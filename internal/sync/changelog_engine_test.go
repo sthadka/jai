@@ -11,7 +11,7 @@ import (
 
 	"github.com/sthadka/jai/internal/config"
 	"github.com/sthadka/jai/internal/db"
-	"github.com/sthadka/jai/internal/jira"
+	"github.com/sthadka/jai/pkg/jira"
 )
 
 func TestSyncChangelogsForKeys(t *testing.T) {
@@ -50,7 +50,7 @@ func TestSyncChangelogsForKeys(t *testing.T) {
 		t.Fatalf("UpsertIssue: %v", err)
 	}
 
-	client := jira.New(srv.URL, "test@test.com", "token", 100)
+	client := jira.NewBasicAuth(srv.URL, "test@test.com", "token", 100)
 	e := New(database, client, &config.Config{})
 
 	e.syncChangelogsForKeys(context.Background(), []string{"TEST-1"})
@@ -110,7 +110,7 @@ func TestSyncChangelogs_Incremental(t *testing.T) {
 		t.Fatalf("UpsertIssue: %v", err)
 	}
 
-	client := jira.New(srv.URL, "test@test.com", "token", 100)
+	client := jira.NewBasicAuth(srv.URL, "test@test.com", "token", 100)
 	e := New(database, client, &config.Config{})
 
 	drain := func(force bool) ChangelogProgress {
@@ -214,7 +214,7 @@ func TestSync_ChangelogsSyncedBySeparatePass(t *testing.T) {
 	}
 	defer database.Close()
 
-	client := jira.New(srv.URL, "test@test.com", "token", 100)
+	client := jira.NewBasicAuth(srv.URL, "test@test.com", "token", 100)
 	cfg := &config.Config{
 		SyncSources: []config.SyncSource{
 			{Name: "test", Projects: []string{"TEST"}},
@@ -332,7 +332,7 @@ func TestFullSync_ReupsertsUnchangedUpdated(t *testing.T) {
 		t.Fatalf("UpsertIssue: %v", err)
 	}
 
-	client := jira.New(srv.URL, "test@test.com", "token", 100)
+	client := jira.NewBasicAuth(srv.URL, "test@test.com", "token", 100)
 	cfg := &config.Config{SyncSources: []config.SyncSource{{Name: "test", JQL: "project = TEST"}}}
 	e := New(database, client, cfg)
 	if err := e.VerifyAuth(context.Background()); err != nil {
