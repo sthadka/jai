@@ -1,0 +1,205 @@
+═══════════════════════════════════════════════════
+  Write-Through Feature Tests (staging)
+  Test issue: ROX-33601
+═══════════════════════════════════════════════════
+
+━━━ Test 1: Auth check ━━━
+  $ /Users/syethadk/go/bin/jai --config /Users/syethadk/.config/jai/staging.yaml --no-sync status
+  Auth:
+  ✓ Sukumar Yethadka (syethadk@redhat.com)
+
+Sources:
+  rox: last sync never
+
+Issues: 6103 total (ROX: 6103)
+Pending changes: 11
+DB size: 126.2 MB
+  ✓ PASS (found: ✓)
+
+━━━ Cleanup: pushing stale pending changes ━━━
+Pushing 11 pending change(s)...
+  ✗ ROX-30571: set_field (max retries (5) exceeded: jira PUT /rest/api/3/issue/ROX-30571: 400 {"errorMessages":[],"errors":{"priority":"Specify the Priority (id or name) in the string format"}})
+  ✗ ROX-33601: set_field (max retries (5) exceeded: jira PUT /rest/api/3/issue/ROX-33601: 400 {"errorMessages":[],"errors":{"priority":"Specify the Priority (id or name) in the string format"}})
+  ✗ ROX-33606: set_field (max retries (5) exceeded: jira PUT /rest/api/3/issue/ROX-33606: 400 {"errorMessages":[],"errors":{"priority":"Specify the Priority (id or name) in the string format"}})
+  ✗ ROX-30571: set_field (max retries (5) exceeded: jira PUT /rest/api/3/issue/ROX-30571: 400 {"errorMessages":[],"errors":{"priority":"Specify the Priority (id or name) in the string format"}})
+  ✗ ROX-33601: set_field (max retries (5) exceeded: jira PUT /rest/api/3/issue/ROX-33601: 400 {"errorMessages":[],"errors":{"priority":"Specify the Priority (id or name) in the string format"}})
+  ✗ ROX-33606: set_field (max retries (5) exceeded: jira PUT /rest/api/3/issue/ROX-33606: 400 {"errorMessages":[],"errors":{"priority":"Specify the Priority (id or name) in the string format"}})
+  ✗ ROX-33607: set_field (max retries (5) exceeded: jira PUT /rest/api/3/issue/ROX-33607: 400 {"errorMessages":[],"errors":{"priority":"Specify the Priority (id or name) in the string format"}})
+  ✗ ROX-33609: set_field (max retries (5) exceeded: jira PUT /rest/api/3/issue/ROX-33609: 400 {"errorMessages":[],"errors":{"priority":"Specify the Priority (id or name) in the string format"}})
+  ✗ ROX-33610: set_field (max retries (5) exceeded: jira PUT /rest/api/3/issue/ROX-33610: 400 {"errorMessages":[],"errors":{"priority":"Specify the Priority (id or name) in the string format"}})
+  ✗ ROX-33616: set_field (max retries (5) exceeded: jira PUT /rest/api/3/issue/ROX-33616: 400 {"errorMessages":[],"errors":{"priority":"Specify the Priority (id or name) in the string format"}})
+  ✓ ROX-33601: update_field
+1 succeeded, 10 failed
+
+━━━ Test 2: set scalar field (write-through) ━━━
+  $ /Users/syethadk/go/bin/jai --config /Users/syethadk/.config/jai/staging.yaml --no-sync set ROX-33601 priority Medium
+  Error: setting priority on ROX-33601: jira PUT /rest/api/3/issue/ROX-33601: 400 {"errorMessages":[],"errors":{"priority":"The priority selected is invalid."}}
+Usage:
+  jai set [key] <field> [value] [flags]
+
+Flags:
+      --add stringArray      Add a value to an array field (repeatable)
+  -h, --help                 help for set
+      --query string         SQL query returning a 'key' column to bulk-set
+  -q, --queue                Queue change locally instead of pushing to Jira immediately
+      --remove stringArray   Remove a value from an array field (repeatable)
+
+Global Flags:
+      --config string   config file (default: ~/.config/jai/config.yaml)
+      --db string       database file path
+      --fields string   comma-separated field names to include in output
+      --json            output as JSON
+      --no-sync         skip auto-sync
+  ✗ FAIL (expected to find: ✓)
+
+━━━ Test 3: verify local DB updated ━━━
+  $ /Users/syethadk/go/bin/jai --config /Users/syethadk/.config/jai/staging.yaml --no-sync query SELECT priority FROM issues WHERE key = 'ROX-33601'
+  PRIORITY
+--------
+Normal  
+(1 row)
+  ✗ FAIL (expected to find: Medium)
+
+━━━ Test 4: set scalar field back (write-through) ━━━
+  $ /Users/syethadk/go/bin/jai --config /Users/syethadk/.config/jai/staging.yaml --no-sync set ROX-33601 priority Normal
+  ROX-33601: priority → "Normal" ✓
+  ✓ PASS (found: ✓)
+
+━━━ Test 5: set with --json (write-through) ━━━
+  $ /Users/syethadk/go/bin/jai --config /Users/syethadk/.config/jai/staging.yaml --no-sync set ROX-33601 priority Medium --json
+  {"error":{"message":"setting priority on ROX-33601: jira PUT /rest/api/3/issue/ROX-33601: 400 {\"errorMessages\":[],\"errors\":{\"priority\":\"The priority selected is invalid.\"}}","type":"JiraError"},"ok":false}
+  ✗ FAIL (expected to find: "status":"synced")
+
+━━━ Test 6: set with --queue ━━━
+  $ /Users/syethadk/go/bin/jai --config /Users/syethadk/.config/jai/staging.yaml --no-sync set ROX-33601 priority Major --queue
+  ROX-33601: priority → "Major" (queued)
+  ✓ PASS (found: queued)
+
+━━━ Test 7: status shows pending change ━━━
+  $ /Users/syethadk/go/bin/jai --config /Users/syethadk/.config/jai/staging.yaml --no-sync status
+  Auth:
+  ✓ Sukumar Yethadka (syethadk@redhat.com)
+
+Sources:
+  rox: last sync never
+
+Issues: 6103 total (ROX: 6103)
+Pending changes: 11
+DB size: 126.2 MB
+  ✓ PASS (found: Pending changes:)
+
+━━━ Test 8: set --queue --json ━━━
+  $ /Users/syethadk/go/bin/jai --config /Users/syethadk/.config/jai/staging.yaml --no-sync set ROX-33601 priority Normal --queue --json
+  {"data":{"field":"priority","issue_key":"ROX-33601","status":"queued","value":{"name":"Normal"}},"ok":true}
+  ✓ PASS (found: "status":"queued")
+
+━━━ Test 9: push queued changes ━━━
+  $ /Users/syethadk/go/bin/jai --config /Users/syethadk/.config/jai/staging.yaml --no-sync push
+  Pushing 12 pending change(s)...
+  ✗ ROX-30571: set_field (max retries (5) exceeded: jira PUT /rest/api/3/issue/ROX-30571: 400 {"errorMessages":[],"errors":{"priority":"Specify the Priority (id or name) in the string format"}})
+  ✗ ROX-33601: set_field (max retries (5) exceeded: jira PUT /rest/api/3/issue/ROX-33601: 400 {"errorMessages":[],"errors":{"priority":"Specify the Priority (id or name) in the string format"}})
+  ✗ ROX-33606: set_field (max retries (5) exceeded: jira PUT /rest/api/3/issue/ROX-33606: 400 {"errorMessages":[],"errors":{"priority":"Specify the Priority (id or name) in the string format"}})
+  ✗ ROX-30571: set_field (max retries (5) exceeded: jira PUT /rest/api/3/issue/ROX-30571: 400 {"errorMessages":[],"errors":{"priority":"Specify the Priority (id or name) in the string format"}})
+  ✗ ROX-33601: set_field (max retries (5) exceeded: jira PUT /rest/api/3/issue/ROX-33601: 400 {"errorMessages":[],"errors":{"priority":"Specify the Priority (id or name) in the string format"}})
+  ✗ ROX-33606: set_field (max retries (5) exceeded: jira PUT /rest/api/3/issue/ROX-33606: 400 {"errorMessages":[],"errors":{"priority":"Specify the Priority (id or name) in the string format"}})
+  ✗ ROX-33607: set_field (max retries (5) exceeded: jira PUT /rest/api/3/issue/ROX-33607: 400 {"errorMessages":[],"errors":{"priority":"Specify the Priority (id or name) in the string format"}})
+  ✗ ROX-33609: set_field (max retries (5) exceeded: jira PUT /rest/api/3/issue/ROX-33609: 400 {"errorMessages":[],"errors":{"priority":"Specify the Priority (id or name) in the string format"}})
+  ✗ ROX-33610: set_field (max retries (5) exceeded: jira PUT /rest/api/3/issue/ROX-33610: 400 {"errorMessages":[],"errors":{"priority":"Specify the Priority (id or name) in the string format"}})
+  ✗ ROX-33616: set_field (max retries (5) exceeded: jira PUT /rest/api/3/issue/ROX-33616: 400 {"errorMessages":[],"errors":{"priority":"Specify the Priority (id or name) in the string format"}})
+  ✓ ROX-33601: set_field
+  ✓ ROX-33601: set_field
+2 succeeded, 10 failed
+  ✓ PASS (found: succeeded)
+
+━━━ Test 10: verify priority after push ━━━
+  $ /Users/syethadk/go/bin/jai --config /Users/syethadk/.config/jai/staging.yaml --no-sync query SELECT priority FROM issues WHERE key = 'ROX-33601'
+  PRIORITY
+--------
+Normal  
+(1 row)
+  ✓ PASS (found: Normal)
+
+━━━ Test 11: comment (write-through) ━━━
+  $ /Users/syethadk/go/bin/jai --config /Users/syethadk/.config/jai/staging.yaml --no-sync comment ROX-33601 write-through test 1785795091
+  ROX-33601: comment added ✓
+  ✓ PASS (found: ✓)
+
+━━━ Test 12: comment --json (write-through) ━━━
+  $ /Users/syethadk/go/bin/jai --config /Users/syethadk/.config/jai/staging.yaml --no-sync comment ROX-33601 write-through json test 1785795091 --json
+  {"data":{"issue_key":"ROX-33601","status":"synced"},"ok":true}
+  ✓ PASS (found: "status":"synced")
+
+━━━ Test 13: comment --queue ━━━
+  $ /Users/syethadk/go/bin/jai --config /Users/syethadk/.config/jai/staging.yaml --no-sync comment ROX-33601 queued test 1785795092 --queue
+  ROX-33601: comment added (queued)
+  ✓ PASS (found: queued)
+
+━━━ Test 14: push queued comment ━━━
+  $ /Users/syethadk/go/bin/jai --config /Users/syethadk/.config/jai/staging.yaml --no-sync push
+  Pushing 11 pending change(s)...
+  ✗ ROX-30571: set_field (max retries (5) exceeded: jira PUT /rest/api/3/issue/ROX-30571: 400 {"errorMessages":[],"errors":{"priority":"Specify the Priority (id or name) in the string format"}})
+  ✗ ROX-33601: set_field (max retries (5) exceeded: jira PUT /rest/api/3/issue/ROX-33601: 400 {"errorMessages":[],"errors":{"priority":"Specify the Priority (id or name) in the string format"}})
+  ✗ ROX-33606: set_field (max retries (5) exceeded: jira PUT /rest/api/3/issue/ROX-33606: 400 {"errorMessages":[],"errors":{"priority":"Specify the Priority (id or name) in the string format"}})
+  ✗ ROX-30571: set_field (max retries (5) exceeded: jira PUT /rest/api/3/issue/ROX-30571: 400 {"errorMessages":[],"errors":{"priority":"Specify the Priority (id or name) in the string format"}})
+  ✗ ROX-33601: set_field (max retries (5) exceeded: jira PUT /rest/api/3/issue/ROX-33601: 400 {"errorMessages":[],"errors":{"priority":"Specify the Priority (id or name) in the string format"}})
+  ✗ ROX-33606: set_field (max retries (5) exceeded: jira PUT /rest/api/3/issue/ROX-33606: 400 {"errorMessages":[],"errors":{"priority":"Specify the Priority (id or name) in the string format"}})
+  ✗ ROX-33607: set_field (max retries (5) exceeded: jira PUT /rest/api/3/issue/ROX-33607: 400 {"errorMessages":[],"errors":{"priority":"Specify the Priority (id or name) in the string format"}})
+  ✗ ROX-33609: set_field (max retries (5) exceeded: jira PUT /rest/api/3/issue/ROX-33609: 400 {"errorMessages":[],"errors":{"priority":"Specify the Priority (id or name) in the string format"}})
+  ✗ ROX-33610: set_field (max retries (5) exceeded: jira PUT /rest/api/3/issue/ROX-33610: 400 {"errorMessages":[],"errors":{"priority":"Specify the Priority (id or name) in the string format"}})
+  ✗ ROX-33616: set_field (max retries (5) exceeded: jira PUT /rest/api/3/issue/ROX-33616: 400 {"errorMessages":[],"errors":{"priority":"Specify the Priority (id or name) in the string format"}})
+  ✓ ROX-33601: add_comment
+1 succeeded, 10 failed
+  ✓ PASS (found: succeeded)
+
+━━━ Transition: listing available transitions ━━━
+Available transitions for ROX-33601:
+  - New (id: 11)
+  - Backlog (id: 21)
+  - Refinement (id: 31)
+  - To Do (id: 41)
+  - In Progress (id: 51)
+  - Waiting (id: 61)
+  - Review (id: 71)
+  - Release Pending (id: 81)
+  - Closed (id: 91)
+
+━━━ Test 15: transition (write-through) ━━━
+  $ /Users/syethadk/go/bin/jai --config /Users/syethadk/.config/jai/staging.yaml --no-sync transition ROX-33601 In Progress
+  ROX-33601: transitioned to "In Progress" ✓
+  ✓ PASS (found: ✓)
+
+━━━ Test 16: transition --queue ━━━
+  $ /Users/syethadk/go/bin/jai --config /Users/syethadk/.config/jai/staging.yaml --no-sync transition ROX-33601 In Progress --queue
+  ROX-33601: transition to "In Progress" (queued)
+  ✓ PASS (found: queued)
+
+━━━ Test 17: push queued transition ━━━
+  $ /Users/syethadk/go/bin/jai --config /Users/syethadk/.config/jai/staging.yaml --no-sync push
+  Pushing 11 pending change(s)...
+  ✗ ROX-30571: set_field (max retries (5) exceeded: jira PUT /rest/api/3/issue/ROX-30571: 400 {"errorMessages":[],"errors":{"priority":"Specify the Priority (id or name) in the string format"}})
+  ✗ ROX-33601: set_field (max retries (5) exceeded: jira PUT /rest/api/3/issue/ROX-33601: 400 {"errorMessages":[],"errors":{"priority":"Specify the Priority (id or name) in the string format"}})
+  ✗ ROX-33606: set_field (max retries (5) exceeded: jira PUT /rest/api/3/issue/ROX-33606: 400 {"errorMessages":[],"errors":{"priority":"Specify the Priority (id or name) in the string format"}})
+  ✗ ROX-30571: set_field (max retries (5) exceeded: jira PUT /rest/api/3/issue/ROX-30571: 400 {"errorMessages":[],"errors":{"priority":"Specify the Priority (id or name) in the string format"}})
+  ✗ ROX-33601: set_field (max retries (5) exceeded: jira PUT /rest/api/3/issue/ROX-33601: 400 {"errorMessages":[],"errors":{"priority":"Specify the Priority (id or name) in the string format"}})
+  ✗ ROX-33606: set_field (max retries (5) exceeded: jira PUT /rest/api/3/issue/ROX-33606: 400 {"errorMessages":[],"errors":{"priority":"Specify the Priority (id or name) in the string format"}})
+  ✗ ROX-33607: set_field (max retries (5) exceeded: jira PUT /rest/api/3/issue/ROX-33607: 400 {"errorMessages":[],"errors":{"priority":"Specify the Priority (id or name) in the string format"}})
+  ✗ ROX-33609: set_field (max retries (5) exceeded: jira PUT /rest/api/3/issue/ROX-33609: 400 {"errorMessages":[],"errors":{"priority":"Specify the Priority (id or name) in the string format"}})
+  ✗ ROX-33610: set_field (max retries (5) exceeded: jira PUT /rest/api/3/issue/ROX-33610: 400 {"errorMessages":[],"errors":{"priority":"Specify the Priority (id or name) in the string format"}})
+  ✗ ROX-33616: set_field (max retries (5) exceeded: jira PUT /rest/api/3/issue/ROX-33616: 400 {"errorMessages":[],"errors":{"priority":"Specify the Priority (id or name) in the string format"}})
+  ✓ ROX-33601: transition
+1 succeeded, 10 failed
+  ✓ PASS (found: succeeded)
+
+━━━ Test 18: set array --add (write-through) ━━━
+  $ /Users/syethadk/go/bin/jai --config /Users/syethadk/.config/jai/staging.yaml --no-sync set ROX-33601 labels --add write-through-test
+  ROX-33601: labels += [write-through-test] ✓
+  ✓ PASS (found: ✓)
+
+━━━ Test 19: set array --remove (write-through) ━━━
+  $ /Users/syethadk/go/bin/jai --config /Users/syethadk/.config/jai/staging.yaml --no-sync set ROX-33601 labels --remove write-through-test
+  ROX-33601: labels -= [write-through-test] ✓
+  ✓ PASS (found: ✓)
+
+═══════════════════════════════════════════════════
+  Results: 16 passed, 3 failed, 19 total
+═══════════════════════════════════════════════════

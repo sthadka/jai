@@ -1,0 +1,26 @@
+═══════════════════════════════════════════════════
+  Re-run: priority tests with valid value (Minor)
+  Test issue: ROX-33601
+═══════════════════════════════════════════════════
+
+━━━ Test 1: set priority Minor (write-through) ━━━
+  $ /Users/syethadk/go/bin/jai --config /Users/syethadk/.config/jai/staging.yaml --no-sync set ROX-33601 priority Minor
+  ROX-33601: priority → "Minor" ✓
+  ✓ PASS (found: ✓)
+
+━━━ Test 2: verify local DB updated to Minor ━━━
+  $ /Users/syethadk/go/bin/jai --config /Users/syethadk/.config/jai/staging.yaml --no-sync query SELECT priority FROM issues WHERE key = 'ROX-33601'
+  PRIORITY
+--------
+Minor   
+(1 row)
+  ✓ PASS (found: Minor)
+
+━━━ Test 3: set --json (write-through) ━━━
+  $ /Users/syethadk/go/bin/jai --config /Users/syethadk/.config/jai/staging.yaml --no-sync set ROX-33601 priority Minor --json
+  {"data":{"field":"priority","issue_key":"ROX-33601","status":"synced","value":{"name":"Minor"}},"ok":true}
+  ✓ PASS (found: "status":"synced")
+
+═══════════════════════════════════════════════════
+  Results: 3 passed, 0 failed, 3 total
+═══════════════════════════════════════════════════

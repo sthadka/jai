@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "jai": {
+      "type": "stdio",
+      "command": "jai",
+      "args": [
+        "serve"
+      ],
+      "env": {}
+    }
+  }
+}

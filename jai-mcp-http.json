@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "jai": {
+      "type": "http",
+      "url": "http://localhost:8947/mcp"
+    }
+  }
+}
