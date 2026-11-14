@@ -4,10 +4,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/sthadka/jai/internal/config"
 	"github.com/sthadka/jai/internal/query"
+	"github.com/sthadka/jai/pkg/config"
 	"github.com/sthadka/jai/pkg/metrics"
-	"github.com/sthadka/jai/pkg/store"
+	db "github.com/sthadka/jai/pkg/store"
 )
 
 // metricsTestConfig returns a config whose metrics: block maps a minimal

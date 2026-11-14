@@ -7,8 +7,6 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-
-	"gopkg.in/yaml.v3"
 )
 
 // DefaultConfigPath returns the default config file path.
@@ -168,43 +166,9 @@ type MCPConfig struct {
 var envVarRe = regexp.MustCompile(`\$\{([^}]+)\}`)
 
 // substituteEnvVars replaces ${VAR} with environment variable values.
-func substituteEnvVars(s string) string {
-	return envVarRe.ReplaceAllStringFunc(s, func(m string) string {
-		key := m[2 : len(m)-1] // strip ${ and }
-		if val, ok := os.LookupEnv(key); ok {
-			return val
-		}
-		return m
-	})
-}
-
-// Load reads and parses the config file at path.
-func Load(path string) (*Config, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("reading config file %s: %w", path, err)
-	}
-
-	// Substitute env vars before parsing YAML.
-	expanded := substituteEnvVars(string(data))
-
-	cfg := defaults()
-	if err := yaml.Unmarshal([]byte(expanded), cfg); err != nil {
-		return nil, fmt.Errorf("parsing config file %s: %w", path, err)
-	}
-
-	if cfg.DB.Path == "" {
-		cfg.DB.Path = DefaultDBPath()
-	} else if strings.HasPrefix(cfg.DB.Path, "~/") {
-		home, _ := os.UserHomeDir()
-		cfg.DB.Path = filepath.Join(home, cfg.DB.Path[2:])
-	}
-
-	return cfg, nil
-}
 
 // defaults returns a Config with sensible default values.
-func defaults() *Config {
+func Defaults() *Config {
 	return &Config{
 		Sync: SyncConfig{
 			Interval:           "15m",

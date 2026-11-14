@@ -9,10 +9,13 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/sthadka/jai/internal/config"
+	"github.com/sthadka/jai/internal/cli/configloader"
 	"github.com/sthadka/jai/internal/query"
+	"github.com/sthadka/jai/pkg/config"
 	"github.com/sthadka/jai/pkg/jira"
-	"github.com/sthadka/jai/pkg/store"
+
+	db "github.com/sthadka/jai/pkg/store"
+
 	synce "github.com/sthadka/jai/pkg/sync"
 )
 
@@ -80,7 +83,7 @@ func newRootCmd() *cobra.Command {
 				cfgPath = config.DefaultConfigPath()
 			}
 
-			cfg, err := config.Load(cfgPath)
+			cfg, err := configloader.Load(cfgPath)
 			if err != nil {
 				return fmt.Errorf("loading config: %w -- run 'jai init' to set up jai", err)
 			}

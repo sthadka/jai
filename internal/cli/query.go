@@ -12,7 +12,7 @@ import (
 	"github.com/sthadka/jai/internal/output"
 	"github.com/sthadka/jai/pkg/jira"
 	"github.com/sthadka/jai/pkg/jql"
-	"github.com/sthadka/jai/pkg/store"
+	db "github.com/sthadka/jai/pkg/store"
 )
 
 var (

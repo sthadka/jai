@@ -4,7 +4,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/sthadka/jai/internal/config"
+	"github.com/sthadka/jai/pkg/config"
 	"github.com/sthadka/jai/pkg/metrics"
 	store "github.com/sthadka/jai/pkg/store"
 )

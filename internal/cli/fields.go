@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/sthadka/jai/internal/output"
-	"github.com/sthadka/jai/pkg/store"
+	db "github.com/sthadka/jai/pkg/store"
 )
 
 var (

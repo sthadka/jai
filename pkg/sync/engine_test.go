@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sthadka/jai/internal/config"
+	"github.com/sthadka/jai/pkg/config"
 	"github.com/sthadka/jai/pkg/jira"
 	store "github.com/sthadka/jai/pkg/store"
 )

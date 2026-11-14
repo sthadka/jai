@@ -10,9 +10,12 @@ import (
 	"unicode/utf8"
 
 	"github.com/spf13/cobra"
-	"github.com/sthadka/jai/internal/config"
+	"github.com/sthadka/jai/internal/cli/configloader"
+	"github.com/sthadka/jai/pkg/config"
+
 	"github.com/sthadka/jai/pkg/jira"
-	"github.com/sthadka/jai/pkg/store"
+	db "github.com/sthadka/jai/pkg/store"
+
 	synce "github.com/sthadka/jai/pkg/sync"
 )
 
@@ -105,7 +108,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 	// Load existing config to pre-populate prompts.
 	var existing *config.Config
-	if cfg, err := config.Load(cfgPath); err == nil {
+	if cfg, err := configloader.Load(cfgPath); err == nil {
 		existing = cfg
 	}
 	defaultFor := func(field string) string {
