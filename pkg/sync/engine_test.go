@@ -16,12 +16,12 @@ import (
 
 	"github.com/sthadka/jai/internal/config"
 	"github.com/sthadka/jai/pkg/jira"
-	"github.com/sthadka/jai/pkg/store"
+	store "github.com/sthadka/jai/pkg/store"
 )
 
 func newTestEngine(t *testing.T, srvURL string) *Engine {
 	t.Helper()
-	database, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
+	database, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}

@@ -12,7 +12,7 @@ import (
 
 	"github.com/sthadka/jai/internal/config"
 	"github.com/sthadka/jai/pkg/jira"
-	"github.com/sthadka/jai/pkg/store"
+	store "github.com/sthadka/jai/pkg/store"
 )
 
 func TestNormalizeRawAndEqual(t *testing.T) {
@@ -77,14 +77,14 @@ func TestReconcileFields_DetectsAndRefreshesRank(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	database, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
+	database, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
 	defer database.Close()
 
 	// Register rank as a custom column and create it.
-	if err := database.UpsertFieldMapping(&db.FieldMapping{
+	if err := database.UpsertFieldMapping(&store.FieldMapping{
 		JiraID: "customfield_10019", JiraName: "Rank", Name: "rank",
 		Type: "text", IsCustom: true, IsColumn: false,
 	}); err != nil {
@@ -99,7 +99,7 @@ func TestReconcileFields_DetectsAndRefreshesRank(t *testing.T) {
 
 	// Seed the issue with the OLD rank in both the column and raw_json.
 	oldRaw := `{"id":"10001","key":"TEST-1","fields":{"summary":"An issue","customfield_10019":"1|oldrank:"}}`
-	issue := &db.Issue{ID: "10001", Key: "TEST-1", Project: "TEST", Summary: "An issue",
+	issue := &store.Issue{ID: "10001", Key: "TEST-1", Project: "TEST", Summary: "An issue",
 		Updated: "2026-06-01T00:00:00Z", RawJSON: oldRaw}
 	if err := database.UpsertIssue(issue, map[string]interface{}{"rank": "1|oldrank:"}); err != nil {
 		t.Fatalf("UpsertIssue: %v", err)
@@ -162,13 +162,13 @@ func TestReconcileFields_NoChangeNoRefetch(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	database, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
+	database, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
 	defer database.Close()
 
-	if err := database.UpsertFieldMapping(&db.FieldMapping{
+	if err := database.UpsertFieldMapping(&store.FieldMapping{
 		JiraID: "customfield_10019", JiraName: "Rank", Name: "rank",
 		Type: "text", IsCustom: true, IsColumn: false,
 	}); err != nil {
@@ -181,7 +181,7 @@ func TestReconcileFields_NoChangeNoRefetch(t *testing.T) {
 
 	// Stored raw_json already has the SAME rank — no drift.
 	raw := `{"id":"10001","key":"TEST-1","fields":{"summary":"An issue","customfield_10019":"1|samerank:"}}`
-	issue := &db.Issue{ID: "10001", Key: "TEST-1", Project: "TEST", Summary: "An issue",
+	issue := &store.Issue{ID: "10001", Key: "TEST-1", Project: "TEST", Summary: "An issue",
 		Updated: "2026-06-01T00:00:00Z", RawJSON: raw}
 	if err := database.UpsertIssue(issue, map[string]interface{}{"rank": rank}); err != nil {
 		t.Fatalf("UpsertIssue: %v", err)
@@ -229,9 +229,9 @@ func TestNormalizeRaw_CanonicalizesObjectKeyOrder(t *testing.T) {
 
 // seedRankIssue registers rank as a custom column and inserts an issue with the
 // given stored rank in both the column and raw_json.
-func seedRankIssue(t *testing.T, database *db.DB, key, storedRank string) {
+func seedRankIssue(t *testing.T, database *store.DB, key, storedRank string) {
 	t.Helper()
-	if err := database.UpsertFieldMapping(&db.FieldMapping{
+	if err := database.UpsertFieldMapping(&store.FieldMapping{
 		JiraID: "customfield_10019", JiraName: "Rank", Name: "rank",
 		Type: "text", IsCustom: true, IsColumn: false,
 	}); err != nil {
@@ -242,7 +242,7 @@ func seedRankIssue(t *testing.T, database *db.DB, key, storedRank string) {
 	}
 	_ = database.MarkFieldAsColumn("customfield_10019")
 	raw := `{"id":"` + key + `","key":"` + key + `","fields":{"summary":"An issue","customfield_10019":"` + storedRank + `"}}`
-	issue := &db.Issue{ID: key, Key: key, Project: "TEST", Summary: "An issue",
+	issue := &store.Issue{ID: key, Key: key, Project: "TEST", Summary: "An issue",
 		Updated: "2026-06-01T00:00:00Z", RawJSON: raw}
 	if err := database.UpsertIssue(issue, map[string]interface{}{"rank": storedRank}); err != nil {
 		t.Fatalf("UpsertIssue: %v", err)
@@ -279,7 +279,7 @@ func TestReconcileFields_CapExceededAppliesDirectly(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	database, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
+	database, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -346,7 +346,7 @@ func TestReconcileFields_RefetchFailureSurfacesError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	database, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
+	database, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -383,7 +383,7 @@ func TestReconcileFields_UnknownFieldSkipped(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	database, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
+	database, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -402,7 +402,7 @@ func TestReconcileFields_UnknownFieldSkipped(t *testing.T) {
 }
 
 func TestFullSyncOverdue(t *testing.T) {
-	database, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
+	database, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -449,9 +449,9 @@ func TestFullSyncOverdue(t *testing.T) {
 
 // registerRankColumn registers "rank" (customfield_10019) as a custom column so
 // ReconcileFields can resolve it. Shared by the scope/cadence tests.
-func registerRankColumn(t *testing.T, database *db.DB) {
+func registerRankColumn(t *testing.T, database *store.DB) {
 	t.Helper()
-	if err := database.UpsertFieldMapping(&db.FieldMapping{
+	if err := database.UpsertFieldMapping(&store.FieldMapping{
 		JiraID: "customfield_10019", JiraName: "Rank", Name: "rank",
 		Type: "text", IsCustom: true, IsColumn: false,
 	}); err != nil {
@@ -481,7 +481,7 @@ func TestReconcileFields_ScopeAppliedToJQL(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	database, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
+	database, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -514,7 +514,7 @@ func TestReconcileFields_CadenceSkipsRecent(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	database, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
+	database, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}

@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/sthadka/jai/pkg/jira"
-	"github.com/sthadka/jai/pkg/store"
+	store "github.com/sthadka/jai/pkg/store"
 )
 
 func TestDenormalize_Basic(t *testing.T) {
@@ -30,7 +30,7 @@ func TestDenormalize_Basic(t *testing.T) {
 		}
 	}`)
 
-	issue, _, err := Denormalize(raw, map[string]*db.FieldMapping{})
+	issue, _, err := Denormalize(raw, map[string]*store.FieldMapping{})
 	if err != nil {
 		t.Fatalf("Denormalize: %v", err)
 	}
@@ -72,7 +72,7 @@ func TestDenormalize_CustomFields(t *testing.T) {
 		}
 	}`)
 
-	fieldMap := map[string]*db.FieldMapping{
+	fieldMap := map[string]*store.FieldMapping{
 		"customfield_12345": {JiraID: "customfield_12345", Name: "team", Type: "option", IsCustom: true, IsColumn: true},
 		"customfield_67890": {JiraID: "customfield_67890", Name: "story_points", Type: "number", IsCustom: true, IsColumn: true},
 	}
@@ -100,7 +100,7 @@ func TestDenormalize_CustomArrayField(t *testing.T) {
 		}
 	}`)
 
-	fieldMap := map[string]*db.FieldMapping{
+	fieldMap := map[string]*store.FieldMapping{
 		"customfield_11128": {JiraID: "customfield_11128", Name: "ebs_account_number", Type: "array", IsCustom: true, IsColumn: true},
 	}
 
@@ -135,7 +135,7 @@ func TestDenormalize_ArrayOfUsers(t *testing.T) {
 		}
 	}`)
 
-	fieldMap := map[string]*db.FieldMapping{
+	fieldMap := map[string]*store.FieldMapping{
 		"customfield_10466": {JiraID: "customfield_10466", Name: "contributors", Type: "array", IsCustom: true, IsColumn: true},
 	}
 
@@ -177,7 +177,7 @@ func TestDenormalize_ObjectFieldFallback(t *testing.T) {
 				}
 			}`, tt.rawValue))
 
-			fieldMap := map[string]*db.FieldMapping{
+			fieldMap := map[string]*store.FieldMapping{
 				"customfield_99999": {JiraID: "customfield_99999", Name: "test_field", Type: tt.fieldType, IsCustom: true, IsColumn: true},
 			}
 

@@ -11,7 +11,7 @@ import (
 
 	"github.com/sthadka/jai/internal/config"
 	"github.com/sthadka/jai/pkg/jira"
-	"github.com/sthadka/jai/pkg/store"
+	store "github.com/sthadka/jai/pkg/store"
 )
 
 // ReconcileProgress reports the state of a rank/field reconcile pass for a
@@ -110,7 +110,7 @@ type reconcileField struct {
 	jiraID string
 }
 
-func (e *Engine) reconcileSource(ctx context.Context, src config.SyncSource, resolved []reconcileField, fieldMap map[string]*db.FieldMapping, ch chan<- ReconcileProgress) {
+func (e *Engine) reconcileSource(ctx context.Context, src config.SyncSource, resolved []reconcileField, fieldMap map[string]*store.FieldMapping, ch chan<- ReconcileProgress) {
 	cols := make([]string, len(resolved))
 	scanFields := []string{"key"}
 	for i, rf := range resolved {
@@ -230,7 +230,7 @@ func (e *Engine) reconcileSource(ctx context.Context, src config.SyncSource, res
 // number of issues successfully upserted, and the first error encountered while
 // re-fetching (if any) so the caller can surface partial reconciliation instead
 // of silently leaving known-drifted issues uncorrected.
-func (e *Engine) refetchAndUpsert(ctx context.Context, keys []string, fieldMap map[string]*db.FieldMapping) (int, error) {
+func (e *Engine) refetchAndUpsert(ctx context.Context, keys []string, fieldMap map[string]*store.FieldMapping) (int, error) {
 	fields := e.expandFields(fieldMap)
 	refetched := 0
 	var firstErr error
@@ -275,7 +275,7 @@ func (e *Engine) refetchAndUpsert(ctx context.Context, keys []string, fieldMap m
 // refresh. Changelog, links, and comments are intentionally left untouched: a
 // silent reconcile-field change does not affect them. Returns the number of
 // issues updated and the first error encountered.
-func (e *Engine) applyReconcileValues(keys []string, vals map[string]map[string]json.RawMessage, fieldMap map[string]*db.FieldMapping) (int, error) {
+func (e *Engine) applyReconcileValues(keys []string, vals map[string]map[string]json.RawMessage, fieldMap map[string]*store.FieldMapping) (int, error) {
 	applied := 0
 	var firstErr error
 	const batchSize = 500
@@ -362,7 +362,7 @@ func patchRawFields(rawJSON string, updates map[string]json.RawMessage) (string,
 
 // upsertAPIIssue denormalizes and upserts a single API issue along with its
 // comments, links, and attachments. Returns true on a successful issue upsert.
-func (e *Engine) upsertAPIIssue(apiIssue *jira.Issue, fieldMap map[string]*db.FieldMapping) bool {
+func (e *Engine) upsertAPIIssue(apiIssue *jira.Issue, fieldMap map[string]*store.FieldMapping) bool {
 	rawBytes, err := json.Marshal(apiIssue)
 	if err != nil {
 		return false

@@ -8,7 +8,7 @@ import (
 
 	"github.com/sthadka/jai/internal/config"
 	"github.com/sthadka/jai/pkg/jira"
-	"github.com/sthadka/jai/pkg/store"
+	store "github.com/sthadka/jai/pkg/store"
 )
 
 const maxRetries = 5
@@ -23,7 +23,7 @@ type PushResult struct {
 
 // Writer processes the pending_changes queue.
 type Writer struct {
-	db     *db.DB
+	db     *store.DB
 	client *jira.Client
 	mw     *metricWriter
 }
@@ -31,14 +31,14 @@ type Writer struct {
 // NewWriter creates a Writer with no metric wiring. Pushing changes still mutates
 // Jira and the optimistic local snapshot; use NewWriterWithMetrics to also refresh
 // flow-metric facts for the affected issues.
-func NewWriter(database *db.DB, client *jira.Client) *Writer {
+func NewWriter(database *store.DB, client *jira.Client) *Writer {
 	return &Writer{db: database, client: client}
 }
 
 // NewWriterWithMetrics creates a Writer that refreshes flow-metric facts for the
 // issues whose queued changes it successfully pushes. Metric refresh is a no-op
 // when metrics are unconfigured (nil metrics: block).
-func NewWriterWithMetrics(database *db.DB, client *jira.Client, cfg *config.Config) *Writer {
+func NewWriterWithMetrics(database *store.DB, client *jira.Client, cfg *config.Config) *Writer {
 	return &Writer{db: database, client: client, mw: newMetricWriter(database, cfg)}
 }
 
@@ -98,7 +98,7 @@ func (w *Writer) ProcessQueue(ctx context.Context) ([]PushResult, error) {
 	return results, nil
 }
 
-func (w *Writer) process(ctx context.Context, c *db.PendingChange) error {
+func (w *Writer) process(ctx context.Context, c *store.PendingChange) error {
 	switch c.Operation {
 	case "set_field":
 		return w.processSetField(ctx, c)
@@ -113,7 +113,7 @@ func (w *Writer) process(ctx context.Context, c *db.PendingChange) error {
 	}
 }
 
-func (w *Writer) processSetField(ctx context.Context, c *db.PendingChange) error {
+func (w *Writer) processSetField(ctx context.Context, c *store.PendingChange) error {
 	var payload struct {
 		Field string      `json:"field"`
 		Value interface{} `json:"value"`
@@ -124,7 +124,7 @@ func (w *Writer) processSetField(ctx context.Context, c *db.PendingChange) error
 	return w.client.UpdateField(ctx, c.IssueKey, payload.Field, payload.Value)
 }
 
-func (w *Writer) processUpdateField(ctx context.Context, c *db.PendingChange) error {
+func (w *Writer) processUpdateField(ctx context.Context, c *store.PendingChange) error {
 	var payload struct {
 		Field string      `json:"field"`
 		Op    string      `json:"op"`
@@ -136,7 +136,7 @@ func (w *Writer) processUpdateField(ctx context.Context, c *db.PendingChange) er
 	return w.client.UpdateFieldOp(ctx, c.IssueKey, payload.Field, payload.Op, payload.Value)
 }
 
-func (w *Writer) processAddComment(ctx context.Context, c *db.PendingChange) error {
+func (w *Writer) processAddComment(ctx context.Context, c *store.PendingChange) error {
 	var payload struct {
 		Body string `json:"body"`
 	}
@@ -147,7 +147,7 @@ func (w *Writer) processAddComment(ctx context.Context, c *db.PendingChange) err
 	return err
 }
 
-func (w *Writer) processTransition(ctx context.Context, c *db.PendingChange) error {
+func (w *Writer) processTransition(ctx context.Context, c *store.PendingChange) error {
 	var payload struct {
 		TransitionID string `json:"transition_id"`
 	}

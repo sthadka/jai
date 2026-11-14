@@ -13,7 +13,7 @@ import (
 
 	"github.com/sthadka/jai/internal/config"
 	"github.com/sthadka/jai/pkg/jira"
-	"github.com/sthadka/jai/pkg/store"
+	store "github.com/sthadka/jai/pkg/store"
 )
 
 // Progress reports sync progress for a project.
@@ -34,7 +34,7 @@ type Progress struct {
 
 // Engine orchestrates Jira sync operations.
 type Engine struct {
-	db       *db.DB
+	db       *store.DB
 	client   *jira.Client
 	cfg      *config.Config
 	jiraTZMu sync.RWMutex
@@ -44,7 +44,7 @@ type Engine struct {
 }
 
 // New creates a new sync Engine.
-func New(database *db.DB, client *jira.Client, cfg *config.Config) *Engine {
+func New(database *store.DB, client *jira.Client, cfg *config.Config) *Engine {
 	return &Engine{db: database, client: client, cfg: cfg, mw: newMetricWriter(database, cfg)}
 }
 
@@ -168,7 +168,7 @@ func (e *Engine) DiscoverFields(ctx context.Context, overrides map[string]string
 		}
 		takenNames[name] = f.ID
 
-		mapping := &db.FieldMapping{
+		mapping := &store.FieldMapping{
 			JiraID:     f.ID,
 			JiraName:   f.Name,
 			Name:       name,
@@ -829,7 +829,7 @@ func applyLookback(hwm, window string) string {
 // ensureCustomColumns creates columns in the issues table for custom fields that don't have one yet.
 // It also updates the in-memory fieldMap so Denormalize sees is_column=true immediately on the
 // same sync run (otherwise the first sync after column creation would skip the field).
-func (e *Engine) ensureCustomColumns(fieldMap map[string]*db.FieldMapping) error {
+func (e *Engine) ensureCustomColumns(fieldMap map[string]*store.FieldMapping) error {
 	for _, f := range fieldMap {
 		if !f.IsCustom || f.IsColumn {
 			continue
@@ -846,7 +846,7 @@ func (e *Engine) ensureCustomColumns(fieldMap map[string]*db.FieldMapping) error
 	return nil
 }
 
-func (e *Engine) expandFields(fieldMap map[string]*db.FieldMapping) []string {
+func (e *Engine) expandFields(fieldMap map[string]*store.FieldMapping) []string {
 	// Always include standard fields + comment + attachment.
 	fields := []string{
 		"summary", "description", "status", "priority", "assignee", "reporter",

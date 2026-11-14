@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/sthadka/jai/pkg/jira"
-	"github.com/sthadka/jai/pkg/store"
+	store "github.com/sthadka/jai/pkg/store"
 )
 
 func marshalJSONArray(items []string) string {
@@ -42,7 +42,7 @@ func normalizeDate(s string) string {
 
 // Denormalize extracts column values from a raw Jira issue JSON blob using the field map.
 // Returns: (fixed IssueFields, extra dynamic columns map).
-func Denormalize(raw []byte, fieldMap map[string]*db.FieldMapping) (*db.Issue, map[string]interface{}, error) {
+func Denormalize(raw []byte, fieldMap map[string]*store.FieldMapping) (*store.Issue, map[string]interface{}, error) {
 	var apiIssue jira.Issue
 	if err := json.Unmarshal(raw, &apiIssue); err != nil {
 		return nil, nil, err
@@ -53,7 +53,7 @@ func Denormalize(raw []byte, fieldMap map[string]*db.FieldMapping) (*db.Issue, m
 		return nil, nil, err
 	}
 
-	issue := &db.Issue{
+	issue := &store.Issue{
 		ID:      apiIssue.ID,
 		Key:     apiIssue.Key,
 		Summary: fields.Summary,
@@ -266,12 +266,12 @@ func extractFieldValue(raw json.RawMessage, fieldType string) interface{} {
 }
 
 // ExtractChangelog extracts changelog entries from a Jira changelog API response.
-func ExtractChangelog(issueKey string, resp *jira.ChangelogResponse) []*db.ChangelogEntry {
+func ExtractChangelog(issueKey string, resp *jira.ChangelogResponse) []*store.ChangelogEntry {
 	if resp == nil || resp.Changelog == nil {
 		return nil
 	}
 
-	var entries []*db.ChangelogEntry
+	var entries []*store.ChangelogEntry
 	for _, h := range resp.Changelog.Histories {
 		author := ""
 		if h.Author != nil {
@@ -281,7 +281,7 @@ func ExtractChangelog(issueKey string, resp *jira.ChangelogResponse) []*db.Chang
 
 		// h.ID is globally unique across the Jira instance, so historyID_itemIndex is unique.
 		for i, item := range h.Items {
-			entries = append(entries, &db.ChangelogEntry{
+			entries = append(entries, &store.ChangelogEntry{
 				ID:         fmt.Sprintf("%s_%d", h.ID, i),
 				IssueKey:   issueKey,
 				Author:     author,
@@ -300,8 +300,8 @@ func ExtractChangelog(issueKey string, resp *jira.ChangelogResponse) []*db.Chang
 
 // ExtractBulkChangelog converts bulk changelog API entries into DB entries.
 // issueIDToKey maps Jira numeric issue IDs to keys (e.g. "10042" -> "ROX-123").
-func ExtractBulkChangelog(entries []jira.BulkChangelogEntry, issueIDToKey map[string]string) []*db.ChangelogEntry {
-	var result []*db.ChangelogEntry
+func ExtractBulkChangelog(entries []jira.BulkChangelogEntry, issueIDToKey map[string]string) []*store.ChangelogEntry {
+	var result []*store.ChangelogEntry
 	for _, e := range entries {
 		issueKey, ok := issueIDToKey[e.IssueID]
 		if !ok {
@@ -314,7 +314,7 @@ func ExtractBulkChangelog(entries []jira.BulkChangelogEntry, issueIDToKey map[st
 		changedAt := normalizeDate(e.Created)
 
 		for i, item := range e.Items {
-			result = append(result, &db.ChangelogEntry{
+			result = append(result, &store.ChangelogEntry{
 				ID:         fmt.Sprintf("%s_%d", e.ID, i),
 				IssueKey:   issueKey,
 				Author:     author,
@@ -334,7 +334,7 @@ func ExtractBulkChangelog(entries []jira.BulkChangelogEntry, issueIDToKey map[st
 // ExtractIssueLinks extracts formal Jira issue links from a raw issue JSON.
 // Each link produces two rows (inward + outward perspective) so both sides are queryable.
 // Also extracts linked_summary, linked_status, and linked_project from the linked issue.
-func ExtractIssueLinks(issueKey string, raw []byte) []db.IssueLink {
+func ExtractIssueLinks(issueKey string, raw []byte) []store.IssueLink {
 	var apiIssue jira.Issue
 	if err := json.Unmarshal(raw, &apiIssue); err != nil {
 		return nil
@@ -344,11 +344,11 @@ func ExtractIssueLinks(issueKey string, raw []byte) []db.IssueLink {
 		return nil
 	}
 
-	var links []db.IssueLink
+	var links []store.IssueLink
 	for _, l := range fields.IssueLinks {
 		if l.InwardIssue != nil {
 			linkedProject := extractProjectFromKey(l.InwardIssue.Key)
-			links = append(links, db.IssueLink{
+			links = append(links, store.IssueLink{
 				ID:            l.ID + "_in",
 				IssueKey:      issueKey,
 				LinkType:      l.Type.Inward,
@@ -361,7 +361,7 @@ func ExtractIssueLinks(issueKey string, raw []byte) []db.IssueLink {
 		}
 		if l.OutwardIssue != nil {
 			linkedProject := extractProjectFromKey(l.OutwardIssue.Key)
-			links = append(links, db.IssueLink{
+			links = append(links, store.IssueLink{
 				ID:            l.ID + "_out",
 				IssueKey:      issueKey,
 				LinkType:      l.Type.Outward,
@@ -436,7 +436,7 @@ func extractLinkedStatus(linkedIssue interface{}) string {
 }
 
 // ExtractComments extracts Jira comments from a raw issue JSON.
-func ExtractComments(issueKey string, raw []byte) ([]*db.Comment, error) {
+func ExtractComments(issueKey string, raw []byte) ([]*store.Comment, error) {
 	var apiIssue jira.Issue
 	if err := json.Unmarshal(raw, &apiIssue); err != nil {
 		return nil, err
@@ -451,9 +451,9 @@ func ExtractComments(issueKey string, raw []byte) ([]*db.Comment, error) {
 		return nil, nil
 	}
 
-	comments := make([]*db.Comment, 0, len(fields.Comment.Comments))
+	comments := make([]*store.Comment, 0, len(fields.Comment.Comments))
 	for _, c := range fields.Comment.Comments {
-		dbC := &db.Comment{
+		dbC := &store.Comment{
 			ID:       c.ID,
 			IssueKey: issueKey,
 			Body:     jira.ADFToPlaintext(c.Body),
@@ -503,7 +503,7 @@ func extractSprintFromRawFields(rawFields map[string]json.RawMessage) (int, stri
 }
 
 // ExtractAttachments extracts attachment metadata from a raw issue JSON.
-func ExtractAttachments(issueKey string, raw []byte) ([]*db.Attachment, error) {
+func ExtractAttachments(issueKey string, raw []byte) ([]*store.Attachment, error) {
 	var apiIssue jira.Issue
 	if err := json.Unmarshal(raw, &apiIssue); err != nil {
 		return nil, err
@@ -542,13 +542,13 @@ func ExtractAttachments(issueKey string, raw []byte) ([]*db.Attachment, error) {
 		return nil, err
 	}
 
-	result := make([]*db.Attachment, 0, len(attachments))
+	result := make([]*store.Attachment, 0, len(attachments))
 	for _, a := range attachments {
 		author := ""
 		if a.Author.DisplayName != "" {
 			author = a.Author.DisplayName
 		}
-		result = append(result, &db.Attachment{
+		result = append(result, &store.Attachment{
 			ID:       a.ID,
 			IssueKey: issueKey,
 			Filename: a.Filename,

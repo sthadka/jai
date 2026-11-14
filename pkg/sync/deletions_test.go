@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/sthadka/jai/pkg/jira"
-	"github.com/sthadka/jai/pkg/store"
+	store "github.com/sthadka/jai/pkg/store"
 )
 
 func TestDetectDeletions(t *testing.T) {
@@ -24,7 +24,7 @@ func TestDetectDeletions(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	database, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
+	database, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -32,7 +32,7 @@ func TestDetectDeletions(t *testing.T) {
 
 	// Insert TEST-1 and TEST-2 locally.
 	for _, key := range []string{"TEST-1", "TEST-2"} {
-		issue := &db.Issue{Key: key, Project: "TEST", Summary: "Issue", RawJSON: "{}"}
+		issue := &store.Issue{Key: key, Project: "TEST", Summary: "Issue", RawJSON: "{}"}
 		if err := database.UpsertIssue(issue, nil); err != nil {
 			t.Fatalf("UpsertIssue %s: %v", key, err)
 		}

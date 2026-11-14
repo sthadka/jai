@@ -11,9 +11,9 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/sthadka/jai/internal/config"
-	synce "github.com/sthadka/jai/internal/sync"
 	"github.com/sthadka/jai/pkg/jira"
 	"github.com/sthadka/jai/pkg/store"
+	synce "github.com/sthadka/jai/pkg/sync"
 )
 
 // ── ANSI helpers ──────────────────────────────────────────────────────────────

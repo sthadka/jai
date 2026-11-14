@@ -11,7 +11,7 @@ import (
 
 	"github.com/sthadka/jai/internal/config"
 	"github.com/sthadka/jai/pkg/jira"
-	"github.com/sthadka/jai/pkg/store"
+	store "github.com/sthadka/jai/pkg/store"
 )
 
 func TestSyncChangelogsForKeys(t *testing.T) {
@@ -39,13 +39,13 @@ func TestSyncChangelogsForKeys(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	database, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
+	database, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
 	defer database.Close()
 
-	issue := &db.Issue{ID: "10042", Key: "TEST-1", Project: "TEST", Summary: "Issue", Updated: "2026-06-01T00:00:00Z", RawJSON: "{}"}
+	issue := &store.Issue{ID: "10042", Key: "TEST-1", Project: "TEST", Summary: "Issue", Updated: "2026-06-01T00:00:00Z", RawJSON: "{}"}
 	if err := database.UpsertIssue(issue, nil); err != nil {
 		t.Fatalf("UpsertIssue: %v", err)
 	}
@@ -99,13 +99,13 @@ func TestSyncChangelogs_Incremental(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	database, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
+	database, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
 	defer database.Close()
 
-	issue := &db.Issue{ID: "10042", Key: "TEST-1", Project: "TEST", Summary: "Issue", Updated: "2026-06-01T00:00:00Z", RawJSON: "{}"}
+	issue := &store.Issue{ID: "10042", Key: "TEST-1", Project: "TEST", Summary: "Issue", Updated: "2026-06-01T00:00:00Z", RawJSON: "{}"}
 	if err := database.UpsertIssue(issue, nil); err != nil {
 		t.Fatalf("UpsertIssue: %v", err)
 	}
@@ -208,7 +208,7 @@ func TestSync_ChangelogsSyncedBySeparatePass(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	database, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
+	database, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -304,14 +304,14 @@ func TestFullSync_ReupsertsUnchangedUpdated(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	database, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
+	database, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
 	defer database.Close()
 
 	// Register rank as a custom column.
-	if err := database.UpsertFieldMapping(&db.FieldMapping{
+	if err := database.UpsertFieldMapping(&store.FieldMapping{
 		JiraID: "customfield_10019", JiraName: "Rank", Name: "rank",
 		Type: "text", IsCustom: true, IsColumn: false,
 	}); err != nil {
@@ -326,7 +326,7 @@ func TestFullSync_ReupsertsUnchangedUpdated(t *testing.T) {
 
 	// Seed the issue with the OLD rank and the exact "updated" the API returns.
 	oldRaw := `{"id":"10001","key":"TEST-1","fields":{"summary":"An issue","updated":"` + sameUpdated + `","customfield_10019":"1|oldrank:"}}`
-	seed := &db.Issue{ID: "10001", Key: "TEST-1", Project: "TEST", Summary: "An issue",
+	seed := &store.Issue{ID: "10001", Key: "TEST-1", Project: "TEST", Summary: "An issue",
 		Updated: "2026-06-01T00:00:00Z", RawJSON: oldRaw}
 	if err := database.UpsertIssue(seed, map[string]interface{}{"rank": "1|oldrank:"}); err != nil {
 		t.Fatalf("UpsertIssue: %v", err)

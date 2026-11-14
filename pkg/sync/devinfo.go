@@ -7,7 +7,7 @@ import (
 
 	"github.com/sthadka/jai/internal/config"
 	"github.com/sthadka/jai/pkg/jira"
-	"github.com/sthadka/jai/pkg/store"
+	store "github.com/sthadka/jai/pkg/store"
 )
 
 // SyncDevInfo fetches development information (PRs, branches, commits) for issues
@@ -76,9 +76,9 @@ func (e *Engine) SyncDevInfo(ctx context.Context, src config.SyncSource) {
 	}
 }
 
-// extractDevLinks converts dev info API response to db.DevLink structs.
-func extractDevLinks(issueKey string, devInfo *jira.DevInfoResponse) []*db.DevLink {
-	var links []*db.DevLink
+// extractDevLinks converts dev info API response to store.DevLink structs.
+func extractDevLinks(issueKey string, devInfo *jira.DevInfoResponse) []*store.DevLink {
+	var links []*store.DevLink
 
 	for _, detail := range devInfo.Detail {
 		for _, repo := range detail.Repositories {
@@ -88,7 +88,7 @@ func extractDevLinks(issueKey string, devInfo *jira.DevInfoResponse) []*db.DevLi
 				if pr.Author != nil {
 					author = pr.Author.Name
 				}
-				links = append(links, &db.DevLink{
+				links = append(links, &store.DevLink{
 					IssueKey: issueKey,
 					Type:     "pullrequest",
 					URL:      pr.URL,
@@ -102,7 +102,7 @@ func extractDevLinks(issueKey string, devInfo *jira.DevInfoResponse) []*db.DevLi
 
 			// Extract branches.
 			for _, branch := range repo.Branches {
-				links = append(links, &db.DevLink{
+				links = append(links, &store.DevLink{
 					IssueKey: issueKey,
 					Type:     "branch",
 					URL:      branch.URL,
@@ -120,7 +120,7 @@ func extractDevLinks(issueKey string, devInfo *jira.DevInfoResponse) []*db.DevLi
 				if commit.Author != nil {
 					author = commit.Author.Name
 				}
-				links = append(links, &db.DevLink{
+				links = append(links, &store.DevLink{
 					IssueKey: issueKey,
 					Type:     "commit",
 					URL:      commit.URL,
