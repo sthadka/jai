@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	mcpkg "github.com/sthadka/jai/internal/mcp"
+	mcpkg "github.com/sthadka/jai/pkg/mcp"
 	synce "github.com/sthadka/jai/pkg/sync"
 )
 
