@@ -8,7 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/sthadka/jai/internal/output"
-	"github.com/sthadka/jai/internal/query"
+	"github.com/sthadka/jai/pkg/query"
 )
 
 var pruneYes bool

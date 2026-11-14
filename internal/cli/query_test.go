@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sthadka/jai/internal/query"
 	"github.com/sthadka/jai/pkg/config"
 	"github.com/sthadka/jai/pkg/jira"
+	"github.com/sthadka/jai/pkg/query"
 	db "github.com/sthadka/jai/pkg/store"
 )
 

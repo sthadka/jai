@@ -9,7 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/sthadka/jai/internal/output"
-	"github.com/sthadka/jai/internal/query"
+	"github.com/sthadka/jai/pkg/query"
 )
 
 // CommandSchema describes a command's parameters and flags.

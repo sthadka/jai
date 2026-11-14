@@ -4,9 +4,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/sthadka/jai/internal/query"
 	"github.com/sthadka/jai/pkg/config"
 	"github.com/sthadka/jai/pkg/metrics"
+	"github.com/sthadka/jai/pkg/query"
 	db "github.com/sthadka/jai/pkg/store"
 )
 
