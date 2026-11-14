@@ -12,8 +12,8 @@ import (
 	_ "time/tzdata"
 
 	"github.com/sthadka/jai/internal/config"
-	"github.com/sthadka/jai/internal/db"
 	"github.com/sthadka/jai/pkg/jira"
+	"github.com/sthadka/jai/pkg/store"
 )
 
 // Progress reports sync progress for a project.

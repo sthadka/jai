@@ -3,7 +3,7 @@ package metrics
 import (
 	"testing"
 
-	"github.com/sthadka/jai/internal/db"
+	"github.com/sthadka/jai/pkg/store"
 )
 
 // clSprint inserts a Sprint-membership changelog transition. from/to carry the full id/name

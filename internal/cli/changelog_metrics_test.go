@@ -5,9 +5,9 @@ import (
 	"testing"
 
 	"github.com/sthadka/jai/internal/config"
-	"github.com/sthadka/jai/internal/db"
 	"github.com/sthadka/jai/internal/metrics"
 	"github.com/sthadka/jai/internal/query"
+	"github.com/sthadka/jai/pkg/store"
 )
 
 // metricsTestConfig returns a config whose metrics: block maps a minimal

@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/sthadka/jai/internal/config"
-	"github.com/sthadka/jai/internal/db"
+	"github.com/sthadka/jai/pkg/store"
 )
 
 func eventsService(t *testing.T, tracked []string) (*db.DB, *Service) {

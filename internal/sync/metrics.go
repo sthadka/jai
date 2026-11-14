@@ -5,8 +5,8 @@ import (
 	"time"
 
 	"github.com/sthadka/jai/internal/config"
-	"github.com/sthadka/jai/internal/db"
 	"github.com/sthadka/jai/internal/metrics"
+	"github.com/sthadka/jai/pkg/store"
 )
 
 // metricWriter drives the flow-metric fact store (internal/metrics) from sync

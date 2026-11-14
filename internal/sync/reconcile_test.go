@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/sthadka/jai/internal/config"
-	"github.com/sthadka/jai/internal/db"
 	"github.com/sthadka/jai/pkg/jira"
+	"github.com/sthadka/jai/pkg/store"
 )
 
 func TestNormalizeRawAndEqual(t *testing.T) {

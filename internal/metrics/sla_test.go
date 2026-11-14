@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/sthadka/jai/internal/config"
-	"github.com/sthadka/jai/internal/db"
+	"github.com/sthadka/jai/pkg/store"
 )
 
 func slaService(t *testing.T, mc *config.MetricsConfig) (*db.DB, *Service) {
