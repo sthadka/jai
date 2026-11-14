@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/sthadka/jai/internal/config"
-	"github.com/sthadka/jai/internal/metrics"
+	"github.com/sthadka/jai/pkg/metrics"
 	"github.com/sthadka/jai/pkg/store"
 )
 

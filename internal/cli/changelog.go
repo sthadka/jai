@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/sthadka/jai/internal/metrics"
 	"github.com/sthadka/jai/internal/output"
+	"github.com/sthadka/jai/pkg/metrics"
 )
 
 var changelogFieldFilter string
