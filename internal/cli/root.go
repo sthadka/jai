@@ -9,11 +9,12 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/sthadka/jai/internal/config"
+	"github.com/sthadka/jai/internal/cli/configloader"
 	"github.com/sthadka/jai/internal/db"
 	"github.com/sthadka/jai/internal/jira"
 	"github.com/sthadka/jai/internal/query"
 	synce "github.com/sthadka/jai/internal/sync"
+	"github.com/sthadka/jai/pkg/config"
 )
 
 // globals holds shared state passed to sub-commands.
@@ -80,7 +81,7 @@ func newRootCmd() *cobra.Command {
 				cfgPath = config.DefaultConfigPath()
 			}
 
-			cfg, err := config.Load(cfgPath)
+			cfg, err := configloader.Load(cfgPath)
 			if err != nil {
 				return fmt.Errorf("loading config: %w -- run 'jai init' to set up jai", err)
 			}

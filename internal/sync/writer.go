@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/sthadka/jai/internal/config"
+	"github.com/sthadka/jai/pkg/config"
 	"github.com/sthadka/jai/internal/db"
 	"github.com/sthadka/jai/internal/jira"
 )
