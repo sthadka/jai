@@ -43,13 +43,14 @@ type Engine struct {
 	jiraTZ   *time.Location
 	colMu    sync.Mutex // serializes ensureCustomColumns ALTER TABLEs across concurrent sources
 	mw       *metricWriter
+	warnf    Warnf
 	onChange ChangeHook
 }
 
 // New creates a new sync Engine with the default system clock.
 func New(database db.Store, client jira.JiraClient, cfg *config.Config) *Engine {
 	mw := newMetricWriter(database, cfg)
-	e := &Engine{db: database, client: client, cfg: cfg, clk: clock.System{}, mw: mw}
+	e := &Engine{db: database, client: client, cfg: cfg, clk: clock.System{}, mw: mw, warnf: defaultWarnf}
 	if mw != nil {
 		mw.clk = e.clk
 	}
@@ -67,6 +68,17 @@ func (e *Engine) WithClock(c clock.Clock) *Engine {
 	if e.mw != nil {
 		e.mw.clk = c
 	}
+	return e
+}
+
+// WithWarnf overrides where recoverable warnings go (default: stderr). Returns
+// the engine for chaining; embedders use it to capture or silence engine
+// warnings. A nil sink restores the stderr default.
+func (e *Engine) WithWarnf(w Warnf) *Engine {
+	if w == nil {
+		w = defaultWarnf
+	}
+	e.warnf = w
 	return e
 }
 
@@ -98,7 +110,7 @@ func (e *Engine) VerifyAuth(ctx context.Context) error {
 
 	loc := time.UTC
 	if me.TimeZone == "" {
-		fmt.Fprintln(os.Stderr, "warning: Jira user timezone is unavailable; falling back to UTC")
+		e.warnf("warning: Jira user timezone is unavailable; falling back to UTC\n")
 	} else {
 		resolved, err := time.LoadLocation(me.TimeZone)
 		if err != nil {

@@ -86,7 +86,7 @@ func (w *BackgroundWorker) runSync(ctx context.Context) {
 		// fields and Denormalize never stores them. This is the promised
 		// "retry in background" that serve.go references.
 		if derr := w.engine.DiscoverFields(ctx, w.engine.cfg.Fields.Overrides); derr != nil {
-			fmt.Fprintf(os.Stderr, "warning: background field discovery failed: %v\n", derr)
+			w.engine.warnf("warning: background field discovery failed: %v\n", derr)
 		}
 		ch, err = w.engine.Sync(ctx, false, false, "")
 	}

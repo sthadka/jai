@@ -26,20 +26,31 @@ type Writer struct {
 	db     db.Store
 	client jira.JiraClient
 	mw     *metricWriter
+	warnf  Warnf
 }
 
 // NewWriter creates a Writer with no metric wiring. Pushing changes still mutates
 // Jira and the optimistic local snapshot; use NewWriterWithMetrics to also refresh
 // flow-metric facts for the affected issues.
 func NewWriter(database db.Store, client jira.JiraClient) *Writer {
-	return &Writer{db: database, client: client}
+	return &Writer{db: database, client: client, warnf: defaultWarnf}
 }
 
 // NewWriterWithMetrics creates a Writer that refreshes flow-metric facts for the
 // issues whose queued changes it successfully pushes. Metric refresh is a no-op
 // when metrics are unconfigured (nil metrics: block).
 func NewWriterWithMetrics(database db.Store, client jira.JiraClient, cfg *config.Config) *Writer {
-	return &Writer{db: database, client: client, mw: newMetricWriter(database, cfg)}
+	return &Writer{db: database, client: client, mw: newMetricWriter(database, cfg), warnf: defaultWarnf}
+}
+
+// WithWarnf overrides where recoverable warnings go (default: stderr); a nil
+// sink restores the default. Returns the writer for chaining.
+func (w *Writer) WithWarnf(fn Warnf) *Writer {
+	if fn == nil {
+		fn = defaultWarnf
+	}
+	w.warnf = fn
+	return w
 }
 
 // ProcessQueue processes all pending (unsynced) changes.
@@ -92,7 +103,7 @@ func (w *Writer) ProcessQueue(ctx context.Context) ([]PushResult, error) {
 	// generation. No-op when metrics are unconfigured; logged, not fatal, on failure
 	// so a metric build problem never fails an otherwise-successful push.
 	if err := w.mw.refreshTouched(pushed); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: metric refresh after push failed: %v\n", err)
+		w.warnf("warning: metric refresh after push failed: %v\n", err)
 	}
 
 	return results, nil
