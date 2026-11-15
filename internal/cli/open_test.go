@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/sthadka/jai/pkg/config"
+	"github.com/sthadka/jai/pkg/core"
 )
 
 func TestOpenURLConstruction(t *testing.T) {
@@ -38,16 +39,19 @@ func TestOpenURLConstruction(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			origCfg := g.cfg
+			if g.core == nil {
+				g.core = &core.Engine{}
+			}
+			origCfg := g.core.Config
 			origJSON := g.jsonOut
 			origOpener := browserOpener
 			defer func() {
-				g.cfg = origCfg
+				g.core.Config = origCfg
 				g.jsonOut = origJSON
 				browserOpener = origOpener
 			}()
 
-			g.cfg = &config.Config{
+			g.core.Config = &config.Config{
 				Jira: config.JiraConfig{URL: tt.baseURL},
 			}
 			g.jsonOut = false
@@ -72,18 +76,21 @@ func TestOpenURLConstruction(t *testing.T) {
 }
 
 func TestOpenURLOnly(t *testing.T) {
-	origCfg := g.cfg
+	if g.core == nil {
+		g.core = &core.Engine{}
+	}
+	origCfg := g.core.Config
 	origJSON := g.jsonOut
 	origOpener := browserOpener
 	origURLOnly := openFlags.urlOnly
 	defer func() {
-		g.cfg = origCfg
+		g.core.Config = origCfg
 		g.jsonOut = origJSON
 		browserOpener = origOpener
 		openFlags.urlOnly = origURLOnly
 	}()
 
-	g.cfg = &config.Config{
+	g.core.Config = &config.Config{
 		Jira: config.JiraConfig{URL: "https://mycompany.atlassian.net"},
 	}
 	g.jsonOut = false
@@ -114,16 +121,19 @@ func TestOpenURLOnly(t *testing.T) {
 }
 
 func TestOpenJSON(t *testing.T) {
-	origCfg := g.cfg
+	if g.core == nil {
+		g.core = &core.Engine{}
+	}
+	origCfg := g.core.Config
 	origJSON := g.jsonOut
 	origOpener := browserOpener
 	defer func() {
-		g.cfg = origCfg
+		g.core.Config = origCfg
 		g.jsonOut = origJSON
 		browserOpener = origOpener
 	}()
 
-	g.cfg = &config.Config{
+	g.core.Config = &config.Config{
 		Jira: config.JiraConfig{URL: "https://mycompany.atlassian.net"},
 	}
 	g.jsonOut = true

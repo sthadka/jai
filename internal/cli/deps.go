@@ -61,7 +61,7 @@ func runDepsTree(issueKey string, depth int) error {
 	}
 
 	// Get the root issue.
-	issue, err := g.db.GetIssue(issueKey)
+	issue, err := g.core.Store.GetIssue(issueKey)
 	if err != nil {
 		return fmt.Errorf("fetching issue: %w", err)
 	}
@@ -114,7 +114,7 @@ func runDepsProject(project string) error {
 		ORDER BY l.linked_project, count DESC
 	`
 
-	rows, err := g.db.Query(query, project)
+	rows, err := g.core.Store.Query(query, project)
 	if err != nil {
 		return fmt.Errorf("querying links: %w", err)
 	}
@@ -211,7 +211,7 @@ func buildDepsTree(issueKey string, depth int, visited map[string]bool) depsTree
 	}
 	visited[issueKey] = true
 
-	issue, _ := g.db.GetIssue(issueKey)
+	issue, _ := g.core.Store.GetIssue(issueKey)
 	node := depsTreeNode{Key: issueKey}
 	if issue != nil {
 		if s, ok := issue["summary"].(string); ok {
@@ -235,7 +235,7 @@ func buildDepsTree(issueKey string, depth int, visited map[string]bool) depsTree
 		FROM issue_links
 		WHERE issue_key = ?
 	`
-	rows, err := g.db.Query(query, issueKey)
+	rows, err := g.core.Store.Query(query, issueKey)
 	if err != nil {
 		return node
 	}
@@ -354,7 +354,7 @@ func findUnsyncedProjectsFromResults(results []linkSummary) []string {
 
 // isProjectSynced checks if a project is in the sync sources.
 func isProjectSynced(project string) bool {
-	for _, src := range g.cfg.SyncSources {
+	for _, src := range g.core.Config.SyncSources {
 		for _, p := range src.Projects {
 			if p == project {
 				return true

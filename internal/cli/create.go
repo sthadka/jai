@@ -80,7 +80,7 @@ Examples:
 		}
 
 		if createFlags.template != "" {
-			desc, err := resolveTemplate(createFlags.template)
+			desc, err := g.resolveTemplate(createFlags.template)
 			if err != nil {
 				if g.jsonOut {
 					fmt.Println(string(output.Err("ValidationError", err.Error())))
@@ -136,7 +136,7 @@ Examples:
 		}
 
 		if createFlags.assignee != "" {
-			accountID, err := g.jira.ResolveAccountID(cmd.Context(), createFlags.assignee)
+			accountID, err := g.core.Client.ResolveAccountID(cmd.Context(), createFlags.assignee)
 			if err != nil {
 				if g.jsonOut {
 					fmt.Println(string(output.Err("JiraError", err.Error())))
@@ -157,7 +157,7 @@ Examples:
 
 		// Apply arbitrary --field key=value pairs via the field map.
 		if len(createFlags.field) > 0 {
-			fieldMap, err := g.db.FieldMapByJiraID()
+			fieldMap, err := g.core.Store.FieldMapByJiraID()
 			if err != nil {
 				return err
 			}
@@ -191,7 +191,7 @@ Examples:
 			}
 		}
 
-		resp, err := g.jira.CreateIssue(cmd.Context(), fields)
+		resp, err := g.core.Client.CreateIssue(cmd.Context(), fields)
 		if err != nil {
 			if g.jsonOut {
 				fmt.Println(string(output.Err("JiraError", err.Error())))
@@ -201,14 +201,14 @@ Examples:
 		}
 
 		// Fetch the full issue and insert into local DB.
-		apiIssue, fetchErr := g.jira.GetIssue(cmd.Context(), resp.Key)
+		apiIssue, fetchErr := g.core.Client.GetIssue(cmd.Context(), resp.Key)
 		if fetchErr == nil {
 			rawJSON, _ := json.Marshal(apiIssue)
-			fieldMap, fmErr := g.db.FieldMapByJiraID()
+			fieldMap, fmErr := g.core.Store.FieldMapByJiraID()
 			if fmErr == nil {
 				dbIssue, extra, denormErr := synce.Denormalize(rawJSON, fieldMap)
 				if denormErr == nil {
-					_ = g.db.UpsertIssue(dbIssue, extra)
+					_ = g.core.Store.UpsertIssue(dbIssue, extra)
 				}
 			}
 		}
@@ -243,11 +243,11 @@ func resolveFieldID(fieldMap map[string]*db.FieldMapping, name string) string {
 
 // resolveTemplate looks up a named template from the config and returns
 // its content. Returns an error if the template name is not found.
-func resolveTemplate(name string) (string, error) {
-	if g.cfg == nil || len(g.cfg.Templates) == 0 {
+func (c *CLI) resolveTemplate(name string) (string, error) {
+	if g.core.Config == nil || len(g.core.Config.Templates) == 0 {
 		return "", fmt.Errorf("template not found: %s", name)
 	}
-	tmpl, ok := g.cfg.Templates[name]
+	tmpl, ok := g.core.Config.Templates[name]
 	if !ok {
 		return "", fmt.Errorf("template not found: %s", name)
 	}

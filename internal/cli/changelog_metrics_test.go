@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/sthadka/jai/pkg/config"
+	"github.com/sthadka/jai/pkg/core"
 	"github.com/sthadka/jai/pkg/metrics"
 	"github.com/sthadka/jai/pkg/query"
 	db "github.com/sthadka/jai/pkg/store"
@@ -39,14 +40,13 @@ func setupCLIMetrics(t *testing.T, cfg *config.Config) *db.DB {
 	}
 	t.Cleanup(func() { database.Close() })
 
-	g.db = database
-	g.cfg = cfg
-	g.query = query.New(database, cfg)
+	g.core = &core.Engine{Store: database}
+
+	g.core.Config = cfg
+	g.core.Query = query.New(database, cfg)
 	g.jsonOut = false
 	t.Cleanup(func() {
-		g.db = nil
-		g.cfg = nil
-		g.query = nil
+		g.core = nil
 		g.jsonOut = false
 	})
 	return database

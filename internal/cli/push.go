@@ -13,11 +13,11 @@ var pushCmd = &cobra.Command{
 	Short: "Push pending changes to Jira",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Ensure pending_changes table exists.
-		if err := g.db.EnsurePendingChangesTable(); err != nil {
+		if err := g.core.Store.EnsurePendingChangesTable(); err != nil {
 			return err
 		}
 
-		count, err := g.db.CountPendingChanges()
+		count, err := g.core.Store.CountPendingChanges()
 		if err != nil {
 			return err
 		}
@@ -28,7 +28,7 @@ var pushCmd = &cobra.Command{
 
 		fmt.Printf("Pushing %d pending change(s)...\n", count)
 
-		writer := synce.NewWriter(g.db, g.jira)
+		writer := synce.NewWriter(g.core.Store, g.core.Client)
 		results, err := writer.ProcessQueue(context.Background())
 		if err != nil {
 			return err

@@ -16,11 +16,12 @@ import (
 
 	db "github.com/sthadka/jai/pkg/store"
 
+	"github.com/sthadka/jai/pkg/core"
 	synce "github.com/sthadka/jai/pkg/sync"
 )
 
 // globals holds shared state passed to sub-commands.
-type globals struct {
+type CLI struct {
 	cfgPath  string
 	dbPath   string
 	jsonOut  bool
@@ -30,15 +31,11 @@ type globals struct {
 	fields   string
 	format   string
 
-	cfg      *config.Config
-	db       *db.DB
-	jira     *jira.Client
-	query    *query.Engine
-	sync     *synce.Engine
+	core     *core.Engine
 	bgWorker *synce.BackgroundWorker
 }
 
-var g globals
+var g CLI
 
 // noAutoSync lists commands that should never trigger auto-sync.
 var noAutoSync = map[string]bool{
@@ -90,10 +87,10 @@ func newRootCmd() *cobra.Command {
 			if err := cfg.Validate(); err != nil {
 				return err
 			}
-			g.cfg = cfg
+			g.core.Config = cfg
 
 			if g.dbPath != "" {
-				g.cfg.DB.Path = g.dbPath
+				g.core.Config.DB.Path = g.dbPath
 			}
 
 			underDB := cmd.Parent() != nil && cmd.Parent().Name() == "db"
@@ -101,15 +98,15 @@ func newRootCmd() *cobra.Command {
 				return nil
 			}
 
-			database, err := db.Open(g.cfg.DB.Path)
+			database, err := db.Open(g.core.Config.DB.Path)
 			if err != nil {
 				return fmt.Errorf("opening database: %w", err)
 			}
-			g.db = database
+			g.core.Store = database
 
-			g.jira = jira.NewBasicAuth(cfg.Jira.URL, cfg.Jira.Email, cfg.Jira.Token, cfg.Sync.RateLimit)
-			g.query = query.New(database, cfg)
-			g.sync = synce.New(database, g.jira, cfg)
+			g.core.Client = jira.NewBasicAuth(cfg.Jira.URL, cfg.Jira.Email, cfg.Jira.Token, cfg.Sync.RateLimit)
+			g.core.Query = query.New(database, cfg)
+			g.core.Sync = synce.New(database, g.core.Client, cfg)
 
 			if !g.noSync && !noAutoSync[cmd.Name()] && !underDB {
 				if shouldAutoSync(database, cfg) {
@@ -154,7 +151,7 @@ func runAutoSync(ctx context.Context) {
 	// anonymous sync pull the wrong results — Jira returns very different data
 	// depending on auth. Transient (non-auth) failures fall through so cached
 	// reads still work offline; run with --no-sync to skip this entirely.
-	if err := g.sync.VerifyAuth(ctx); err != nil {
+	if err := g.core.Sync.VerifyAuth(ctx); err != nil {
 		var authErr *jira.AuthError
 		if errors.As(err, &authErr) {
 			fmt.Fprintf(os.Stderr, "✗ Jira authentication failed: %v\n", authErr)
@@ -173,11 +170,11 @@ func runAutoSync(ctx context.Context) {
 
 	// Non-blocking: start background worker and return immediately
 	if g.bgWorker == nil {
-		interval, err := time.ParseDuration(g.cfg.Sync.Interval)
+		interval, err := time.ParseDuration(g.core.Config.Sync.Interval)
 		if err != nil {
 			interval = 15 * time.Minute
 		}
-		g.bgWorker = synce.NewBackgroundWorker(g.sync, interval)
+		g.bgWorker = synce.NewBackgroundWorker(g.core.Sync, interval)
 		g.bgWorker.Start(ctx)
 	}
 
@@ -185,7 +182,7 @@ func runAutoSync(ctx context.Context) {
 }
 
 func runSyncSynchronous(ctx context.Context) {
-	ch, err := g.sync.Sync(ctx, false, false, "")
+	ch, err := g.core.Sync.Sync(ctx, false, false, "")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "sync: %v\n", err)
 		return
@@ -244,13 +241,13 @@ func GetSyncAge() int {
 	}
 
 	// Fall back to database sync metadata
-	if g.db == nil || g.cfg == nil {
+	if g.core.Store == nil || g.core.Config == nil {
 		return -1
 	}
 
 	var oldestSync time.Time
-	for _, src := range g.cfg.SyncSources {
-		meta, err := g.db.GetSyncMeta(src.Name)
+	for _, src := range g.core.Config.SyncSources {
+		meta, err := g.core.Store.GetSyncMeta(src.Name)
 		if err != nil || !meta.LastSyncTime.Valid || meta.LastSyncTime.String == "" {
 			continue
 		}

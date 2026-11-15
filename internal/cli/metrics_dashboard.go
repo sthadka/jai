@@ -61,7 +61,7 @@ func runMetricsDashboardLive() error {
 	_, pol, store := metricsService()
 
 	engine, err := live.NewEngine(live.EngineConfig{
-		DBPath:           g.cfg.DB.Path,
+		DBPath:           g.core.Config.DB.Path,
 		DoneResolutions:  pol.DoneResolutions(),
 		BlockerLinkTypes: pol.BlockerLinkTypes(),
 	})
@@ -89,7 +89,7 @@ func runMetricsDashboardLive() error {
 
 	srv := live.NewServer(engine, projects, gen)
 	srv.SetDashboards(dashboardCapabilities(pol), nil)
-	srv.SetJiraBaseURL(strings.TrimRight(g.cfg.Jira.URL, "/"))
+	srv.SetJiraBaseURL(strings.TrimRight(g.core.Config.Jira.URL, "/"))
 	url, httpSrv, err := srv.ListenAndServe(dashboardPort)
 	if err != nil {
 		return metricErr("DashboardError", fmt.Errorf("bind localhost server: %w", err))
@@ -121,7 +121,7 @@ func dashboardCapabilities(pol *metrics.Policy) map[string]bool {
 	caps := map[string]bool{
 		"blocker_link_types": len(pol.BlockerLinkTypes()) > 0,
 	}
-	if m := g.cfg.Metrics; m.SLA != nil && m.SLA.Security != nil {
+	if m := g.core.Config.Metrics; m.SLA != nil && m.SLA.Security != nil {
 		caps["security_sla"] = true
 	}
 	return caps

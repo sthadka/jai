@@ -85,7 +85,7 @@ Examples:
 		}
 		linkType = resolved
 
-		if err := g.jira.CreateLink(cmd.Context(), linkType, issueKey, toKey); err != nil {
+		if err := g.core.Client.CreateLink(cmd.Context(), linkType, issueKey, toKey); err != nil {
 			if g.jsonOut {
 				fmt.Println(string(output.Err("JiraError", err.Error())))
 				return nil
@@ -114,7 +114,7 @@ func runRemoteLink(cmd *cobra.Command, issueKey, url string, args []string) erro
 		title = args[2]
 	}
 
-	if err := g.jira.CreateRemoteLink(cmd.Context(), issueKey, url, title); err != nil {
+	if err := g.core.Client.CreateRemoteLink(cmd.Context(), issueKey, url, title); err != nil {
 		if g.jsonOut {
 			fmt.Println(string(output.Err("JiraError", err.Error())))
 			return nil
@@ -137,7 +137,7 @@ func runRemoteLink(cmd *cobra.Command, issueKey, url string, args []string) erro
 }
 
 func runListLinkTypes(cmd *cobra.Command) error {
-	linkTypes, err := g.jira.GetLinkTypes(cmd.Context())
+	linkTypes, err := g.core.Client.GetLinkTypes(cmd.Context())
 	if err != nil {
 		if g.jsonOut {
 			fmt.Println(string(output.Err("JiraError", err.Error())))
@@ -166,7 +166,7 @@ func runListLinkTypes(cmd *cobra.Command) error {
 }
 
 func resolveLinkType(cmd *cobra.Command, name string) (string, error) {
-	linkTypes, err := g.jira.GetLinkTypes(cmd.Context())
+	linkTypes, err := g.core.Client.GetLinkTypes(cmd.Context())
 	if err != nil {
 		return "", fmt.Errorf("fetching link types: %w", err)
 	}

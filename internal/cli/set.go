@@ -66,7 +66,7 @@ Bulk operations with a SQL query:
 			if len(args) == 2 {
 				scalarValue = args[1]
 			}
-			results, err := g.query.Execute(setQuery)
+			results, err := g.core.Query.Execute(setQuery)
 			if err != nil {
 				if g.jsonOut {
 					fmt.Println(string(output.Err("QueryError", err.Error())))
@@ -146,12 +146,12 @@ Bulk operations with a SQL query:
 		}
 
 		if setQueue {
-			if err := g.db.EnsurePendingChangesTable(); err != nil {
+			if err := g.core.Store.EnsurePendingChangesTable(); err != nil {
 				return err
 			}
 		}
 
-		fieldMap, err := g.db.FieldMapByJiraID()
+		fieldMap, err := g.core.Store.FieldMapByJiraID()
 		if err != nil {
 			return err
 		}
@@ -203,7 +203,7 @@ func setScalarField(cmd *cobra.Command, issueKey, fieldName, jiraID, value, fiel
 
 	if fieldType == "array" {
 		resolveAccountID := func(v string) (string, error) {
-			return g.jira.ResolveAccountID(cmd.Context(), v)
+			return g.core.Client.ResolveAccountID(cmd.Context(), v)
 		}
 		items := fieldwrap.ParseArrayInput(value)
 		wrapped, werr := fieldwrap.WrapArrayItems(jiraID, itemType, items, resolveAccountID)
@@ -220,7 +220,7 @@ func setScalarField(cmd *cobra.Command, issueKey, fieldName, jiraID, value, fiel
 		localVal = string(j)
 	} else {
 		resolveAccountID := func(v string) (string, error) {
-			return g.jira.ResolveAccountID(cmd.Context(), v)
+			return g.core.Client.ResolveAccountID(cmd.Context(), v)
 		}
 		if wrapped, ok, err := fieldwrap.WrapScalarFieldValue(jiraID, value, resolveAccountID); ok {
 			if err != nil {
@@ -240,12 +240,12 @@ func setScalarField(cmd *cobra.Command, issueKey, fieldName, jiraID, value, fiel
 	status := "synced"
 	if setQueue {
 		payload, _ := json.Marshal(map[string]interface{}{"field": jiraID, "value": payloadVal})
-		if err := g.db.InsertPendingChange(issueKey, "set_field", string(payload)); err != nil {
+		if err := g.core.Store.InsertPendingChange(issueKey, "set_field", string(payload)); err != nil {
 			return err
 		}
 		status = "queued"
 	} else {
-		if err := g.jira.UpdateField(cmd.Context(), issueKey, jiraID, payloadVal); err != nil {
+		if err := g.core.Client.UpdateField(cmd.Context(), issueKey, jiraID, payloadVal); err != nil {
 			msg := fmt.Sprintf("setting %s on %s: %v", fieldName, issueKey, err)
 			if g.jsonOut {
 				fmt.Println(string(output.Err("JiraError", msg)))
@@ -255,7 +255,7 @@ func setScalarField(cmd *cobra.Command, issueKey, fieldName, jiraID, value, fiel
 		}
 	}
 
-	_, err := g.db.Exec(
+	_, err := g.core.Store.Exec(
 		fmt.Sprintf("UPDATE issues SET %s = ?, synced_at = datetime('now') WHERE key = ?", fieldName),
 		localVal, issueKey,
 	)
@@ -322,7 +322,7 @@ func setBulk(cmd *cobra.Command, keys []string, fieldName, jiraID, value, fieldT
 		scalarLocalVal = value
 		if fieldType == "array" {
 			resolveAccountID := func(v string) (string, error) {
-				return g.jira.ResolveAccountID(cmd.Context(), v)
+				return g.core.Client.ResolveAccountID(cmd.Context(), v)
 			}
 			items := fieldwrap.ParseArrayInput(value)
 			wrapped, werr := fieldwrap.WrapArrayItems(jiraID, itemType, items, resolveAccountID)
@@ -339,7 +339,7 @@ func setBulk(cmd *cobra.Command, keys []string, fieldName, jiraID, value, fieldT
 			scalarLocalVal = string(j)
 		} else {
 			resolveAccountID := func(v string) (string, error) {
-				return g.jira.ResolveAccountID(cmd.Context(), v)
+				return g.core.Client.ResolveAccountID(cmd.Context(), v)
 			}
 			if wrapped, ok, err := fieldwrap.WrapScalarFieldValue(jiraID, value, resolveAccountID); ok {
 				if err != nil {
@@ -363,7 +363,7 @@ func setBulk(cmd *cobra.Command, keys []string, fieldName, jiraID, value, fieldT
 			var keyErr error
 			for _, v := range setAddValues {
 				val, werr := fieldwrap.WrapArrayItem(jiraID, itemType, v, func(s string) (string, error) {
-					return g.jira.ResolveAccountID(cmd.Context(), s)
+					return g.core.Client.ResolveAccountID(cmd.Context(), s)
 				})
 				if werr != nil {
 					keyErr = werr
@@ -372,11 +372,11 @@ func setBulk(cmd *cobra.Command, keys []string, fieldName, jiraID, value, fieldT
 				}
 				if setQueue {
 					payload, _ := json.Marshal(map[string]interface{}{"field": jiraID, "op": "add", "value": val})
-					if err := g.db.InsertPendingChange(key, "update_field", string(payload)); err != nil {
+					if err := g.core.Store.InsertPendingChange(key, "update_field", string(payload)); err != nil {
 						return err
 					}
 				} else {
-					if err := g.jira.UpdateFieldOp(cmd.Context(), key, jiraID, "add", val); err != nil {
+					if err := g.core.Client.UpdateFieldOp(cmd.Context(), key, jiraID, "add", val); err != nil {
 						keyErr = err
 						fmt.Fprintf(cmd.ErrOrStderr(), "  ✗ %s: add %v (%v)\n", key, v, err)
 					}
@@ -384,7 +384,7 @@ func setBulk(cmd *cobra.Command, keys []string, fieldName, jiraID, value, fieldT
 			}
 			for _, v := range setRemoveValues {
 				val, werr := fieldwrap.WrapArrayItem(jiraID, itemType, v, func(s string) (string, error) {
-					return g.jira.ResolveAccountID(cmd.Context(), s)
+					return g.core.Client.ResolveAccountID(cmd.Context(), s)
 				})
 				if werr != nil {
 					keyErr = werr
@@ -393,11 +393,11 @@ func setBulk(cmd *cobra.Command, keys []string, fieldName, jiraID, value, fieldT
 				}
 				if setQueue {
 					payload, _ := json.Marshal(map[string]interface{}{"field": jiraID, "op": "remove", "value": val})
-					if err := g.db.InsertPendingChange(key, "update_field", string(payload)); err != nil {
+					if err := g.core.Store.InsertPendingChange(key, "update_field", string(payload)); err != nil {
 						return err
 					}
 				} else {
-					if err := g.jira.UpdateFieldOp(cmd.Context(), key, jiraID, "remove", val); err != nil {
+					if err := g.core.Client.UpdateFieldOp(cmd.Context(), key, jiraID, "remove", val); err != nil {
 						keyErr = err
 						fmt.Fprintf(cmd.ErrOrStderr(), "  ✗ %s: remove %v (%v)\n", key, v, err)
 					}
@@ -411,7 +411,7 @@ func setBulk(cmd *cobra.Command, keys []string, fieldName, jiraID, value, fieldT
 				b, _ := json.Marshal(updated)
 				keyLocalVal = string(b)
 			}
-			if _, err := g.db.Exec(
+			if _, err := g.core.Store.Exec(
 				fmt.Sprintf("UPDATE issues SET %s = ?, synced_at = datetime('now') WHERE key = ?", fieldName),
 				keyLocalVal, key,
 			); err != nil {
@@ -426,17 +426,17 @@ func setBulk(cmd *cobra.Command, keys []string, fieldName, jiraID, value, fieldT
 		} else {
 			if setQueue {
 				payload, _ := json.Marshal(map[string]interface{}{"field": jiraID, "value": scalarPayloadVal})
-				if err := g.db.InsertPendingChange(key, "set_field", string(payload)); err != nil {
+				if err := g.core.Store.InsertPendingChange(key, "set_field", string(payload)); err != nil {
 					return err
 				}
 			} else {
-				if err := g.jira.UpdateField(cmd.Context(), key, jiraID, scalarPayloadVal); err != nil {
+				if err := g.core.Client.UpdateField(cmd.Context(), key, jiraID, scalarPayloadVal); err != nil {
 					failed++
 					fmt.Fprintf(cmd.ErrOrStderr(), "  ✗ %s: %v\n", key, err)
 					continue
 				}
 			}
-			if _, err := g.db.Exec(
+			if _, err := g.core.Store.Exec(
 				fmt.Sprintf("UPDATE issues SET %s = ?, synced_at = datetime('now') WHERE key = ?", fieldName),
 				scalarLocalVal, key,
 			); err != nil {
@@ -471,7 +471,7 @@ func setBulk(cmd *cobra.Command, keys []string, fieldName, jiraID, value, fieldT
 func setArrayField(cmd *cobra.Command, issueKey, fieldName, jiraID, itemType string) error {
 	for _, v := range setAddValues {
 		val, werr := fieldwrap.WrapArrayItem(jiraID, itemType, v, func(s string) (string, error) {
-			return g.jira.ResolveAccountID(cmd.Context(), s)
+			return g.core.Client.ResolveAccountID(cmd.Context(), s)
 		})
 		if werr != nil {
 			msg := fmt.Sprintf("adding %v to %s on %s: %v", v, fieldName, issueKey, werr)
@@ -483,11 +483,11 @@ func setArrayField(cmd *cobra.Command, issueKey, fieldName, jiraID, itemType str
 		}
 		if setQueue {
 			payload, _ := json.Marshal(map[string]interface{}{"field": jiraID, "op": "add", "value": val})
-			if err := g.db.InsertPendingChange(issueKey, "update_field", string(payload)); err != nil {
+			if err := g.core.Store.InsertPendingChange(issueKey, "update_field", string(payload)); err != nil {
 				return err
 			}
 		} else {
-			if err := g.jira.UpdateFieldOp(cmd.Context(), issueKey, jiraID, "add", val); err != nil {
+			if err := g.core.Client.UpdateFieldOp(cmd.Context(), issueKey, jiraID, "add", val); err != nil {
 				msg := fmt.Sprintf("adding %v to %s on %s: %v", v, fieldName, issueKey, err)
 				if g.jsonOut {
 					fmt.Println(string(output.Err("JiraError", msg)))
@@ -499,7 +499,7 @@ func setArrayField(cmd *cobra.Command, issueKey, fieldName, jiraID, itemType str
 	}
 	for _, v := range setRemoveValues {
 		val, werr := fieldwrap.WrapArrayItem(jiraID, itemType, v, func(s string) (string, error) {
-			return g.jira.ResolveAccountID(cmd.Context(), s)
+			return g.core.Client.ResolveAccountID(cmd.Context(), s)
 		})
 		if werr != nil {
 			msg := fmt.Sprintf("removing %v from %s on %s: %v", v, fieldName, issueKey, werr)
@@ -511,11 +511,11 @@ func setArrayField(cmd *cobra.Command, issueKey, fieldName, jiraID, itemType str
 		}
 		if setQueue {
 			payload, _ := json.Marshal(map[string]interface{}{"field": jiraID, "op": "remove", "value": val})
-			if err := g.db.InsertPendingChange(issueKey, "update_field", string(payload)); err != nil {
+			if err := g.core.Store.InsertPendingChange(issueKey, "update_field", string(payload)); err != nil {
 				return err
 			}
 		} else {
-			if err := g.jira.UpdateFieldOp(cmd.Context(), issueKey, jiraID, "remove", val); err != nil {
+			if err := g.core.Client.UpdateFieldOp(cmd.Context(), issueKey, jiraID, "remove", val); err != nil {
 				msg := fmt.Sprintf("removing %v from %s on %s: %v", v, fieldName, issueKey, err)
 				if g.jsonOut {
 					fmt.Println(string(output.Err("JiraError", msg)))
@@ -533,7 +533,7 @@ func setArrayField(cmd *cobra.Command, issueKey, fieldName, jiraID, itemType str
 		b, _ := json.Marshal(updated)
 		localVal = string(b)
 	}
-	_, err := g.db.Exec(
+	_, err := g.core.Store.Exec(
 		fmt.Sprintf("UPDATE issues SET %s = ?, synced_at = datetime('now') WHERE key = ?", fieldName),
 		localVal, issueKey,
 	)
@@ -574,7 +574,7 @@ func setArrayField(cmd *cobra.Command, issueKey, fieldName, jiraID, itemType str
 
 func readCurrentArray(issueKey, fieldName string) []string {
 	var raw sql.NullString
-	_ = g.db.QueryRow(
+	_ = g.core.Store.QueryRow(
 		fmt.Sprintf("SELECT %s FROM issues WHERE key = ?", fieldName),
 		issueKey,
 	).Scan(&raw)

@@ -86,9 +86,9 @@ over a newer incremental update.`,
 // metricsService builds the shared service, compiled policy and store from the
 // active config and DB. There is one definition of each metric behind this.
 func metricsService() (*metrics.Service, *metrics.Policy, *metrics.Store) {
-	pol := metrics.CompilePolicy(g.cfg.Metrics)
-	store := metrics.NewStore(g.db, g.cfg.DB.Path)
-	svc := metrics.NewService(g.db, store, pol, g.cfg)
+	pol := metrics.CompilePolicy(g.core.Config.Metrics)
+	store := metrics.NewStore(g.core.Store, g.core.Config.DB.Path)
+	svc := metrics.NewService(g.core.Store, store, pol, g.core.Config)
 	return svc, pol, store
 }
 
@@ -288,8 +288,8 @@ func printDiagnostics(w io.Writer, r *metrics.Result) {
 }
 
 func runMetricCoverage() error {
-	pol := metrics.CompilePolicy(g.cfg.Metrics)
-	report, err := metrics.ReportCoverage(g.db, splitProjects(metricProjects), pol, g.cfg)
+	pol := metrics.CompilePolicy(g.core.Config.Metrics)
+	report, err := metrics.ReportCoverage(g.core.Store, splitProjects(metricProjects), pol, g.core.Config)
 	if err != nil {
 		return metricErr("CoverageError", err)
 	}
@@ -345,8 +345,8 @@ func printCoverageCaveats(w io.Writer, report *metrics.CoverageReport) {
 }
 
 func runMetricRebuild() error {
-	pol := metrics.CompilePolicy(g.cfg.Metrics)
-	store := metrics.NewStore(g.db, g.cfg.DB.Path)
+	pol := metrics.CompilePolicy(g.core.Config.Metrics)
+	store := metrics.NewStore(g.core.Store, g.core.Config.DB.Path)
 	builder := metrics.NewBuilder(store, pol)
 
 	asOf := time.Now().UTC()

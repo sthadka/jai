@@ -22,7 +22,7 @@ Examples:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		issueKey := strings.ToUpper(args[0])
 
-		user := g.cfg.Me
+		user := g.core.Config.Me
 		if len(args) > 1 {
 			user = args[1]
 		}
@@ -36,7 +36,7 @@ Examples:
 			return fmt.Errorf("%s", msg)
 		}
 
-		accountID, err := g.jira.ResolveAccountID(cmd.Context(), user)
+		accountID, err := g.core.Client.ResolveAccountID(cmd.Context(), user)
 		if err != nil {
 			if g.jsonOut {
 				fmt.Println(string(output.Err("JiraError", err.Error())))
@@ -45,7 +45,7 @@ Examples:
 			return fmt.Errorf("resolving user: %w", err)
 		}
 
-		if err := g.jira.AddWatcher(cmd.Context(), issueKey, accountID); err != nil {
+		if err := g.core.Client.AddWatcher(cmd.Context(), issueKey, accountID); err != nil {
 			if g.jsonOut {
 				fmt.Println(string(output.Err("JiraError", err.Error())))
 				return nil
@@ -80,7 +80,7 @@ Examples:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		issueKey := strings.ToUpper(args[0])
 
-		user := g.cfg.Me
+		user := g.core.Config.Me
 		if user == "" {
 			msg := "'me' not set in config — cannot determine which user to remove"
 			if g.jsonOut {
@@ -90,7 +90,7 @@ Examples:
 			return fmt.Errorf("%s", msg)
 		}
 
-		accountID, err := g.jira.ResolveAccountID(cmd.Context(), user)
+		accountID, err := g.core.Client.ResolveAccountID(cmd.Context(), user)
 		if err != nil {
 			if g.jsonOut {
 				fmt.Println(string(output.Err("JiraError", err.Error())))
@@ -99,7 +99,7 @@ Examples:
 			return fmt.Errorf("resolving user: %w", err)
 		}
 
-		if err := g.jira.RemoveWatcher(cmd.Context(), issueKey, accountID); err != nil {
+		if err := g.core.Client.RemoveWatcher(cmd.Context(), issueKey, accountID); err != nil {
 			if g.jsonOut {
 				fmt.Println(string(output.Err("JiraError", err.Error())))
 				return nil

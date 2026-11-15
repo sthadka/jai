@@ -24,7 +24,7 @@ func handleFieldsSearch(keyword string) error {
 			WHERE name LIKE ? OR jira_name LIKE ?
 			ORDER BY is_column DESC, name ASC`
 	pattern := "%" + keyword + "%"
-	rows, err := g.db.Query(sql, pattern, pattern)
+	rows, err := g.core.Store.Query(sql, pattern, pattern)
 	if err != nil {
 		if g.jsonOut {
 			fmt.Println(string(output.Err("QueryError", err.Error())))
@@ -106,7 +106,7 @@ func handleFieldsSearch(keyword string) error {
 func handleFieldsSuggest(key string) error {
 	// Get all custom column fields from field_map.
 	sql := `SELECT name, jira_name, type FROM field_map WHERE is_column = 1 AND is_custom = 1`
-	rows, err := g.db.Query(sql)
+	rows, err := g.core.Store.Query(sql)
 	if err != nil {
 		if g.jsonOut {
 			fmt.Println(string(output.Err("QueryError", err.Error())))
@@ -136,7 +136,7 @@ func handleFieldsSuggest(key string) error {
 	for _, cf := range customFields {
 		// Use dynamic SQL to check if the field is non-null for this issue.
 		checkSQL := fmt.Sprintf(`SELECT 1 FROM issues WHERE key = ? AND "%s" IS NOT NULL AND "%s" != '' LIMIT 1`, cf.Name, cf.Name)
-		checkRows, err := g.db.Query(checkSQL, key)
+		checkRows, err := g.core.Store.Query(checkSQL, key)
 		if err != nil {
 			continue
 		}
@@ -201,7 +201,7 @@ var fieldsCmd = &cobra.Command{
 			return handleFieldsSearch(fieldsSearch)
 		}
 
-		mappings, err := g.db.AllFieldMappings()
+		mappings, err := g.core.Store.AllFieldMappings()
 		if err != nil {
 			if g.jsonOut {
 				fmt.Println(string(output.Err("QueryError", err.Error())))
@@ -232,7 +232,7 @@ var fieldsCmd = &cobra.Command{
 					colNames = append(colNames, m.Name)
 				}
 			}
-			stats, _ = g.db.FieldPopulationStats(colNames, fieldsProject)
+			stats, _ = g.core.Store.FieldPopulationStats(colNames, fieldsProject)
 		}
 
 		if g.jsonOut {

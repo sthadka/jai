@@ -31,7 +31,7 @@ Examples:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		key := strings.ToUpper(args[0])
 
-		baseURL := strings.TrimRight(g.cfg.Jira.URL, "/")
+		baseURL := strings.TrimRight(g.core.Config.Jira.URL, "/")
 		issueURL := baseURL + "/browse/" + key
 
 		if g.jsonOut {

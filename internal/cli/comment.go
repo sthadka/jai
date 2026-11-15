@@ -27,17 +27,17 @@ defer the push until 'jai push'.`,
 		var commentID string
 
 		if commentQueue {
-			if err := g.db.EnsurePendingChangesTable(); err != nil {
+			if err := g.core.Store.EnsurePendingChangesTable(); err != nil {
 				return err
 			}
 			payload, _ := json.Marshal(map[string]string{"body": text})
-			if err := g.db.InsertPendingChange(issueKey, "add_comment", string(payload)); err != nil {
+			if err := g.core.Store.InsertPendingChange(issueKey, "add_comment", string(payload)); err != nil {
 				return err
 			}
 			commentID = fmt.Sprintf("local_%d", time.Now().UnixNano())
 			status = "queued"
 		} else {
-			id, err := g.jira.AddComment(cmd.Context(), issueKey, text)
+			id, err := g.core.Client.AddComment(cmd.Context(), issueKey, text)
 			if err != nil {
 				msg := fmt.Sprintf("adding comment to %s: %v", issueKey, err)
 				if g.jsonOut {
@@ -53,13 +53,13 @@ defer the push until 'jai push'.`,
 		localComment := &db.Comment{
 			ID:       commentID,
 			IssueKey: issueKey,
-			Author:   g.cfg.Me,
+			Author:   g.core.Config.Me,
 			Body:     text,
 			Created:  now,
 			Updated:  now,
 		}
-		_ = g.db.UpsertComment(localComment)
-		_ = g.db.UpdateIssueCommentsText(issueKey)
+		_ = g.core.Store.UpsertComment(localComment)
+		_ = g.core.Store.UpdateIssueCommentsText(issueKey)
 
 		if g.jsonOut {
 			fmt.Println(string(output.OK(map[string]string{

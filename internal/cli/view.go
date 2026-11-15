@@ -31,13 +31,13 @@ var viewCmd = &cobra.Command{
 	Short: "Execute a named view query",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Surface generated metric fragments/views (in-memory; never persisted).
-		if _, _, collisions := applyGeneratedMetrics(g.cfg); len(collisions) > 0 {
+		if _, _, collisions := applyGeneratedMetrics(g.core.Config); len(collisions) > 0 {
 			fmt.Fprintf(os.Stderr, "note: generated metric names overridden by user config: %v\n", collisions)
 		}
 
 		if len(args) == 0 {
 			// List available views.
-			views := g.cfg.Views
+			views := g.core.Config.Views
 			if len(views) == 0 {
 				fmt.Println("No views configured. Add views to your config file.")
 				return nil
@@ -58,7 +58,7 @@ var viewCmd = &cobra.Command{
 		}
 
 		name := args[0]
-		view := g.cfg.ViewByName(name)
+		view := g.core.Config.ViewByName(name)
 		if view == nil {
 			msg := fmt.Sprintf("unknown view: %s", name)
 			if g.jsonOut {
@@ -68,7 +68,7 @@ var viewCmd = &cobra.Command{
 			return fmt.Errorf("%s", msg)
 		}
 
-		results, err := g.query.Execute(view.Query)
+		results, err := g.core.Query.Execute(view.Query)
 		if err != nil {
 			if g.jsonOut {
 				fmt.Println(string(output.Err("QueryError", err.Error())))

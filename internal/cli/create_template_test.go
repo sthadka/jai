@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/sthadka/jai/pkg/config"
+	"github.com/sthadka/jai/pkg/core"
 )
 
 func TestResolveTemplate(t *testing.T) {
@@ -48,16 +49,22 @@ func TestResolveTemplate(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Save and restore global config.
-			origCfg := g.cfg
-			defer func() { g.cfg = origCfg }()
+			if g.core == nil {
+				g.core = &core.Engine{}
+			}
+			origCfg := g.core.Config
+			defer func() { g.core.Config = origCfg }()
 
 			if tt.templates != nil {
-				g.cfg = &config.Config{Templates: tt.templates}
+				g.core.Config = &config.Config{Templates: tt.templates}
 			} else {
-				g.cfg = &config.Config{}
+				if g.core == nil {
+					g.core = &core.Engine{}
+				}
+				g.core.Config = &config.Config{}
 			}
 
-			got, err := resolveTemplate(tt.lookup)
+			got, err := g.resolveTemplate(tt.lookup)
 			if tt.wantErr != "" {
 				if err == nil {
 					t.Fatalf("expected error %q, got nil", tt.wantErr)
@@ -167,12 +174,15 @@ func TestTemplateAndBodyMutualExclusion(t *testing.T) {
 }
 
 func TestResolveTemplateNilConfig(t *testing.T) {
-	origCfg := g.cfg
-	defer func() { g.cfg = origCfg }()
+	if g.core == nil {
+		g.core = &core.Engine{}
+	}
+	origCfg := g.core.Config
+	defer func() { g.core.Config = origCfg }()
 
-	g.cfg = nil
+	g.core.Config = nil
 
-	_, err := resolveTemplate("anything")
+	_, err := g.resolveTemplate("anything")
 	if err == nil {
 		t.Fatal("expected error with nil config")
 	}

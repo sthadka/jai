@@ -35,7 +35,7 @@ front-matter view. Pass --fields all to get every column instead, or
 			return getRaw(cmd, key)
 		}
 
-		results, err := g.query.Execute("SELECT * FROM issues WHERE key = ?", key)
+		results, err := g.core.Query.Execute("SELECT * FROM issues WHERE key = ?", key)
 		if err != nil {
 			if jsonMode {
 				fmt.Println(string(output.Err("QueryError", err.Error())))
@@ -45,7 +45,7 @@ front-matter view. Pass --fields all to get every column instead, or
 		}
 
 		if len(results.Rows) == 0 {
-			issue, apiErr := g.jira.GetIssue(cmd.Context(), key)
+			issue, apiErr := g.core.Client.GetIssue(cmd.Context(), key)
 			if apiErr != nil {
 				// Don't mask an auth failure as "not found" — the issue may well
 				// exist, we just can't see it unauthenticated.
@@ -101,7 +101,7 @@ front-matter view. Pass --fields all to get every column instead, or
 		data = curateGetFields(data, g.fields)
 		var dbComments []map[string]interface{}
 		if getShowComments {
-			if cs, err := g.db.GetComments(key); err == nil {
+			if cs, err := g.core.Store.GetComments(key); err == nil {
 				dbComments = dbCommentsToMaps(cs)
 			}
 		}
@@ -174,7 +174,7 @@ func renderGet(data map[string]interface{}, comments []map[string]interface{}, j
 // field_map (populated during sync from Jira's field discovery). Returns nil
 // on error, in which case fieldLabel falls back to a generic title-case.
 func jiraFieldNames() map[string]string {
-	mappings, err := g.db.AllFieldMappings()
+	mappings, err := g.core.Store.AllFieldMappings()
 	if err != nil {
 		return nil
 	}
@@ -223,14 +223,14 @@ func issueDataToRow(data map[string]interface{}, jiraNames map[string]string) ([
 }
 
 func getRaw(cmd *cobra.Command, key string) error {
-	results, err := g.query.Execute("SELECT raw_json FROM issues WHERE key = ?", key)
+	results, err := g.core.Query.Execute("SELECT raw_json FROM issues WHERE key = ?", key)
 	if err == nil && len(results.Rows) > 0 {
 		if raw := output.ValueStr(results.Rows[0][0]); raw != "" {
 			printRaw([]byte(raw))
 			return nil
 		}
 	}
-	issue, err := g.jira.GetIssue(cmd.Context(), key)
+	issue, err := g.core.Client.GetIssue(cmd.Context(), key)
 	if err != nil {
 		if g.jsonOut {
 			fmt.Println(string(output.Err("NotFoundError", err.Error())))

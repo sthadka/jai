@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/sthadka/jai/pkg/config"
+	"github.com/sthadka/jai/pkg/core"
 	"github.com/sthadka/jai/pkg/query"
 	db "github.com/sthadka/jai/pkg/store"
 )
@@ -32,14 +33,17 @@ func setupTestGlobals(t *testing.T) {
 		t.Fatalf("upsert issue: %v", err)
 	}
 
-	g.db = database
-	g.query = query.New(database, &config.Config{})
+	g.core = &core.Engine{Store: database}
+
+	g.core.Query = query.New(database, &config.Config{})
 	g.jsonOut = false
 	g.fields = ""
 	g.format = ""
 	t.Cleanup(func() {
-		g.db = nil
-		g.query = nil
+		g.core = nil
+		if g.core != nil {
+			g.core.Query = nil
+		}
 		g.jsonOut = false
 		g.fields = ""
 		g.format = ""
@@ -261,7 +265,7 @@ func TestGetFieldsAll(t *testing.T) {
 func TestGetFormatMarkdownUsesReadableLabels(t *testing.T) {
 	setupTestGlobals(t)
 
-	database := g.db
+	database := g.core.Store
 	if err := database.UpsertFieldMapping(&db.FieldMapping{
 		JiraID: "parent", JiraName: "Parent", Name: "parent_key", Type: "issuelink",
 	}); err != nil {

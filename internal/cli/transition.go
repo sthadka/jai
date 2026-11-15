@@ -72,7 +72,7 @@ Bulk operations with a SQL query:
 			if len(args) >= 1 {
 				targetName = args[0]
 			}
-			results, err := g.query.Execute(transitionQuery)
+			results, err := g.core.Query.Execute(transitionQuery)
 			if err != nil {
 				if g.jsonOut {
 					fmt.Println(string(output.Err("QueryError", err.Error())))
@@ -127,7 +127,7 @@ Bulk operations with a SQL query:
 		// Single key logic (existing)
 		issueKey := keys[0]
 
-		transitions, err := g.jira.GetTransitions(cmd.Context(), issueKey)
+		transitions, err := g.core.Client.GetTransitions(cmd.Context(), issueKey)
 		if err != nil {
 			if g.jsonOut {
 				fmt.Println(string(output.Err("JiraError", fmt.Sprintf("fetching transitions: %v", err))))
@@ -185,16 +185,16 @@ Bulk operations with a SQL query:
 
 		status := "synced"
 		if transitionQueue {
-			if err := g.db.EnsurePendingChangesTable(); err != nil {
+			if err := g.core.Store.EnsurePendingChangesTable(); err != nil {
 				return err
 			}
 			payload, _ := json.Marshal(map[string]string{"transition_id": match.ID})
-			if err := g.db.InsertPendingChange(issueKey, "transition", string(payload)); err != nil {
+			if err := g.core.Store.InsertPendingChange(issueKey, "transition", string(payload)); err != nil {
 				return err
 			}
 			status = "queued"
 		} else {
-			if err := g.jira.ExecuteTransition(cmd.Context(), issueKey, match.ID); err != nil {
+			if err := g.core.Client.ExecuteTransition(cmd.Context(), issueKey, match.ID); err != nil {
 				msg := fmt.Sprintf("transition failed: %v", err)
 				if g.jsonOut {
 					fmt.Println(string(output.Err("JiraError", msg)))
@@ -204,11 +204,11 @@ Bulk operations with a SQL query:
 			}
 
 			// Refresh the local DB so status is immediately queryable.
-			if apiIssue, fetchErr := g.jira.GetIssue(cmd.Context(), issueKey); fetchErr == nil {
+			if apiIssue, fetchErr := g.core.Client.GetIssue(cmd.Context(), issueKey); fetchErr == nil {
 				rawJSON, _ := json.Marshal(apiIssue)
-				if fieldMap, fmErr := g.db.FieldMapByJiraID(); fmErr == nil {
+				if fieldMap, fmErr := g.core.Store.FieldMapByJiraID(); fmErr == nil {
 					if dbIssue, extra, denormErr := synce.Denormalize(rawJSON, fieldMap); denormErr == nil {
-						_ = g.db.UpsertIssue(dbIssue, extra)
+						_ = g.core.Store.UpsertIssue(dbIssue, extra)
 					}
 				}
 			}
@@ -245,7 +245,7 @@ func transitionBulk(cmd *cobra.Command, keys []string, targetName string) error 
 	var results []result
 
 	for _, issueKey := range keys {
-		transitions, err := g.jira.GetTransitions(cmd.Context(), issueKey)
+		transitions, err := g.core.Client.GetTransitions(cmd.Context(), issueKey)
 		if err != nil {
 			failed++
 			res := result{
@@ -291,11 +291,11 @@ func transitionBulk(cmd *cobra.Command, keys []string, targetName string) error 
 		}
 
 		if transitionQueue {
-			if err := g.db.EnsurePendingChangesTable(); err != nil {
+			if err := g.core.Store.EnsurePendingChangesTable(); err != nil {
 				return err
 			}
 			payload, _ := json.Marshal(map[string]string{"transition_id": match.ID})
-			if err := g.db.InsertPendingChange(issueKey, "transition", string(payload)); err != nil {
+			if err := g.core.Store.InsertPendingChange(issueKey, "transition", string(payload)); err != nil {
 				failed++
 				res := result{
 					Key:    issueKey,
@@ -309,7 +309,7 @@ func transitionBulk(cmd *cobra.Command, keys []string, targetName string) error 
 				continue
 			}
 		} else {
-			if err := g.jira.ExecuteTransition(cmd.Context(), issueKey, match.ID); err != nil {
+			if err := g.core.Client.ExecuteTransition(cmd.Context(), issueKey, match.ID); err != nil {
 				failed++
 				res := result{
 					Key:    issueKey,
@@ -324,11 +324,11 @@ func transitionBulk(cmd *cobra.Command, keys []string, targetName string) error 
 			}
 
 			// Refresh the local DB so status is immediately queryable.
-			if apiIssue, fetchErr := g.jira.GetIssue(cmd.Context(), issueKey); fetchErr == nil {
+			if apiIssue, fetchErr := g.core.Client.GetIssue(cmd.Context(), issueKey); fetchErr == nil {
 				rawJSON, _ := json.Marshal(apiIssue)
-				if fieldMap, fmErr := g.db.FieldMapByJiraID(); fmErr == nil {
+				if fieldMap, fmErr := g.core.Store.FieldMapByJiraID(); fmErr == nil {
 					if dbIssue, extra, denormErr := synce.Denormalize(rawJSON, fieldMap); denormErr == nil {
-						_ = g.db.UpsertIssue(dbIssue, extra)
+						_ = g.core.Store.UpsertIssue(dbIssue, extra)
 					}
 				}
 			}

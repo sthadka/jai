@@ -46,9 +46,9 @@ var statusCmd = &cobra.Command{
 		ctx := cmd.Context()
 
 		// Auth check.
-		me, authErr := g.jira.MySelf(ctx)
+		me, authErr := g.core.Client.MySelf(ctx)
 
-		metas, err := g.db.AllSyncMeta()
+		metas, err := g.core.Store.AllSyncMeta()
 		if err != nil {
 			if g.jsonOut {
 				fmt.Println(string(output.Err("QueryError", err.Error())))
@@ -57,15 +57,15 @@ var statusCmd = &cobra.Command{
 			return err
 		}
 
-		totalIssues, _ := g.db.TotalIssueCount()
-		countByProject, _ := g.db.IssueCountByProject()
+		totalIssues, _ := g.core.Store.TotalIssueCount()
+		countByProject, _ := g.core.Store.IssueCountByProject()
 
-		pendingCount, err := g.db.CountPendingChanges()
+		pendingCount, err := g.core.Store.CountPendingChanges()
 		if err != nil {
 			pendingCount = 0
 		}
 
-		dbInfo, _ := os.Stat(g.cfg.DB.Path)
+		dbInfo, _ := os.Stat(g.core.Config.DB.Path)
 
 		if g.jsonOut {
 			auth := map[string]any{"ok": authErr == nil}

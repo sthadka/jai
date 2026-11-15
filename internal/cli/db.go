@@ -22,7 +22,10 @@ var dbResetCmd = &cobra.Command{
 	Short: "Delete and recreate the database",
 	Long:  "Removes the SQLite database and all WAL files, then creates a fresh empty database.",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		dbPath := g.cfg.DB.Path
+		var dbPath string
+		if g.core != nil && g.core.Config != nil {
+			dbPath = g.core.Config.DB.Path
+		}
 
 		if !dbResetForce {
 			fmt.Println("This will delete all local data and require a full re-sync.")
@@ -39,6 +42,9 @@ var dbResetCmd = &cobra.Command{
 			fmt.Println("Warning: WAL file is non-empty — another jai process may be using this database.")
 		}
 
+		if g.core != nil && g.core.Store != nil {
+			g.core.Store.Close()
+		}
 		for _, suffix := range []string{"", "-shm", "-wal"} {
 			os.Remove(dbPath + suffix) // ignore errors (file may not exist)
 		}
@@ -58,7 +64,9 @@ var dbPathCmd = &cobra.Command{
 	Use:   "path",
 	Short: "Print the database file path",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Println(g.cfg.DB.Path)
+		if g.core != nil && g.core.Config != nil {
+			fmt.Println(g.core.Config.DB.Path)
+		}
 		return nil
 	},
 }
@@ -67,7 +75,10 @@ var dbInfoCmd = &cobra.Command{
 	Use:   "info",
 	Short: "Show database statistics",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		dbPath := g.cfg.DB.Path
+		var dbPath string
+		if g.core != nil && g.core.Config != nil {
+			dbPath = g.core.Config.DB.Path
+		}
 
 		info, err := os.Stat(dbPath)
 		if err != nil {
@@ -75,16 +86,16 @@ var dbInfoCmd = &cobra.Command{
 		}
 
 		var issueCount int
-		g.db.QueryRow("SELECT count(*) FROM issues").Scan(&issueCount)
+		g.core.Store.QueryRow("SELECT count(*) FROM issues").Scan(&issueCount)
 
 		var changelogCount int
-		g.db.QueryRow("SELECT count(*) FROM changelog").Scan(&changelogCount)
+		g.core.Store.QueryRow("SELECT count(*) FROM changelog").Scan(&changelogCount)
 
 		var version int
-		g.db.QueryRow("SELECT COALESCE(MAX(version), 0) FROM schema_version").Scan(&version)
+		g.core.Store.QueryRow("SELECT COALESCE(MAX(version), 0) FROM schema_version").Scan(&version)
 
 		var lastSync string
-		g.db.QueryRow("SELECT COALESCE(MAX(last_sync_time), '') FROM sync_metadata").Scan(&lastSync)
+		g.core.Store.QueryRow("SELECT COALESCE(MAX(last_sync_time), '') FROM sync_metadata").Scan(&lastSync)
 
 		if g.jsonOut {
 			fmt.Println(string(output.OK(map[string]any{

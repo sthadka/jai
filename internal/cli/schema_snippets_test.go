@@ -6,10 +6,14 @@ import (
 	"testing"
 
 	"github.com/sthadka/jai/pkg/config"
+	"github.com/sthadka/jai/pkg/core"
 )
 
 func TestSchemaSnippetsCmd_Empty(t *testing.T) {
-	g.cfg = &config.Config{}
+	if g.core == nil {
+		g.core = &core.Engine{}
+	}
+	g.core.Config = &config.Config{}
 
 	var buf bytes.Buffer
 	schemaSnippetsCmd.SetOut(&buf)
@@ -25,7 +29,7 @@ func TestSchemaSnippetsCmd_Empty(t *testing.T) {
 }
 
 func TestSchemaSnippetsCmd_WithSnippets(t *testing.T) {
-	g.cfg = &config.Config{
+	g.core.Config = &config.Config{
 		Me: "user@example.com",
 		Snippets: map[string]string{
 			"active":  "status NOT IN ('Done', 'Closed')",
@@ -39,7 +43,7 @@ func TestSchemaSnippetsCmd_WithSnippets(t *testing.T) {
 }
 
 func TestSchemaSnippetsCmd_JSONStructure(t *testing.T) {
-	g.cfg = &config.Config{
+	g.core.Config = &config.Config{
 		Me: "user@example.com",
 		Snippets: map[string]string{
 			"active": "status != 'Done'",

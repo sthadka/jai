@@ -34,32 +34,32 @@ Examples:
 
 		// Override config with CLI flags
 		if readOnly {
-			g.cfg.MCP.ReadOnly = true
+			g.core.Config.MCP.ReadOnly = true
 		}
 		if toolsets != "" {
-			g.cfg.MCP.Toolsets = strings.Split(toolsets, ",")
+			g.core.Config.MCP.Toolsets = strings.Split(toolsets, ",")
 		}
 
 		// Discover fields first (non-fatal for serve - will retry in background sync)
 		var overrides map[string]string
-		if g.cfg.Fields.Overrides != nil {
-			overrides = g.cfg.Fields.Overrides
+		if g.core.Config.Fields.Overrides != nil {
+			overrides = g.core.Config.Fields.Overrides
 		}
-		if err := g.sync.DiscoverFields(cmd.Context(), overrides); err != nil {
+		if err := g.core.Sync.DiscoverFields(cmd.Context(), overrides); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: field discovery failed (will retry in background): %v\n", err)
 		}
 
 		// Start background sync worker
-		interval, err := time.ParseDuration(g.cfg.Sync.Interval)
+		interval, err := time.ParseDuration(g.core.Config.Sync.Interval)
 		if err != nil {
 			interval = 15 * time.Minute
 		}
-		bgWorker := synce.NewBackgroundWorker(g.sync, interval)
+		bgWorker := synce.NewBackgroundWorker(g.core.Sync, interval)
 		bgWorker.Start(cmd.Context())
 		defer bgWorker.Stop()
 
 		// Create MCP server
-		srv := mcpkg.New(g.cfg, g.db, g.jira, g.query, g.sync)
+		srv := mcpkg.New(g.core.Config, g.core.Store, g.core.Client, g.core.Query, g.core.Sync)
 
 		ctx := cmd.Context()
 		switch transport {

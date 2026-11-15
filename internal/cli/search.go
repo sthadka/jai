@@ -25,13 +25,13 @@ var searchCmd = &cobra.Command{
 			ORDER BY issues_fts.rank
 			LIMIT %d`, searchLimit)
 
-		results, err := g.query.Execute(sql, text)
+		results, err := g.core.Query.Execute(sql, text)
 		if err != nil && strings.Contains(err.Error(), "fts5: missing row") {
 			fmt.Fprintln(cmd.ErrOrStderr(), "FTS index out of sync, rebuilding...")
-			if rbErr := g.db.RebuildFTS(); rbErr != nil {
+			if rbErr := g.core.Store.RebuildFTS(); rbErr != nil {
 				return fmt.Errorf("rebuilding FTS index: %w", rbErr)
 			}
-			results, err = g.query.Execute(sql, text)
+			results, err = g.core.Query.Execute(sql, text)
 		}
 		if err != nil {
 			if g.jsonOut {

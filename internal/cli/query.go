@@ -128,7 +128,7 @@ func leadingTokenIsSQL(arg string) bool {
 }
 
 func runSQLQuery(sql string) error {
-	results, err := g.query.Execute(sql)
+	results, err := g.core.Query.Execute(sql)
 	if err != nil {
 		if g.jsonOut {
 			fmt.Println(string(output.Err("QueryError", err.Error())))
@@ -188,8 +188,8 @@ func runLocalJQLQuery(jqlStr string) error {
 		IDResolver: jqlIDResolver(fieldMap),
 		Now:        time.Now(),
 	}
-	if g.cfg != nil {
-		opts.CurrentUser = g.cfg.Jira.Email
+	if g.core.Config != nil {
+		opts.CurrentUser = g.core.Config.Jira.Email
 	}
 	// The shared default projection names columns (e.g. team) that may not exist
 	// in this snapshot's issues table; restrict it to columns actually present so
@@ -243,7 +243,7 @@ func localJQLSelectColumns() ([]string, error) {
 
 // issuesColumnSet reads the physical column names of the issues table.
 func issuesColumnSet() (map[string]bool, error) {
-	rows, err := g.db.Query("PRAGMA table_info(issues)")
+	rows, err := g.core.Store.Query("PRAGMA table_info(issues)")
 	if err != nil {
 		return nil, err
 	}
@@ -270,7 +270,7 @@ func issuesColumnSet() (map[string]bool, error) {
 // mapping both the canonical Name and the Jira display name (JiraName),
 // case-insensitively, to the physical column (design §16.3).
 func buildJQLFieldMap() (jql.FieldMap, error) {
-	mappings, err := g.db.AllFieldMappings()
+	mappings, err := g.core.Store.AllFieldMappings()
 	if err != nil {
 		return nil, err
 	}
@@ -325,7 +325,7 @@ func jqlIDResolver(fm jql.FieldMap) jql.IDResolver {
 		col := def.Column
 		q := "SELECT DISTINCT " + col + " FROM issues WHERE raw_json LIKE '%'||?||'%' AND " +
 			col + " IS NOT NULL AND " + col + " <> '' LIMIT 2"
-		rows, err := g.db.Query(q, id)
+		rows, err := g.core.Store.Query(q, id)
 		if err != nil {
 			return "", false, err
 		}
@@ -395,7 +395,7 @@ func runJQLQuery(jql string) error {
 	}
 
 	var rows [][]interface{}
-	for page, err := range g.jira.SearchAll(context.Background(), jql, apiFields) {
+	for page, err := range g.core.Client.SearchAll(context.Background(), jql, apiFields) {
 		if err != nil {
 			if g.jsonOut {
 				fmt.Println(string(output.Err("JQLError", err.Error())))
@@ -439,7 +439,7 @@ func runJQLQuery(jql string) error {
 
 func runJQLQueryRaw(jql string) error {
 	var issues []*jira.Issue
-	for page, err := range g.jira.SearchAll(context.Background(), jql, []string{"*all"}) {
+	for page, err := range g.core.Client.SearchAll(context.Background(), jql, []string{"*all"}) {
 		if err != nil {
 			if g.jsonOut {
 				fmt.Println(string(output.Err("JQLError", err.Error())))

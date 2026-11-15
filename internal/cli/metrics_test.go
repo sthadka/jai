@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/sthadka/jai/pkg/config"
+	"github.com/sthadka/jai/pkg/core"
 	"github.com/sthadka/jai/pkg/metrics"
 	"github.com/sthadka/jai/pkg/query"
 	db "github.com/sthadka/jai/pkg/store"
@@ -36,9 +37,10 @@ func setupMetricsGlobals(t *testing.T, issues []*db.Issue, mc *config.MetricsCon
 	cfg := &config.Config{Metrics: mc}
 	cfg.DB.Path = dbPath
 
-	g.db = database
-	g.cfg = cfg
-	g.query = query.New(database, cfg)
+	g.core = &core.Engine{Store: database}
+
+	g.core.Config = cfg
+	g.core.Query = query.New(database, cfg)
 	g.jsonOut = false
 	g.fields = ""
 	g.format = ""
@@ -47,9 +49,7 @@ func setupMetricsGlobals(t *testing.T, issues []*db.Issue, mc *config.MetricsCon
 	metricTimeout = 10 * time.Second
 
 	t.Cleanup(func() {
-		g.db = nil
-		g.cfg = nil
-		g.query = nil
+		g.core = nil
 		g.jsonOut = false
 		g.format = ""
 		resetMetricFlags()

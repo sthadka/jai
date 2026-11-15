@@ -37,7 +37,7 @@ Examples:
 		sourceKey := strings.ToUpper(args[0])
 
 		// Read source issue from local DB.
-		issue, err := g.db.GetIssue(sourceKey)
+		issue, err := g.core.Store.GetIssue(sourceKey)
 		if err != nil {
 			if g.jsonOut {
 				fmt.Println(string(output.Err("QueryError", err.Error())))
@@ -65,7 +65,7 @@ Examples:
 			return fmt.Errorf("%s", msg)
 		}
 
-		fieldMap, err := g.db.FieldMapByJiraID()
+		fieldMap, err := g.core.Store.FieldMapByJiraID()
 		if err != nil {
 			return err
 		}
@@ -117,7 +117,7 @@ Examples:
 				}
 				name, value := parts[0], parts[1]
 				resolveAccountID := func(v string) (string, error) {
-					return g.jira.ResolveAccountID(cmd.Context(), v)
+					return g.core.Client.ResolveAccountID(cmd.Context(), v)
 				}
 				if err := applyFieldOverride(fields, fieldMap, name, value, resolveAccountID); err != nil {
 					if g.jsonOut {
@@ -130,7 +130,7 @@ Examples:
 		}
 
 		// Create the issue via Jira API.
-		resp, err := g.jira.CreateIssue(cmd.Context(), fields)
+		resp, err := g.core.Client.CreateIssue(cmd.Context(), fields)
 		if err != nil {
 			if g.jsonOut {
 				fmt.Println(string(output.Err("JiraError", err.Error())))
@@ -140,14 +140,14 @@ Examples:
 		}
 
 		// Fetch the full issue and insert into local DB.
-		apiIssue, fetchErr := g.jira.GetIssue(cmd.Context(), resp.Key)
+		apiIssue, fetchErr := g.core.Client.GetIssue(cmd.Context(), resp.Key)
 		if fetchErr == nil {
 			rawJSON, _ := json.Marshal(apiIssue)
-			fieldMap, fmErr := g.db.FieldMapByJiraID()
+			fieldMap, fmErr := g.core.Store.FieldMapByJiraID()
 			if fmErr == nil {
 				dbIssue, extra, denormErr := synce.Denormalize(rawJSON, fieldMap)
 				if denormErr == nil {
-					_ = g.db.UpsertIssue(dbIssue, extra)
+					_ = g.core.Store.UpsertIssue(dbIssue, extra)
 				}
 			}
 		}

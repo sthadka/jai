@@ -25,11 +25,11 @@ Runs as a dry run by default — pass --yes to apply.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Orphan sources: sync_metadata rows keyed by a source name that is no
 		// longer configured.
-		configuredSources := make(map[string]bool, len(g.cfg.SyncSources))
-		for _, s := range g.cfg.SyncSources {
+		configuredSources := make(map[string]bool, len(g.core.Config.SyncSources))
+		for _, s := range g.core.Config.SyncSources {
 			configuredSources[s.Name] = true
 		}
-		metas, err := g.db.AllSyncMeta()
+		metas, err := g.core.Store.AllSyncMeta()
 		if err != nil {
 			return fmt.Errorf("reading sync metadata: %w", err)
 		}
@@ -45,11 +45,11 @@ Runs as a dry run by default — pass --yes to apply.`,
 		// source. When coverage is ambiguous (a JQL source with no parseable
 		// project), skip issue pruning entirely rather than risk deleting live
 		// data — orphan sync_metadata rows are still safe to remove by name.
-		counts, err := g.db.IssueCountByProject()
+		counts, err := g.core.Store.IssueCountByProject()
 		if err != nil {
 			return fmt.Errorf("counting issues: %w", err)
 		}
-		keys, ambiguous := query.ConfiguredProjectKeys(g.cfg)
+		keys, ambiguous := query.ConfiguredProjectKeys(g.core.Config)
 		configuredProjects := make(map[string]bool, len(keys))
 		for _, k := range keys {
 			configuredProjects[k] = true
@@ -122,11 +122,11 @@ Runs as a dry run by default — pass --yes to apply.`,
 			return fmt.Errorf("listing issues to prune: %w", err)
 		}
 
-		removed, err := g.db.PruneProjects(sortedProjects)
+		removed, err := g.core.Store.PruneProjects(sortedProjects)
 		if err != nil {
 			return fmt.Errorf("pruning issues: %w", err)
 		}
-		deletedMeta, err := g.db.DeleteSyncMetadata(orphanSources)
+		deletedMeta, err := g.core.Store.DeleteSyncMetadata(orphanSources)
 		if err != nil {
 			return fmt.Errorf("deleting sync metadata: %w", err)
 		}
@@ -158,7 +158,7 @@ func issueKeysForProjects(projects []string) ([]string, error) {
 		placeholders[i] = "?"
 		args[i] = p
 	}
-	rows, err := g.db.Query(
+	rows, err := g.core.Store.Query(
 		"SELECT key FROM issues WHERE project IN ("+strings.Join(placeholders, ",")+")", args...)
 	if err != nil {
 		return nil, err

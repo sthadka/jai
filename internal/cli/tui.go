@@ -12,7 +12,7 @@ var tuiCmd = &cobra.Command{
 	Use:   "tui",
 	Short: "Launch the interactive full-screen TUI",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		app := tui.New(g.cfg, g.query, g.sync, g.db, g.jira)
+		app := tui.New(g.core.Config, g.core.Query, g.core.Sync, g.core.Store, g.core.Client)
 		p := tea.NewProgram(app, tea.WithAltScreen())
 		if _, err := p.Run(); err != nil {
 			return fmt.Errorf("TUI error: %w", err)

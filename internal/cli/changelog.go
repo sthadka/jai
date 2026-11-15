@@ -33,7 +33,7 @@ var changelogCmd = &cobra.Command{
 
 		query += " ORDER BY changed_at ASC"
 
-		rows, err := g.db.Query(query, params...)
+		rows, err := g.core.Store.Query(query, params...)
 		if err != nil {
 			if g.jsonOut {
 				fmt.Println(string(output.Err("QueryError", err.Error())))
@@ -132,12 +132,12 @@ no-op when flow metrics are not configured.`,
 		// as checked, so the metric refresh advances exactly those facts. This
 		// mirrors SyncChangelogs' own candidate scoping (a single named source is
 		// limited to its projects).
-		touched, err := g.db.GetChangelogSyncCandidates(changelogSyncProjectFilter())
+		touched, err := g.core.Store.GetChangelogSyncCandidates(changelogSyncProjectFilter())
 		if err != nil {
 			return fmt.Errorf("finding changelog candidates: %w", err)
 		}
 
-		ch, err := g.sync.SyncChangelogs(ctx, changelogSyncSource, changelogSyncForce)
+		ch, err := g.core.Sync.SyncChangelogs(ctx, changelogSyncSource, changelogSyncForce)
 		if err != nil {
 			return fmt.Errorf("changelog sync: %w", err)
 		}
@@ -157,10 +157,10 @@ no-op when flow metrics are not configured.`,
 // source restricts the candidate (and refresh) set to that source's projects;
 // no filter — or a source with no project keys (JQL) — covers all candidates.
 func changelogSyncProjectFilter() []string {
-	if changelogSyncSource == "" || g.cfg == nil {
+	if changelogSyncSource == "" || g.core.Config == nil {
 		return nil
 	}
-	for _, s := range g.cfg.SyncSources {
+	for _, s := range g.core.Config.SyncSources {
 		if s.Name == changelogSyncSource {
 			return s.Projects
 		}
@@ -181,11 +181,11 @@ func changelogSyncProjectFilter() []string {
 // (invariant #7). A nil metrics config, or an empty key set, is a no-op so the
 // commands work unchanged when flow metrics are not configured.
 func refreshMetricFacts(keys []string) error {
-	if g.cfg == nil || g.cfg.Metrics == nil || len(keys) == 0 {
+	if g.core.Config == nil || g.core.Config.Metrics == nil || len(keys) == 0 {
 		return nil
 	}
-	pol := metrics.CompilePolicy(g.cfg.Metrics)
-	store := metrics.NewStore(g.db, g.cfg.DB.Path)
+	pol := metrics.CompilePolicy(g.core.Config.Metrics)
+	store := metrics.NewStore(g.core.Store, g.core.Config.DB.Path)
 	builder := metrics.NewBuilder(store, pol)
 
 	asOf := time.Now().UTC()
