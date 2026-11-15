@@ -8,10 +8,10 @@ import (
 	"testing"
 
 	"github.com/sthadka/jai/pkg/config"
-	db "github.com/sthadka/jai/pkg/store"
 	"github.com/sthadka/jai/pkg/jira"
 	"github.com/sthadka/jai/pkg/query"
-	synce "github.com/sthadka/jai/internal/sync"
+	db "github.com/sthadka/jai/pkg/store"
+	synce "github.com/sthadka/jai/pkg/sync"
 )
 
 // testServer creates a minimal Server instance for testing using a temp DB.

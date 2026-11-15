@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	db "github.com/sthadka/jai/pkg/store"
 	"github.com/sthadka/jai/pkg/output"
+	db "github.com/sthadka/jai/pkg/store"
 )
 
 // syncWarnings returns human-readable health warnings for a source's sync

@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/sthadka/jai/pkg/clock"
 )
 
 // ErrFullRebuildRequired is returned by Incremental when no compatible active
@@ -23,6 +25,7 @@ var ErrFullRebuildRequired = errors.New("metrics: full rebuild required (no comp
 type Builder struct {
 	store *Store
 	pol   *Policy
+	clk   clock.Clock
 
 	// afterRead, if set, runs inside BuildAll after the source snapshot is read but
 	// before the staging transaction opens. It is a test-only seam for exercising the
@@ -31,9 +34,20 @@ type Builder struct {
 	afterRead func()
 }
 
-// NewBuilder binds a Builder to a store and a compiled policy.
+// NewBuilder binds a Builder to a store and a compiled policy, using the default
+// system clock for the generation build timestamp.
 func NewBuilder(store *Store, pol *Policy) *Builder {
-	return &Builder{store: store, pol: pol}
+	return &Builder{store: store, pol: pol, clk: clock.System{}}
+}
+
+// WithClock overrides the clock used to stamp built generations. Returns the
+// builder for chaining; a test seam for deterministic build timestamps.
+func (b *Builder) WithClock(c clock.Clock) *Builder {
+	if c == nil {
+		c = clock.System{}
+	}
+	b.clk = c
+	return b
 }
 
 // BuildResult summarizes a published generation.
@@ -85,7 +99,7 @@ func (b *Builder) BuildAll(asOf time.Time, projects []string) (*BuildResult, err
 	}
 	defer tx.Rollback()
 
-	builtAt := time.Now().UTC()
+	builtAt := b.clk.Now().UTC()
 	res, err := tx.Exec(
 		`INSERT INTO metrics_generation (fingerprint, scope, built_at, source_watermark, issue_count)
 		 VALUES (?, ?, ?, ?, 0)`,

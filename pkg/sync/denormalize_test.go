@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"testing"
 
-	db "github.com/sthadka/jai/pkg/store"
 	"github.com/sthadka/jai/pkg/jira"
+	db "github.com/sthadka/jai/pkg/store"
 )
 
 func TestDenormalize_Basic(t *testing.T) {

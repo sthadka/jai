@@ -8,7 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 	mcpkg "github.com/sthadka/jai/internal/mcp"
-	synce "github.com/sthadka/jai/internal/sync"
+	synce "github.com/sthadka/jai/pkg/sync"
 )
 
 var serveCmd = &cobra.Command{

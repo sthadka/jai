@@ -6,9 +6,9 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	db "github.com/sthadka/jai/pkg/store"
 	"github.com/sthadka/jai/pkg/output"
-	synce "github.com/sthadka/jai/internal/sync"
+	db "github.com/sthadka/jai/pkg/store"
+	synce "github.com/sthadka/jai/pkg/sync"
 )
 
 var cloneFlags struct {

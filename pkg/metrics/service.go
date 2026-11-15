@@ -4,6 +4,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sthadka/jai/pkg/clock"
 	"github.com/sthadka/jai/pkg/config"
 	db "github.com/sthadka/jai/pkg/store"
 )
@@ -16,12 +17,24 @@ type Service struct {
 	store *Store
 	pol   *Policy
 	cfg   *config.Config
+	clk   clock.Clock
 }
 
 // NewService builds the shared service. store is used by fact-based metrics (delivery);
 // issues-only metrics read db directly. cfg is optional (used for freshness/coverage).
+// The default as-of (when a query omits one) comes from the system clock.
 func NewService(database *db.DB, store *Store, pol *Policy, cfg *config.Config) *Service {
-	return &Service{db: database, store: store, pol: pol, cfg: cfg}
+	return &Service{db: database, store: store, pol: pol, cfg: cfg, clk: clock.System{}}
+}
+
+// WithClock overrides the clock used to resolve a query's default as-of.
+// Returns the service for chaining; a test seam for deterministic now.
+func (s *Service) WithClock(c clock.Clock) *Service {
+	if c == nil {
+		c = clock.System{}
+	}
+	s.clk = c
+	return s
 }
 
 // Policy exposes the compiled policy to consumers that must surface rejections.
@@ -46,7 +59,7 @@ func (s *Service) Compute(q Query) (*Result, error) {
 // are computed against this value, never a sync-frozen now.
 func (s *Service) asOf(q Query) time.Time {
 	if q.AsOf.IsZero() {
-		return time.Now().UTC()
+		return s.clk.Now().UTC()
 	}
 	return q.AsOf.UTC()
 }

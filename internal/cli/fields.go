@@ -5,8 +5,8 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	db "github.com/sthadka/jai/pkg/store"
 	"github.com/sthadka/jai/pkg/output"
+	db "github.com/sthadka/jai/pkg/store"
 )
 
 var (
