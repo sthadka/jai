@@ -562,10 +562,12 @@ func MeasureOptions() []MeasureOption {
 	return out
 }
 
+// DimensionOptions returns the available Explore group-by dimensions with labels.
 func DimensionOptions() []LabelOption {
 	return labelOptions(sortedKeys(dimensionKeys()), dimensionLabels)
 }
 
+// CohortOptions returns the available Explore cohort choices with labels.
 func CohortOptions() []LabelOption {
 	return labelOptions(sortedKeys(cohortKeys()), cohortLabels)
 }
