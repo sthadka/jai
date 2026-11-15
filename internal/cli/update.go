@@ -10,7 +10,7 @@ import (
 	"github.com/sthadka/jai/internal/db"
 	"github.com/sthadka/jai/internal/fieldwrap"
 	"github.com/sthadka/jai/pkg/jira"
-	"github.com/sthadka/jai/internal/output"
+	"github.com/sthadka/jai/pkg/output"
 	synce "github.com/sthadka/jai/internal/sync"
 )
 
