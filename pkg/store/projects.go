@@ -1,4 +1,4 @@
-package db
+package store
 
 // UpsertProject stores a project's display name.
 func (db *DB) UpsertProject(key, name string) error {

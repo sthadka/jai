@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/sthadka/jai/pkg/config"
-	"github.com/sthadka/jai/internal/db"
+	db "github.com/sthadka/jai/pkg/store"
 )
 
 // paramVarRe matches parameterized template variables like {{days_ago:14}}.

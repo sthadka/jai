@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/sthadka/jai/pkg/config"
-	"github.com/sthadka/jai/internal/db"
+	db "github.com/sthadka/jai/pkg/store"
 )
 
 func mustTime(t *testing.T, s string) time.Time {
