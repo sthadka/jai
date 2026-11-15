@@ -29,7 +29,7 @@ type mockJira struct {
 func (mockJira) MySelf(ctx context.Context) (*jira.MySelf, error) {
 	return &jira.MySelf{DisplayName: "Embedder", TimeZone: "UTC"}, nil
 }
-func (mockJira) Fields(ctx context.Context) ([]*jira.Field, error) { return nil, nil }
+func (mockJira) Fields(ctx context.Context) ([]*jira.Field, error)           { return nil, nil }
 func (mockJira) SearchCount(ctx context.Context, jqlStr string) (int, error) { return 0, nil }
 func (mockJira) SearchAll(ctx context.Context, jqlStr string, fields []string) func(yield func([]*jira.Issue, error) bool) {
 	return func(yield func([]*jira.Issue, error) bool) {} // yield no issues
