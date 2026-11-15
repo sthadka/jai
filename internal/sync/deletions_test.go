@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/sthadka/jai/internal/db"
-	"github.com/sthadka/jai/internal/jira"
+	"github.com/sthadka/jai/pkg/jira"
 )
 
 func TestDetectDeletions(t *testing.T) {

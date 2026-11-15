@@ -11,7 +11,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/sthadka/jai/internal/cli/configloader"
 	"github.com/sthadka/jai/internal/db"
-	"github.com/sthadka/jai/internal/jira"
+	"github.com/sthadka/jai/pkg/jira"
 	"github.com/sthadka/jai/internal/query"
 	synce "github.com/sthadka/jai/internal/sync"
 	"github.com/sthadka/jai/pkg/config"

@@ -16,7 +16,7 @@ import (
 
 	"github.com/sthadka/jai/pkg/config"
 	"github.com/sthadka/jai/internal/db"
-	"github.com/sthadka/jai/internal/jira"
+	"github.com/sthadka/jai/pkg/jira"
 )
 
 func newTestEngine(t *testing.T, srvURL string) *Engine {

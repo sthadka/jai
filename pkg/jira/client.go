@@ -41,17 +41,64 @@ func authError(statusCode int, body []byte) error {
 	return nil
 }
 
-// Client is a Jira Cloud HTTP client.
-type Client struct {
-	baseURL    string
-	email      string
-	token      string
-	httpClient *http.Client
-	limiter    *rate.Limiter
+// RateLimiter throttles outbound Jira requests. *golang.org/x/time/rate.Limiter
+// satisfies it; embedders may supply their own (e.g. a shared cross-client
+// limiter) via NewWithClient's options.
+type RateLimiter interface {
+	Wait(ctx context.Context) error
 }
 
-// New creates a new Jira client.
+// BasicAuthTransport is an http.RoundTripper that injects HTTP Basic
+// Authentication (Jira email + API token) into every outgoing request. It is
+// the default auth mechanism; an embedder can substitute any other
+// RoundTripper (for example an OAuth 2.0 token source) by constructing the
+// client with NewWithClient and a custom *http.Client.
+type BasicAuthTransport struct {
+	Email    string
+	APIToken string
+	// Base is the underlying transport; nil uses http.DefaultTransport.
+	Base http.RoundTripper
+}
+
+// RoundTrip adds the Authorization header to a clone of req and forwards it to
+// the base transport, leaving the caller's request untouched.
+func (t *BasicAuthTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	clone := req.Clone(req.Context())
+	clone.SetBasicAuth(t.Email, t.APIToken)
+	base := t.Base
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	return base.RoundTrip(clone)
+}
+
+// Client is a Jira Cloud HTTP client. Auth is carried by its *http.Client's
+// transport, so the authentication mechanism is pluggable (Basic by default).
+type Client struct {
+	baseURL    string
+	httpClient *http.Client
+	limiter    RateLimiter
+}
+
+// New creates a Jira client authenticated with HTTP Basic auth (email + API
+// token), the default for Jira Cloud. For a different auth mechanism (e.g.
+// OAuth 2.0), use NewWithClient with a custom *http.Client.
 func New(baseURL, email, token string, ratePerSec float64) *Client {
+	httpClient := &http.Client{
+		Timeout: 30 * time.Second,
+		Transport: &BasicAuthTransport{
+			Email:    email,
+			APIToken: token,
+		},
+	}
+	return NewWithClient(baseURL, httpClient, ratePerSec)
+}
+
+// NewWithClient creates a Jira client using a caller-supplied *http.Client,
+// which is the seam for alternative authentication: set the client's Transport
+// to any http.RoundTripper (BasicAuthTransport, an OAuth token source, etc.).
+// A nil httpClient defaults to an unauthenticated 30s-timeout client.
+func NewWithClient(baseURL string, httpClient *http.Client, ratePerSec float64) *Client {
 	if ratePerSec <= 0 {
 		ratePerSec = 10
 	}
@@ -62,14 +109,13 @@ func New(baseURL, email, token string, ratePerSec float64) *Client {
 	if burst < 1 {
 		burst = 1
 	}
+	if httpClient == nil {
+		httpClient = &http.Client{Timeout: 30 * time.Second}
+	}
 	return &Client{
-		baseURL: strings.TrimRight(baseURL, "/"),
-		email:   email,
-		token:   token,
-		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
-		},
-		limiter: rate.NewLimiter(rate.Limit(ratePerSec), burst),
+		baseURL:    strings.TrimRight(baseURL, "/"),
+		httpClient: httpClient,
+		limiter:    rate.NewLimiter(rate.Limit(ratePerSec), burst),
 	}
 }
 
@@ -99,7 +145,6 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body io.Rea
 		if err != nil {
 			return nil, err
 		}
-		req.SetBasicAuth(c.email, c.token)
 		req.Header.Set("Accept", "application/json")
 		req.Header.Set("Content-Type", "application/json")
 

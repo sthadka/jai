@@ -13,7 +13,7 @@ import (
 
 	"github.com/sthadka/jai/pkg/config"
 	"github.com/sthadka/jai/internal/db"
-	"github.com/sthadka/jai/internal/jira"
+	"github.com/sthadka/jai/pkg/jira"
 )
 
 // Progress reports sync progress for a project.
