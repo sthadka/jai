@@ -3,7 +3,6 @@ package sync
 import (
 	"context"
 	"fmt"
-	"os"
 
 	"github.com/sthadka/jai/v5/pkg/config"
 )
@@ -26,7 +25,7 @@ func (e *Engine) SyncSprints(ctx context.Context, src config.SyncSource) {
 
 	for _, projectKey := range src.Projects {
 		if err := e.syncProjectSprints(ctx, projectKey); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: syncing sprints for %s: %v\n", projectKey, err)
+			e.warnf("warning: syncing sprints for %s: %v\n", projectKey, err)
 		}
 	}
 }
@@ -45,28 +44,28 @@ func (e *Engine) syncProjectSprints(ctx context.Context, projectKey string) erro
 			boardProjectKey = board.Location.ProjectKey
 		}
 		if err := e.db.UpsertBoard(board.ID, board.Name, board.Type, boardProjectKey); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: storing board %d: %v\n", board.ID, err)
+			e.warnf("warning: storing board %d: %v\n", board.ID, err)
 			continue
 		}
 
 		// Fetch sprints for this board.
 		sprints, err := e.client.GetSprints(ctx, board.ID)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "warning: fetching sprints for board %d: %v\n", board.ID, err)
+			e.warnf("warning: fetching sprints for board %d: %v\n", board.ID, err)
 			continue
 		}
 
 		for _, sprint := range sprints {
 			// Upsert sprint metadata.
 			if err := e.db.UpsertSprint(sprint.ID, board.ID, sprint.Name, sprint.State, sprint.StartDate, sprint.EndDate, sprint.CompleteDate, sprint.Goal); err != nil {
-				fmt.Fprintf(os.Stderr, "warning: storing sprint %d: %v\n", sprint.ID, err)
+				e.warnf("warning: storing sprint %d: %v\n", sprint.ID, err)
 				continue
 			}
 
 			// For active sprints, fetch issue membership and update issues table.
 			if sprint.State == "active" {
 				if err := e.syncSprintIssues(ctx, sprint.ID, sprint.Name); err != nil {
-					fmt.Fprintf(os.Stderr, "warning: syncing issues for sprint %d: %v\n", sprint.ID, err)
+					e.warnf("warning: syncing issues for sprint %d: %v\n", sprint.ID, err)
 				}
 			}
 		}

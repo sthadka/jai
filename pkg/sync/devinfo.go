@@ -2,8 +2,6 @@ package sync
 
 import (
 	"context"
-	"fmt"
-	"os"
 
 	"github.com/sthadka/jai/v5/pkg/config"
 	"github.com/sthadka/jai/v5/pkg/jira"
@@ -30,7 +28,7 @@ func (e *Engine) SyncDevInfo(ctx context.Context, src config.SyncSource) {
 
 	stmt, err := e.db.Prepare(query)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "warning: dev info sync prepare failed: %v\n", err)
+		e.warnf("warning: dev info sync prepare failed: %v\n", err)
 		return
 	}
 	defer stmt.Close()
@@ -44,7 +42,7 @@ func (e *Engine) SyncDevInfo(ctx context.Context, src config.SyncSource) {
 
 	rows, err := stmt.Query(args...)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "warning: dev info sync query failed: %v\n", err)
+		e.warnf("warning: dev info sync query failed: %v\n", err)
 		return
 	}
 	defer rows.Close()

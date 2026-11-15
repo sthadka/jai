@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 
 	"github.com/sthadka/jai/v5/pkg/config"
 	"github.com/sthadka/jai/v5/pkg/jira"
