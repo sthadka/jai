@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/sthadka/jai/pkg/config"
-	"github.com/sthadka/jai/internal/db"
+	db "github.com/sthadka/jai/pkg/store"
 )
 
 // setupDBTestGlobals opens a temp DB, points g.cfg.DB.Path at it, and
