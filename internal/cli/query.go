@@ -9,10 +9,10 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/sthadka/jai/pkg/jira"
-	"github.com/sthadka/jai/pkg/jql"
-	"github.com/sthadka/jai/pkg/output"
-	db "github.com/sthadka/jai/pkg/store"
+	"github.com/sthadka/jai/v5/pkg/jira"
+	"github.com/sthadka/jai/v5/pkg/jql"
+	"github.com/sthadka/jai/v5/pkg/output"
+	db "github.com/sthadka/jai/v5/pkg/store"
 )
 
 var (

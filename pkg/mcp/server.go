@@ -5,11 +5,11 @@ import (
 	"os"
 
 	"github.com/mark3labs/mcp-go/server"
-	"github.com/sthadka/jai/pkg/config"
-	"github.com/sthadka/jai/pkg/jira"
-	"github.com/sthadka/jai/pkg/query"
-	db "github.com/sthadka/jai/pkg/store"
-	synce "github.com/sthadka/jai/pkg/sync"
+	"github.com/sthadka/jai/v5/pkg/config"
+	"github.com/sthadka/jai/v5/pkg/jira"
+	"github.com/sthadka/jai/v5/pkg/query"
+	db "github.com/sthadka/jai/v5/pkg/store"
+	synce "github.com/sthadka/jai/v5/pkg/sync"
 )
 
 // Server wraps an MCP server with jai-specific handlers.

@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/sthadka/jai/pkg/metrics"
-	"github.com/sthadka/jai/pkg/metrics/dashboard/live"
-	"github.com/sthadka/jai/pkg/output"
+	"github.com/sthadka/jai/v5/pkg/metrics"
+	"github.com/sthadka/jai/v5/pkg/metrics/dashboard/live"
+	"github.com/sthadka/jai/v5/pkg/output"
 )
 
 // Dashboard-local flags. --project / --as-of are inherited (persistent) from metricsCmd.

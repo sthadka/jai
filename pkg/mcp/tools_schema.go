@@ -9,7 +9,7 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
-	"github.com/sthadka/jai/pkg/output"
+	"github.com/sthadka/jai/v5/pkg/output"
 )
 
 // registerSchemaTools registers all schema toolset tools with the MCP server.

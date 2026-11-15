@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sthadka/jai/pkg/config"
-	db "github.com/sthadka/jai/pkg/store"
+	"github.com/sthadka/jai/v5/pkg/config"
+	db "github.com/sthadka/jai/v5/pkg/store"
 )
 
 // setupDBTestGlobals opens a temp DB, points g.engine.Config.DB.Path at it, and

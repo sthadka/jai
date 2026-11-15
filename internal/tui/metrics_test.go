@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sthadka/jai/pkg/metrics"
+	"github.com/sthadka/jai/v5/pkg/metrics"
 )
 
 func TestSparkline(t *testing.T) {

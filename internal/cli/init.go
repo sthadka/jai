@@ -10,11 +10,11 @@ import (
 	"unicode/utf8"
 
 	"github.com/spf13/cobra"
-	"github.com/sthadka/jai/internal/cli/configloader"
-	"github.com/sthadka/jai/pkg/config"
-	"github.com/sthadka/jai/pkg/jira"
-	db "github.com/sthadka/jai/pkg/store"
-	synce "github.com/sthadka/jai/pkg/sync"
+	"github.com/sthadka/jai/v5/internal/cli/configloader"
+	"github.com/sthadka/jai/v5/pkg/config"
+	"github.com/sthadka/jai/v5/pkg/jira"
+	db "github.com/sthadka/jai/v5/pkg/store"
+	synce "github.com/sthadka/jai/v5/pkg/sync"
 )
 
 // ── ANSI helpers ──────────────────────────────────────────────────────────────

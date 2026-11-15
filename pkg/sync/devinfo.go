@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/sthadka/jai/pkg/config"
-	"github.com/sthadka/jai/pkg/jira"
-	db "github.com/sthadka/jai/pkg/store"
+	"github.com/sthadka/jai/v5/pkg/config"
+	"github.com/sthadka/jai/v5/pkg/jira"
+	db "github.com/sthadka/jai/v5/pkg/store"
 )
 
 // SyncDevInfo fetches development information (PRs, branches, commits) for issues

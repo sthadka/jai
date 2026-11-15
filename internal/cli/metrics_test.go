@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sthadka/jai/pkg/config"
-	"github.com/sthadka/jai/pkg/metrics"
-	"github.com/sthadka/jai/pkg/query"
-	db "github.com/sthadka/jai/pkg/store"
+	"github.com/sthadka/jai/v5/pkg/config"
+	"github.com/sthadka/jai/v5/pkg/metrics"
+	"github.com/sthadka/jai/v5/pkg/query"
+	db "github.com/sthadka/jai/v5/pkg/store"
 )
 
 // setupMetricsGlobals opens a fresh DB, seeds the given issues and installs a

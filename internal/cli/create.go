@@ -8,10 +8,10 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/sthadka/jai/pkg/jira"
-	"github.com/sthadka/jai/pkg/output"
-	db "github.com/sthadka/jai/pkg/store"
-	synce "github.com/sthadka/jai/pkg/sync"
+	"github.com/sthadka/jai/v5/pkg/jira"
+	"github.com/sthadka/jai/v5/pkg/output"
+	db "github.com/sthadka/jai/v5/pkg/store"
+	synce "github.com/sthadka/jai/v5/pkg/sync"
 )
 
 var createFlags struct {
