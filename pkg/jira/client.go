@@ -43,8 +43,8 @@ func authError(statusCode int, body []byte) error {
 
 // Client is a Jira Cloud HTTP client.
 type Client struct {
-	baseURL    string
-	email      string
+	baseURL string
+
 	httpClient *http.Client
 	limiter    *rate.Limiter
 }

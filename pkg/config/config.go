@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 )
@@ -162,8 +161,6 @@ type MCPConfig struct {
 	ReadOnly bool     `yaml:"read_only"` // block write operations
 	Toolsets []string `yaml:"toolsets"`  // enabled toolsets: read,schema,write,sync,browser,config
 }
-
-var envVarRe = regexp.MustCompile(`\$\{([^}]+)\}`)
 
 // substituteEnvVars replaces ${VAR} with environment variable values.
 
