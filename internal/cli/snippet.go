@@ -8,7 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/sthadka/jai/internal/cli/configloader"
-	"github.com/sthadka/jai/internal/output"
+	"github.com/sthadka/jai/pkg/output"
 	"github.com/sthadka/jai/pkg/config"
 	"gopkg.in/yaml.v3"
 )

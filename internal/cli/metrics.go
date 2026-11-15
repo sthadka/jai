@@ -11,7 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/sthadka/jai/internal/metrics"
-	"github.com/sthadka/jai/internal/output"
+	"github.com/sthadka/jai/pkg/output"
 )
 
 // Metric-run flags. These are local to the `jai metrics <name>` run path; the

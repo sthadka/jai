@@ -8,7 +8,7 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
-	"github.com/sthadka/jai/internal/output"
+	"github.com/sthadka/jai/pkg/output"
 	synce "github.com/sthadka/jai/internal/sync"
 )
 
