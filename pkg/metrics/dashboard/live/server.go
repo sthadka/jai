@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/sthadka/jai/pkg/jql"
-	"github.com/sthadka/jai/internal/metrics/dashboard/specs"
+	"github.com/sthadka/jai/pkg/metrics/dashboard/specs"
 )
 
 // assets holds the single-page app and the VENDORED Apache ECharts runtime plus
