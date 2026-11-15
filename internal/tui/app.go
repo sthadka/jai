@@ -12,10 +12,10 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/sthadka/jai/pkg/config"
-	db "github.com/sthadka/jai/pkg/store"
 	"github.com/sthadka/jai/pkg/jira"
 	"github.com/sthadka/jai/pkg/query"
-	synce "github.com/sthadka/jai/internal/sync"
+	db "github.com/sthadka/jai/pkg/store"
+	synce "github.com/sthadka/jai/pkg/sync"
 )
 
 // Mode represents the current UI mode.

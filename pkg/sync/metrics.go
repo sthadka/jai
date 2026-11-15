@@ -2,11 +2,11 @@ package sync
 
 import (
 	"errors"
-	"time"
 
+	"github.com/sthadka/jai/pkg/clock"
 	"github.com/sthadka/jai/pkg/config"
-	db "github.com/sthadka/jai/pkg/store"
 	"github.com/sthadka/jai/pkg/metrics"
+	db "github.com/sthadka/jai/pkg/store"
 )
 
 // metricWriter drives the flow-metric fact store (internal/metrics) from sync
@@ -19,6 +19,7 @@ import (
 // when the config carries no `metrics:` block. Metrics are never forced on.
 type metricWriter struct {
 	builder *metrics.Builder
+	clk     clock.Clock
 }
 
 // newMetricWriter binds a metric writer to the database and config, or returns
@@ -31,7 +32,7 @@ func newMetricWriter(database *db.DB, cfg *config.Config) *metricWriter {
 	}
 	store := metrics.NewStore(database, cfg.DB.Path)
 	pol := metrics.CompilePolicy(cfg.Metrics)
-	return &metricWriter{builder: metrics.NewBuilder(store, pol)}
+	return &metricWriter{builder: metrics.NewBuilder(store, pol), clk: clock.System{}}
 }
 
 // refreshFull restates every in-scope fact from scratch: it stages a brand-new
@@ -42,7 +43,7 @@ func (m *metricWriter) refreshFull(projects []string) error {
 	if m == nil {
 		return nil
 	}
-	_, err := m.builder.BuildAll(time.Now().UTC(), projects)
+	_, err := m.builder.BuildAll(m.clk.Now().UTC(), projects)
 	return err
 }
 
@@ -61,9 +62,9 @@ func (m *metricWriter) refreshTouched(keys []string) error {
 	if m == nil || len(keys) == 0 {
 		return nil
 	}
-	_, err := m.builder.Incremental(time.Now().UTC(), keys)
+	_, err := m.builder.Incremental(m.clk.Now().UTC(), keys)
 	if errors.Is(err, metrics.ErrFullRebuildRequired) {
-		_, err = m.builder.BuildAll(time.Now().UTC(), nil)
+		_, err = m.builder.BuildAll(m.clk.Now().UTC(), nil)
 	}
 	return err
 }

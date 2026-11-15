@@ -10,11 +10,11 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/sthadka/jai/internal/cli/configloader"
-	db "github.com/sthadka/jai/pkg/store"
+	"github.com/sthadka/jai/pkg/config"
 	"github.com/sthadka/jai/pkg/jira"
 	"github.com/sthadka/jai/pkg/query"
-	synce "github.com/sthadka/jai/internal/sync"
-	"github.com/sthadka/jai/pkg/config"
+	db "github.com/sthadka/jai/pkg/store"
+	synce "github.com/sthadka/jai/pkg/sync"
 )
 
 // globals holds shared state passed to sub-commands.

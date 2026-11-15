@@ -5,8 +5,8 @@ import (
 	"testing"
 
 	"github.com/sthadka/jai/pkg/config"
-	db "github.com/sthadka/jai/pkg/store"
 	"github.com/sthadka/jai/pkg/metrics"
+	db "github.com/sthadka/jai/pkg/store"
 )
 
 // metricsCfg builds a config whose metrics: block maps the given done resolutions.

@@ -15,10 +15,10 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/sthadka/jai/pkg/config"
-	db "github.com/sthadka/jai/pkg/store"
 	"github.com/sthadka/jai/pkg/jira"
 	"github.com/sthadka/jai/pkg/query"
-	synce "github.com/sthadka/jai/internal/sync"
+	db "github.com/sthadka/jai/pkg/store"
+	synce "github.com/sthadka/jai/pkg/sync"
 )
 
 // writeTestServer builds a Server whose Jira client points at the given base URL

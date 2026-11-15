@@ -7,9 +7,9 @@ import (
 	"testing"
 
 	"github.com/sthadka/jai/pkg/config"
-	db "github.com/sthadka/jai/pkg/store"
 	"github.com/sthadka/jai/pkg/jira"
 	"github.com/sthadka/jai/pkg/query"
+	db "github.com/sthadka/jai/pkg/store"
 )
 
 // TestJQLIssueToRow_DescriptionPreservesLinks guards the JQL path against the

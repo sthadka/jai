@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	db "github.com/sthadka/jai/pkg/store"
 	"github.com/sthadka/jai/pkg/jira"
+	db "github.com/sthadka/jai/pkg/store"
 )
 
 func TestDetectDeletions(t *testing.T) {

@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/sthadka/jai/pkg/config"
-	db "github.com/sthadka/jai/pkg/store"
 	"github.com/sthadka/jai/pkg/jira"
+	db "github.com/sthadka/jai/pkg/store"
 )
 
 // ReconcileProgress reports the state of a rank/field reconcile pass for a

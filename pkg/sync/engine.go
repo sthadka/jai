@@ -11,9 +11,10 @@ import (
 	"time"
 	_ "time/tzdata"
 
+	"github.com/sthadka/jai/pkg/clock"
 	"github.com/sthadka/jai/pkg/config"
-	db "github.com/sthadka/jai/pkg/store"
 	"github.com/sthadka/jai/pkg/jira"
+	db "github.com/sthadka/jai/pkg/store"
 )
 
 // Progress reports sync progress for a project.
@@ -37,16 +38,40 @@ type Engine struct {
 	db       *db.DB
 	client   *jira.Client
 	cfg      *config.Config
+	clk      clock.Clock
 	jiraTZMu sync.RWMutex
 	jiraTZ   *time.Location
 	colMu    sync.Mutex // serializes ensureCustomColumns ALTER TABLEs across concurrent sources
 	mw       *metricWriter
+	onChange ChangeHook
 }
 
-// New creates a new sync Engine.
+// New creates a new sync Engine with the default system clock.
 func New(database *db.DB, client *jira.Client, cfg *config.Config) *Engine {
-	return &Engine{db: database, client: client, cfg: cfg, mw: newMetricWriter(database, cfg)}
+	mw := newMetricWriter(database, cfg)
+	e := &Engine{db: database, client: client, cfg: cfg, clk: clock.System{}, mw: mw}
+	if mw != nil {
+		mw.clk = e.clk
+	}
+	return e
 }
+
+// WithClock overrides the clock used for sync timestamps and metric-build
+// as-of resolution. It returns the engine for chaining and is primarily a test
+// seam for deterministic time.
+func (e *Engine) WithClock(c clock.Clock) *Engine {
+	if c == nil {
+		c = clock.System{}
+	}
+	e.clk = c
+	if e.mw != nil {
+		e.mw.clk = c
+	}
+	return e
+}
+
+// now returns the engine's current time.
+func (e *Engine) now() time.Time { return e.clk.Now() }
 
 // concurrency returns the configured parallel-fetch worker count, defaulting to
 // 8 when unset. The client's shared rate limiter still caps total request rate.
@@ -232,7 +257,7 @@ func (e *Engine) FullSyncOverdue(sourceFilter string) []string {
 	if err != nil {
 		return nil
 	}
-	cutoff := time.Now().Add(-age)
+	cutoff := e.now().Add(-age)
 	var stale []string
 	for _, m := range metas {
 		if !configured[m.Project] {
@@ -311,7 +336,7 @@ func (e *Engine) Sync(ctx context.Context, full, resume bool, sourceFilter strin
 }
 
 func (e *Engine) syncSource(ctx context.Context, src config.SyncSource, full, resume bool, jiraTZ *time.Location, ch chan<- Progress) {
-	start := time.Now()
+	start := e.now()
 
 	fieldMap, err := e.db.FieldMapByJiraID()
 	if err != nil {
@@ -533,6 +558,7 @@ func (e *Engine) syncSource(ctx context.Context, src config.SyncSource, full, re
 	elapsed := time.Since(start).Seconds()
 	_ = e.db.UpdateSyncMeta(src.Name, elapsed, total, newCount+updatedCount, "", lastUpdated)
 
+	e.emitChange(ChangeEvent{Source: src.Name, New: newCount, Updated: updatedCount, Total: total})
 	ch <- Progress{Project: src.Name, New: newCount, Updated: updatedCount, Total: total, Done: true}
 }
 
