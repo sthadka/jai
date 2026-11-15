@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/sthadka/jai/pkg/config"
-	"github.com/sthadka/jai/internal/metrics"
+	"github.com/sthadka/jai/pkg/metrics"
 )
 
 // flowKeySet returns the issue keys present in the active generation's flow facts.
