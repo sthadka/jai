@@ -12,7 +12,7 @@ import (
 	"github.com/sthadka/jai/internal/cli/configloader"
 	db "github.com/sthadka/jai/pkg/store"
 	"github.com/sthadka/jai/pkg/jira"
-	"github.com/sthadka/jai/internal/query"
+	"github.com/sthadka/jai/pkg/query"
 	synce "github.com/sthadka/jai/internal/sync"
 	"github.com/sthadka/jai/pkg/config"
 )

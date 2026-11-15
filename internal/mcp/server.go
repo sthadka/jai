@@ -8,7 +8,7 @@ import (
 	"github.com/sthadka/jai/pkg/config"
 	db "github.com/sthadka/jai/pkg/store"
 	"github.com/sthadka/jai/pkg/jira"
-	"github.com/sthadka/jai/internal/query"
+	"github.com/sthadka/jai/pkg/query"
 	synce "github.com/sthadka/jai/internal/sync"
 )
 
