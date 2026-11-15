@@ -48,16 +48,16 @@ func TestResolveTemplate(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Save and restore global config.
-			origCfg := g.cfg
-			defer func() { g.cfg = origCfg }()
+			origCfg := g.engine.Config
+			defer func() { g.engine.Config = origCfg }()
 
 			if tt.templates != nil {
-				g.cfg = &config.Config{Templates: tt.templates}
+				g.engine.Config = &config.Config{Templates: tt.templates}
 			} else {
-				g.cfg = &config.Config{}
+				g.engine.Config = &config.Config{}
 			}
 
-			got, err := resolveTemplate(tt.lookup)
+			got, err := resolveTemplate(g, tt.lookup)
 			if tt.wantErr != "" {
 				if err == nil {
 					t.Fatalf("expected error %q, got nil", tt.wantErr)
@@ -167,12 +167,12 @@ func TestTemplateAndBodyMutualExclusion(t *testing.T) {
 }
 
 func TestResolveTemplateNilConfig(t *testing.T) {
-	origCfg := g.cfg
-	defer func() { g.cfg = origCfg }()
+	origCfg := g.engine.Config
+	defer func() { g.engine.Config = origCfg }()
 
-	g.cfg = nil
+	g.engine.Config = nil
 
-	_, err := resolveTemplate("anything")
+	_, err := resolveTemplate(g, "anything")
 	if err == nil {
 		t.Fatal("expected error with nil config")
 	}

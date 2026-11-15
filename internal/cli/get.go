@@ -28,14 +28,16 @@ front-matter view. Pass --fields all to get every column instead, or
 --fields <comma-separated names> to select specific ones.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		key := args[0]
-		jsonMode := g.jsonOut || g.format == "json"
 
-		if g.rawOut {
-			return getRaw(cmd, key)
+		app := cliFrom(cmd)
+		key := args[0]
+		jsonMode := app.jsonOut || app.format == "json"
+
+		if app.rawOut {
+			return app.getRaw(cmd, key)
 		}
 
-		results, err := g.query.Execute("SELECT * FROM issues WHERE key = ?", key)
+		results, err := app.engine.Query.Execute("SELECT * FROM issues WHERE key = ?", key)
 		if err != nil {
 			if jsonMode {
 				fmt.Println(string(output.Err("QueryError", err.Error())))
@@ -45,7 +47,7 @@ front-matter view. Pass --fields all to get every column instead, or
 		}
 
 		if len(results.Rows) == 0 {
-			issue, apiErr := g.jira.GetIssue(cmd.Context(), key)
+			issue, apiErr := app.engine.Client.GetIssue(cmd.Context(), key)
 			if apiErr != nil {
 				// Don't mask an auth failure as "not found" — the issue may well
 				// exist, we just can't see it unauthenticated.
@@ -67,7 +69,7 @@ front-matter view. Pass --fields all to get every column instead, or
 			var f jira.IssueFields
 			_ = json.Unmarshal(issue.Fields, &f)
 			fields := issueFieldsToMap(issue.Key, &f)
-			fields = curateGetFields(fields, g.fields)
+			fields = curateGetFields(fields, app.fields)
 			var apiComments []map[string]interface{}
 			if getShowComments && f.Comment != nil {
 				apiComments = apiCommentsToMaps(f.Comment.Comments)
@@ -75,7 +77,7 @@ front-matter view. Pass --fields all to get every column instead, or
 			if !jsonMode {
 				fmt.Fprintln(os.Stderr, "(live from Jira API — not in local database)")
 			}
-			return renderGet(fields, apiComments, jsonMode)
+			return app.renderGet(fields, apiComments, jsonMode)
 		}
 
 		data := make(map[string]interface{}, len(results.Columns))
@@ -98,14 +100,14 @@ front-matter view. Pass --fields all to get every column instead, or
 				}
 			}
 		}
-		data = curateGetFields(data, g.fields)
+		data = curateGetFields(data, app.fields)
 		var dbComments []map[string]interface{}
 		if getShowComments {
-			if cs, err := g.db.GetComments(key); err == nil {
+			if cs, err := app.engine.Store.GetComments(key); err == nil {
 				dbComments = dbCommentsToMaps(cs)
 			}
 		}
-		return renderGet(data, dbComments, jsonMode)
+		return app.renderGet(data, dbComments, jsonMode)
 	},
 }
 
@@ -140,7 +142,7 @@ func curateGetFields(data map[string]interface{}, requested string) map[string]i
 // renderGet writes a single issue's data using the --json flag or --format flag.
 // "table" (the default) keeps the curated front-matter document; csv/tsv/markdown
 // render every field as a single-row table, matching how query/view/search honor --format.
-func renderGet(data map[string]interface{}, comments []map[string]interface{}, jsonMode bool) error {
+func (app *CLI) renderGet(data map[string]interface{}, comments []map[string]interface{}, jsonMode bool) error {
 	if jsonMode {
 		if getShowComments {
 			data["comments"] = comments
@@ -149,10 +151,10 @@ func renderGet(data map[string]interface{}, comments []map[string]interface{}, j
 		return nil
 	}
 
-	switch g.format {
+	switch app.format {
 	case "csv", "tsv", "markdown":
-		cols, row := issueDataToRow(data, jiraFieldNames())
-		switch g.format {
+		cols, row := issueDataToRow(data, app.jiraFieldNames())
+		switch app.format {
 		case "csv":
 			fmt.Print(output.CSV(cols, [][]interface{}{row}))
 		case "tsv":
@@ -173,8 +175,8 @@ func renderGet(data map[string]interface{}, comments []map[string]interface{}, j
 // (e.g. "team" -> "Team", "target_version" -> "Target Version"), sourced from
 // field_map (populated during sync from Jira's field discovery). Returns nil
 // on error, in which case fieldLabel falls back to a generic title-case.
-func jiraFieldNames() map[string]string {
-	mappings, err := g.db.AllFieldMappings()
+func (app *CLI) jiraFieldNames() map[string]string {
+	mappings, err := app.engine.Store.AllFieldMappings()
 	if err != nil {
 		return nil
 	}
@@ -222,29 +224,29 @@ func issueDataToRow(data map[string]interface{}, jiraNames map[string]string) ([
 	return cols, row
 }
 
-func getRaw(cmd *cobra.Command, key string) error {
-	results, err := g.query.Execute("SELECT raw_json FROM issues WHERE key = ?", key)
+func (app *CLI) getRaw(cmd *cobra.Command, key string) error {
+	results, err := app.engine.Query.Execute("SELECT raw_json FROM issues WHERE key = ?", key)
 	if err == nil && len(results.Rows) > 0 {
 		if raw := output.ValueStr(results.Rows[0][0]); raw != "" {
-			printRaw([]byte(raw))
+			app.printRaw([]byte(raw))
 			return nil
 		}
 	}
-	issue, err := g.jira.GetIssue(cmd.Context(), key)
+	issue, err := app.engine.Client.GetIssue(cmd.Context(), key)
 	if err != nil {
-		if g.jsonOut {
+		if app.jsonOut {
 			fmt.Println(string(output.Err("NotFoundError", err.Error())))
 			return nil
 		}
 		return fmt.Errorf("issue %s not found: %w", key, err)
 	}
 	b, _ := json.Marshal(issue)
-	printRaw(b)
+	app.printRaw(b)
 	return nil
 }
 
-func printRaw(data []byte) {
-	if g.jsonOut {
+func (app *CLI) printRaw(data []byte) {
+	if app.jsonOut {
 		fmt.Println(string(output.OK(json.RawMessage(data))))
 		return
 	}

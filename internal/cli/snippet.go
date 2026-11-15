@@ -26,9 +26,11 @@ var snippetListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all available snippets",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := configloader.Load(g.cfgPath)
+
+		app := cliFrom(cmd)
+		cfg, err := configloader.Load(app.cfgPath)
 		if err != nil {
-			if g.jsonOut {
+			if app.jsonOut {
 				fmt.Println(string(output.Err("ConfigLoadError", err.Error())))
 				return nil
 			}
@@ -44,7 +46,7 @@ var snippetListCmd = &cobra.Command{
 		}
 
 		if len(cfg.Snippets) == 0 {
-			if g.jsonOut {
+			if app.jsonOut {
 				fmt.Println(string(output.OK(map[string]interface{}{"snippets": []string{}})))
 				return nil
 			}
@@ -59,7 +61,7 @@ var snippetListCmd = &cobra.Command{
 		}
 		sort.Strings(names)
 
-		if g.jsonOut {
+		if app.jsonOut {
 			fmt.Println(string(output.OK(map[string]interface{}{"snippets": names})))
 			return nil
 		}
@@ -84,11 +86,13 @@ var snippetShowCmd = &cobra.Command{
 	Short: "Show snippet SQL",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+
+		app := cliFrom(cmd)
 		name := args[0]
 
-		cfg, err := configloader.Load(g.cfgPath)
+		cfg, err := configloader.Load(app.cfgPath)
 		if err != nil {
-			if g.jsonOut {
+			if app.jsonOut {
 				fmt.Println(string(output.Err("ConfigLoadError", err.Error())))
 				return nil
 			}
@@ -100,14 +104,14 @@ var snippetShowCmd = &cobra.Command{
 
 		sql, ok := cfg.Snippets[name]
 		if !ok {
-			if g.jsonOut {
+			if app.jsonOut {
 				fmt.Println(string(output.Err("SnippetNotFound", fmt.Sprintf("snippet '%s' not found", name))))
 				return nil
 			}
 			return fmt.Errorf("snippet '%s' not found", name)
 		}
 
-		if g.jsonOut {
+		if app.jsonOut {
 			fmt.Println(string(output.OK(map[string]interface{}{
 				"name": name,
 				"sql":  sql,
@@ -129,18 +133,20 @@ var snippetAddCmd = &cobra.Command{
 	Short: "Add a user-defined snippet to config",
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
+
+		app := cliFrom(cmd)
 		name := args[0]
 		sql := args[1]
 
 		// Load existing config.
-		cfgPath := g.cfgPath
+		cfgPath := app.cfgPath
 		if cfgPath == "" {
 			cfgPath = config.DefaultConfigPath()
 		}
 
 		data, err := os.ReadFile(cfgPath)
 		if err != nil {
-			if g.jsonOut {
+			if app.jsonOut {
 				fmt.Println(string(output.Err("ConfigReadError", err.Error())))
 				return nil
 			}
@@ -150,7 +156,7 @@ var snippetAddCmd = &cobra.Command{
 		// Parse YAML to preserve structure and comments.
 		var doc yaml.Node
 		if err := yaml.Unmarshal(data, &doc); err != nil {
-			if g.jsonOut {
+			if app.jsonOut {
 				fmt.Println(string(output.Err("ConfigParseError", err.Error())))
 				return nil
 			}
@@ -160,7 +166,7 @@ var snippetAddCmd = &cobra.Command{
 		// Load config to get current snippets.
 		cfg, err := configloader.Load(cfgPath)
 		if err != nil {
-			if g.jsonOut {
+			if app.jsonOut {
 				fmt.Println(string(output.Err("ConfigLoadError", err.Error())))
 				return nil
 			}
@@ -174,7 +180,7 @@ var snippetAddCmd = &cobra.Command{
 
 		// Find or create snippets section in YAML.
 		if err := addSnippetToYAML(&doc, name, sql); err != nil {
-			if g.jsonOut {
+			if app.jsonOut {
 				fmt.Println(string(output.Err("YAMLUpdateError", err.Error())))
 				return nil
 			}
@@ -184,7 +190,7 @@ var snippetAddCmd = &cobra.Command{
 		// Write back to config file.
 		out, err := yaml.Marshal(&doc)
 		if err != nil {
-			if g.jsonOut {
+			if app.jsonOut {
 				fmt.Println(string(output.Err("YAMLMarshalError", err.Error())))
 				return nil
 			}
@@ -192,14 +198,14 @@ var snippetAddCmd = &cobra.Command{
 		}
 
 		if err := os.WriteFile(cfgPath, out, 0644); err != nil {
-			if g.jsonOut {
+			if app.jsonOut {
 				fmt.Println(string(output.Err("ConfigWriteError", err.Error())))
 				return nil
 			}
 			return fmt.Errorf("writing config file: %w", err)
 		}
 
-		if g.jsonOut {
+		if app.jsonOut {
 			fmt.Println(string(output.OK(map[string]interface{}{
 				"name": name,
 				"sql":  sql,

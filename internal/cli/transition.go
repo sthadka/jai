@@ -64,6 +64,8 @@ Bulk operations with a SQL query:
 		return cobra.RangeArgs(1, 2)(cmd, args)
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
+
+		app := cliFrom(cmd)
 		var keys []string
 		var targetName string
 		listFlag, _ := cmd.Flags().GetBool("list")
@@ -72,9 +74,9 @@ Bulk operations with a SQL query:
 			if len(args) >= 1 {
 				targetName = args[0]
 			}
-			results, err := g.query.Execute(transitionQuery)
+			results, err := app.engine.Query.Execute(transitionQuery)
 			if err != nil {
-				if g.jsonOut {
+				if app.jsonOut {
 					fmt.Println(string(output.Err("QueryError", err.Error())))
 					return nil
 				}
@@ -82,7 +84,7 @@ Bulk operations with a SQL query:
 			}
 			keys, err = extractKeys(results.Columns, results.Rows)
 			if err != nil {
-				if g.jsonOut {
+				if app.jsonOut {
 					fmt.Println(string(output.Err("QueryError", err.Error())))
 					return nil
 				}
@@ -90,7 +92,7 @@ Bulk operations with a SQL query:
 			}
 			if len(keys) == 0 {
 				msg := "query returned 0 rows"
-				if g.jsonOut {
+				if app.jsonOut {
 					fmt.Println(string(output.Err("QueryError", msg)))
 					return nil
 				}
@@ -107,7 +109,7 @@ Bulk operations with a SQL query:
 		if len(keys) > 1 {
 			if listFlag {
 				msg := "--list flag cannot be used with bulk operations"
-				if g.jsonOut {
+				if app.jsonOut {
 					fmt.Println(string(output.Err("ValidationError", msg)))
 					return nil
 				}
@@ -115,21 +117,21 @@ Bulk operations with a SQL query:
 			}
 			if targetName == "" {
 				msg := "status argument required for bulk transitions"
-				if g.jsonOut {
+				if app.jsonOut {
 					fmt.Println(string(output.Err("ValidationError", msg)))
 					return nil
 				}
 				return fmt.Errorf("%s", msg)
 			}
-			return transitionBulk(cmd, keys, targetName)
+			return app.transitionBulk(cmd, keys, targetName)
 		}
 
 		// Single key logic (existing)
 		issueKey := keys[0]
 
-		transitions, err := g.jira.GetTransitions(cmd.Context(), issueKey)
+		transitions, err := app.engine.Client.GetTransitions(cmd.Context(), issueKey)
 		if err != nil {
-			if g.jsonOut {
+			if app.jsonOut {
 				fmt.Println(string(output.Err("JiraError", fmt.Sprintf("fetching transitions: %v", err))))
 				return nil
 			}
@@ -145,7 +147,7 @@ Bulk operations with a SQL query:
 			for i, t := range transitions {
 				items[i] = transitionInfo{ID: t.ID, Name: t.Name}
 			}
-			if g.jsonOut {
+			if app.jsonOut {
 				fmt.Println(string(output.OK(map[string]interface{}{
 					"issue_key":   issueKey,
 					"transitions": items,
@@ -164,7 +166,7 @@ Bulk operations with a SQL query:
 
 		if match == nil && ambiguous != nil {
 			msg := fmt.Sprintf("ambiguous transition %q matches multiple options:\n%s", targetName, formatTransitionNames(ambiguous))
-			if g.jsonOut {
+			if app.jsonOut {
 				fmt.Println(string(output.Err("ValidationError", msg)))
 				return nil
 			}
@@ -176,7 +178,7 @@ Bulk operations with a SQL query:
 			if len(transitions) > 0 {
 				msg += fmt.Sprintf("\nAvailable transitions:\n%s", formatTransitionNames(transitions))
 			}
-			if g.jsonOut {
+			if app.jsonOut {
 				fmt.Println(string(output.Err("ValidationError", msg)))
 				return nil
 			}
@@ -185,18 +187,18 @@ Bulk operations with a SQL query:
 
 		status := "synced"
 		if transitionQueue {
-			if err := g.db.EnsurePendingChangesTable(); err != nil {
+			if err := app.engine.Store.EnsurePendingChangesTable(); err != nil {
 				return err
 			}
 			payload, _ := json.Marshal(map[string]string{"transition_id": match.ID})
-			if err := g.db.InsertPendingChange(issueKey, "transition", string(payload)); err != nil {
+			if err := app.engine.Store.InsertPendingChange(issueKey, "transition", string(payload)); err != nil {
 				return err
 			}
 			status = "queued"
 		} else {
-			if err := g.jira.ExecuteTransition(cmd.Context(), issueKey, match.ID); err != nil {
+			if err := app.engine.Client.ExecuteTransition(cmd.Context(), issueKey, match.ID); err != nil {
 				msg := fmt.Sprintf("transition failed: %v", err)
-				if g.jsonOut {
+				if app.jsonOut {
 					fmt.Println(string(output.Err("JiraError", msg)))
 					return nil
 				}
@@ -204,17 +206,17 @@ Bulk operations with a SQL query:
 			}
 
 			// Refresh the local DB so status is immediately queryable.
-			if apiIssue, fetchErr := g.jira.GetIssue(cmd.Context(), issueKey); fetchErr == nil {
+			if apiIssue, fetchErr := app.engine.Client.GetIssue(cmd.Context(), issueKey); fetchErr == nil {
 				rawJSON, _ := json.Marshal(apiIssue)
-				if fieldMap, fmErr := g.db.FieldMapByJiraID(); fmErr == nil {
+				if fieldMap, fmErr := app.engine.Store.FieldMapByJiraID(); fmErr == nil {
 					if dbIssue, extra, denormErr := synce.Denormalize(rawJSON, fieldMap); denormErr == nil {
-						_ = g.db.UpsertIssue(dbIssue, extra)
+						_ = app.engine.Store.UpsertIssue(dbIssue, extra)
 					}
 				}
 			}
 		}
 
-		if g.jsonOut {
+		if app.jsonOut {
 			fmt.Println(string(output.OK(map[string]string{
 				"issue_key":     issueKey,
 				"transition":    match.Name,
@@ -233,7 +235,7 @@ Bulk operations with a SQL query:
 	},
 }
 
-func transitionBulk(cmd *cobra.Command, keys []string, targetName string) error {
+func (app *CLI) transitionBulk(cmd *cobra.Command, keys []string, targetName string) error {
 	type result struct {
 		Key        string `json:"key"`
 		Status     string `json:"status"`
@@ -245,7 +247,7 @@ func transitionBulk(cmd *cobra.Command, keys []string, targetName string) error 
 	var results []result
 
 	for _, issueKey := range keys {
-		transitions, err := g.jira.GetTransitions(cmd.Context(), issueKey)
+		transitions, err := app.engine.Client.GetTransitions(cmd.Context(), issueKey)
 		if err != nil {
 			failed++
 			res := result{
@@ -254,7 +256,7 @@ func transitionBulk(cmd *cobra.Command, keys []string, targetName string) error 
 				Error:  fmt.Sprintf("fetching transitions: %v", err),
 			}
 			results = append(results, res)
-			if !g.jsonOut {
+			if !app.jsonOut {
 				fmt.Fprintf(cmd.ErrOrStderr(), "  ✗ %s: %v\n", issueKey, err)
 			}
 			continue
@@ -270,7 +272,7 @@ func transitionBulk(cmd *cobra.Command, keys []string, targetName string) error 
 				Error:  fmt.Sprintf("ambiguous transition %q", targetName),
 			}
 			results = append(results, res)
-			if !g.jsonOut {
+			if !app.jsonOut {
 				fmt.Fprintf(cmd.ErrOrStderr(), "  ✗ %s: ambiguous transition %q\n", issueKey, targetName)
 			}
 			continue
@@ -284,18 +286,18 @@ func transitionBulk(cmd *cobra.Command, keys []string, targetName string) error 
 				Error:  fmt.Sprintf("unknown transition %q", targetName),
 			}
 			results = append(results, res)
-			if !g.jsonOut {
+			if !app.jsonOut {
 				fmt.Fprintf(cmd.ErrOrStderr(), "  ✗ %s: unknown transition %q\n", issueKey, targetName)
 			}
 			continue
 		}
 
 		if transitionQueue {
-			if err := g.db.EnsurePendingChangesTable(); err != nil {
+			if err := app.engine.Store.EnsurePendingChangesTable(); err != nil {
 				return err
 			}
 			payload, _ := json.Marshal(map[string]string{"transition_id": match.ID})
-			if err := g.db.InsertPendingChange(issueKey, "transition", string(payload)); err != nil {
+			if err := app.engine.Store.InsertPendingChange(issueKey, "transition", string(payload)); err != nil {
 				failed++
 				res := result{
 					Key:    issueKey,
@@ -303,13 +305,13 @@ func transitionBulk(cmd *cobra.Command, keys []string, targetName string) error 
 					Error:  fmt.Sprintf("queueing: %v", err),
 				}
 				results = append(results, res)
-				if !g.jsonOut {
+				if !app.jsonOut {
 					fmt.Fprintf(cmd.ErrOrStderr(), "  ✗ %s: %v\n", issueKey, err)
 				}
 				continue
 			}
 		} else {
-			if err := g.jira.ExecuteTransition(cmd.Context(), issueKey, match.ID); err != nil {
+			if err := app.engine.Client.ExecuteTransition(cmd.Context(), issueKey, match.ID); err != nil {
 				failed++
 				res := result{
 					Key:    issueKey,
@@ -317,18 +319,18 @@ func transitionBulk(cmd *cobra.Command, keys []string, targetName string) error 
 					Error:  fmt.Sprintf("transition failed: %v", err),
 				}
 				results = append(results, res)
-				if !g.jsonOut {
+				if !app.jsonOut {
 					fmt.Fprintf(cmd.ErrOrStderr(), "  ✗ %s: %v\n", issueKey, err)
 				}
 				continue
 			}
 
 			// Refresh the local DB so status is immediately queryable.
-			if apiIssue, fetchErr := g.jira.GetIssue(cmd.Context(), issueKey); fetchErr == nil {
+			if apiIssue, fetchErr := app.engine.Client.GetIssue(cmd.Context(), issueKey); fetchErr == nil {
 				rawJSON, _ := json.Marshal(apiIssue)
-				if fieldMap, fmErr := g.db.FieldMapByJiraID(); fmErr == nil {
+				if fieldMap, fmErr := app.engine.Store.FieldMapByJiraID(); fmErr == nil {
 					if dbIssue, extra, denormErr := synce.Denormalize(rawJSON, fieldMap); denormErr == nil {
-						_ = g.db.UpsertIssue(dbIssue, extra)
+						_ = app.engine.Store.UpsertIssue(dbIssue, extra)
 					}
 				}
 			}
@@ -341,12 +343,12 @@ func transitionBulk(cmd *cobra.Command, keys []string, targetName string) error 
 			Transition: match.Name,
 		}
 		results = append(results, res)
-		if !g.jsonOut {
+		if !app.jsonOut {
 			fmt.Fprintf(cmd.OutOrStdout(), "  ✓ %s: transitioned to %q\n", issueKey, match.Name)
 		}
 	}
 
-	if g.jsonOut {
+	if app.jsonOut {
 		fmt.Println(string(output.OK(map[string]interface{}{
 			"count":     len(keys),
 			"succeeded": succeeded,

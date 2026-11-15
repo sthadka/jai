@@ -23,22 +23,22 @@ type PushResult struct {
 
 // Writer processes the pending_changes queue.
 type Writer struct {
-	db     *db.DB
-	client *jira.Client
+	db     db.Store
+	client jira.JiraClient
 	mw     *metricWriter
 }
 
 // NewWriter creates a Writer with no metric wiring. Pushing changes still mutates
 // Jira and the optimistic local snapshot; use NewWriterWithMetrics to also refresh
 // flow-metric facts for the affected issues.
-func NewWriter(database *db.DB, client *jira.Client) *Writer {
+func NewWriter(database db.Store, client jira.JiraClient) *Writer {
 	return &Writer{db: database, client: client}
 }
 
 // NewWriterWithMetrics creates a Writer that refreshes flow-metric facts for the
 // issues whose queued changes it successfully pushes. Metric refresh is a no-op
 // when metrics are unconfigured (nil metrics: block).
-func NewWriterWithMetrics(database *db.DB, client *jira.Client, cfg *config.Config) *Writer {
+func NewWriterWithMetrics(database db.Store, client jira.JiraClient, cfg *config.Config) *Writer {
 	return &Writer{db: database, client: client, mw: newMetricWriter(database, cfg)}
 }
 

@@ -64,16 +64,16 @@ func setupLocalJQL(t *testing.T) *db.DB {
 	}
 	t.Cleanup(func() { database.Close() })
 
-	g.db = database
-	g.cfg = cfg
-	g.query = query.New(database, cfg)
+	g.engine.Store = database
+	g.engine.Config = cfg
+	g.engine.Query = query.New(database, cfg)
 	g.jsonOut = false
 	g.format = "table"
 	g.fields = ""
 	t.Cleanup(func() {
-		g.db = nil
-		g.cfg = nil
-		g.query = nil
+		g.engine.Store = nil
+		g.engine.Config = nil
+		g.engine.Query = nil
 		g.jsonOut = false
 		g.format = ""
 		g.fields = ""
@@ -145,7 +145,7 @@ func TestRunLocalJQLQuery_Rows(t *testing.T) {
 	g.jsonOut = true
 
 	out := captureStdout(t, func() {
-		if err := runLocalJQLQuery("project = ROX AND status = \"In Progress\""); err != nil {
+		if err := g.runLocalJQLQuery("project = ROX AND status = \"In Progress\""); err != nil {
 			t.Fatalf("runLocalJQLQuery: %v", err)
 		}
 	})
@@ -188,7 +188,7 @@ func TestRunLocalJQLQuery_FormatPassthrough(t *testing.T) {
 	g.fields = "key"
 
 	out := captureStdout(t, func() {
-		if err := runLocalJQLQuery("project = ROX"); err != nil {
+		if err := g.runLocalJQLQuery("project = ROX"); err != nil {
 			t.Fatalf("runLocalJQLQuery: %v", err)
 		}
 	})
@@ -210,7 +210,7 @@ func TestRunLocalJQLQuery_UnsupportedConstruct(t *testing.T) {
 	setupLocalJQL(t)
 	g.jsonOut = false
 
-	err := runLocalJQLQuery("status WAS Done")
+	err := g.runLocalJQLQuery("status WAS Done")
 	if err == nil {
 		t.Fatal("expected error for history operator, got nil")
 	}
@@ -225,7 +225,7 @@ func TestRunLocalJQLQuery_UnsupportedFunction(t *testing.T) {
 	setupLocalJQL(t)
 	g.jsonOut = false
 
-	err := runLocalJQLQuery("assignee in membersOf(\"devs\")")
+	err := g.runLocalJQLQuery("assignee in membersOf(\"devs\")")
 	if err == nil {
 		t.Fatal("expected error for membersOf(), got nil")
 	}

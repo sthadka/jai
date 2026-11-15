@@ -9,7 +9,7 @@ import (
 
 // clm inserts a set-valued (membership) changelog transition. value fields hold stable ids
 // (comma-separated for components/Sprint), string fields the display names.
-func clm(t *testing.T, database *db.DB, id, key, field, fromV, fromS, toV, toS, at string) {
+func clm(t *testing.T, database db.Store, id, key, field, fromV, fromS, toV, toS, at string) {
 	t.Helper()
 	if err := database.InsertChangelog(&db.ChangelogEntry{
 		ID: id, IssueKey: key, Field: field,

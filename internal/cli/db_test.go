@@ -11,9 +11,9 @@ import (
 	db "github.com/sthadka/jai/pkg/store"
 )
 
-// setupDBTestGlobals opens a temp DB, points g.cfg.DB.Path at it, and
+// setupDBTestGlobals opens a temp DB, points g.engine.Config.DB.Path at it, and
 // registers cleanup. Unlike setupTestGlobals (get_test.go), db.go's
-// commands read g.cfg.DB.Path directly, so g.cfg must be populated.
+// commands read g.engine.Config.DB.Path directly, so g.engine.Config must be populated.
 func setupDBTestGlobals(t *testing.T) string {
 	t.Helper()
 	dbFile := filepath.Join(t.TempDir(), "test.db")
@@ -22,15 +22,15 @@ func setupDBTestGlobals(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
-	g.db = database
-	g.cfg = &config.Config{DB: config.DBConfig{Path: dbFile}}
+	g.engine.Store = database
+	g.engine.Config = &config.Config{DB: config.DBConfig{Path: dbFile}}
 	g.jsonOut = false
 	t.Cleanup(func() {
-		if g.db != nil {
-			g.db.Close()
+		if g.engine.Store != nil {
+			g.engine.Store.Close()
 		}
-		g.db = nil
-		g.cfg = nil
+		g.engine.Store = nil
+		g.engine.Config = nil
 		g.jsonOut = false
 	})
 
@@ -41,7 +41,7 @@ func TestDBPath(t *testing.T) {
 	dbFile := setupDBTestGlobals(t)
 
 	out := captureStdout(t, func() {
-		if err := dbPathCmd.RunE(dbPathCmd, nil); err != nil {
+		if err := callRunE(dbPathCmd, nil); err != nil {
 			t.Fatalf("RunE: %v", err)
 		}
 	})
@@ -56,11 +56,11 @@ func TestDBInfo(t *testing.T) {
 
 	for _, key := range []string{"TEST-1", "TEST-2"} {
 		issue := &db.Issue{Key: key, Project: "TEST", Summary: "s", RawJSON: "{}"}
-		if err := g.db.UpsertIssue(issue, nil); err != nil {
+		if err := g.engine.Store.UpsertIssue(issue, nil); err != nil {
 			t.Fatalf("upsert issue: %v", err)
 		}
 	}
-	if err := g.db.InsertChangelog(&db.ChangelogEntry{
+	if err := g.engine.Store.InsertChangelog(&db.ChangelogEntry{
 		ID: "1", IssueKey: "TEST-1", Field: "status", ToString: "Done",
 	}); err != nil {
 		t.Fatalf("insert changelog: %v", err)
@@ -68,7 +68,7 @@ func TestDBInfo(t *testing.T) {
 
 	g.jsonOut = true
 	out := captureStdout(t, func() {
-		if err := dbInfoCmd.RunE(dbInfoCmd, nil); err != nil {
+		if err := callRunE(dbInfoCmd, nil); err != nil {
 			t.Fatalf("RunE: %v", err)
 		}
 	})
@@ -99,7 +99,7 @@ func TestDBReset(t *testing.T) {
 	dbFile := setupDBTestGlobals(t)
 
 	issue := &db.Issue{Key: "TEST-1", Project: "TEST", Summary: "s", RawJSON: "{}"}
-	if err := g.db.UpsertIssue(issue, nil); err != nil {
+	if err := g.engine.Store.UpsertIssue(issue, nil); err != nil {
 		t.Fatalf("upsert issue: %v", err)
 	}
 
@@ -108,11 +108,11 @@ func TestDBReset(t *testing.T) {
 
 	// db reset closes and reopens the DB itself; root.go's PersistentPreRunE
 	// never opened it for this command, so drop our handle first to match.
-	g.db.Close()
-	g.db = nil
+	g.engine.Store.Close()
+	g.engine.Store = nil
 
 	captureStdout(t, func() {
-		if err := dbResetCmd.RunE(dbResetCmd, nil); err != nil {
+		if err := callRunE(dbResetCmd, nil); err != nil {
 			t.Fatalf("RunE: %v", err)
 		}
 	})
@@ -136,11 +136,11 @@ func TestDBResetNoConfirm(t *testing.T) {
 	dbFile := setupDBTestGlobals(t)
 
 	issue := &db.Issue{Key: "TEST-1", Project: "TEST", Summary: "s", RawJSON: "{}"}
-	if err := g.db.UpsertIssue(issue, nil); err != nil {
+	if err := g.engine.Store.UpsertIssue(issue, nil); err != nil {
 		t.Fatalf("upsert issue: %v", err)
 	}
-	g.db.Close()
-	g.db = nil
+	g.engine.Store.Close()
+	g.engine.Store = nil
 
 	dbResetForce = false
 
@@ -158,7 +158,7 @@ func TestDBResetNoConfirm(t *testing.T) {
 	t.Cleanup(func() { os.Stdin = origStdin })
 
 	captureStdout(t, func() {
-		if err := dbResetCmd.RunE(dbResetCmd, nil); err != nil {
+		if err := callRunE(dbResetCmd, nil); err != nil {
 			t.Fatalf("RunE: %v", err)
 		}
 	})

@@ -50,11 +50,13 @@ Examples:
   echo "description" | jai create ROX --type Bug --summary "Fix it" --body -`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+
+		app := cliFrom(cmd)
 		project := strings.ToUpper(args[0])
 
 		if createFlags.summary == "" {
 			msg := "summary is required (use --summary)"
-			if g.jsonOut {
+			if app.jsonOut {
 				fmt.Println(string(output.Err("ValidationError", msg)))
 				return nil
 			}
@@ -62,7 +64,7 @@ Examples:
 		}
 		if createFlags.issueType == "" {
 			msg := "issue type is required (use --type)"
-			if g.jsonOut {
+			if app.jsonOut {
 				fmt.Println(string(output.Err("ValidationError", msg)))
 				return nil
 			}
@@ -72,7 +74,7 @@ Examples:
 		// Resolve description from --template or --body (mutually exclusive).
 		if createFlags.template != "" && createFlags.body != "" {
 			msg := "--template and --body are mutually exclusive"
-			if g.jsonOut {
+			if app.jsonOut {
 				fmt.Println(string(output.Err("ValidationError", msg)))
 				return nil
 			}
@@ -80,9 +82,9 @@ Examples:
 		}
 
 		if createFlags.template != "" {
-			desc, err := resolveTemplate(createFlags.template)
+			desc, err := resolveTemplate(app, createFlags.template)
 			if err != nil {
-				if g.jsonOut {
+				if app.jsonOut {
 					fmt.Println(string(output.Err("ValidationError", err.Error())))
 					return nil
 				}
@@ -94,7 +96,7 @@ Examples:
 		if createFlags.body != "" {
 			desc, err := resolveBody(createFlags.body)
 			if err != nil {
-				if g.jsonOut {
+				if app.jsonOut {
 					fmt.Println(string(output.Err("ReadError", err.Error())))
 					return nil
 				}
@@ -136,9 +138,9 @@ Examples:
 		}
 
 		if createFlags.assignee != "" {
-			accountID, err := g.jira.ResolveAccountID(cmd.Context(), createFlags.assignee)
+			accountID, err := app.engine.Client.ResolveAccountID(cmd.Context(), createFlags.assignee)
 			if err != nil {
-				if g.jsonOut {
+				if app.jsonOut {
 					fmt.Println(string(output.Err("JiraError", err.Error())))
 					return nil
 				}
@@ -157,7 +159,7 @@ Examples:
 
 		// Apply arbitrary --field key=value pairs via the field map.
 		if len(createFlags.field) > 0 {
-			fieldMap, err := g.db.FieldMapByJiraID()
+			fieldMap, err := app.engine.Store.FieldMapByJiraID()
 			if err != nil {
 				return err
 			}
@@ -165,7 +167,7 @@ Examples:
 				parts := strings.SplitN(kv, "=", 2)
 				if len(parts) != 2 {
 					msg := fmt.Sprintf("invalid --field format %q (expected key=value)", kv)
-					if g.jsonOut {
+					if app.jsonOut {
 						fmt.Println(string(output.Err("ValidationError", msg)))
 						return nil
 					}
@@ -176,7 +178,7 @@ Examples:
 				jiraID := resolveFieldID(fieldMap, name)
 				if jiraID == "" {
 					msg := fmt.Sprintf("unknown field: %s (run 'jai fields' to see available fields)", name)
-					if g.jsonOut {
+					if app.jsonOut {
 						fmt.Println(string(output.Err("ValidationError", msg)))
 						return nil
 					}
@@ -191,9 +193,9 @@ Examples:
 			}
 		}
 
-		resp, err := g.jira.CreateIssue(cmd.Context(), fields)
+		resp, err := app.engine.Client.CreateIssue(cmd.Context(), fields)
 		if err != nil {
-			if g.jsonOut {
+			if app.jsonOut {
 				fmt.Println(string(output.Err("JiraError", err.Error())))
 				return nil
 			}
@@ -201,19 +203,19 @@ Examples:
 		}
 
 		// Fetch the full issue and insert into local DB.
-		apiIssue, fetchErr := g.jira.GetIssue(cmd.Context(), resp.Key)
+		apiIssue, fetchErr := app.engine.Client.GetIssue(cmd.Context(), resp.Key)
 		if fetchErr == nil {
 			rawJSON, _ := json.Marshal(apiIssue)
-			fieldMap, fmErr := g.db.FieldMapByJiraID()
+			fieldMap, fmErr := app.engine.Store.FieldMapByJiraID()
 			if fmErr == nil {
 				dbIssue, extra, denormErr := synce.Denormalize(rawJSON, fieldMap)
 				if denormErr == nil {
-					_ = g.db.UpsertIssue(dbIssue, extra)
+					_ = app.engine.Store.UpsertIssue(dbIssue, extra)
 				}
 			}
 		}
 
-		if g.jsonOut {
+		if app.jsonOut {
 			fmt.Println(string(output.OK(map[string]string{
 				"key":     resp.Key,
 				"id":      resp.ID,
@@ -243,11 +245,11 @@ func resolveFieldID(fieldMap map[string]*db.FieldMapping, name string) string {
 
 // resolveTemplate looks up a named template from the config and returns
 // its content. Returns an error if the template name is not found.
-func resolveTemplate(name string) (string, error) {
-	if g.cfg == nil || len(g.cfg.Templates) == 0 {
+func resolveTemplate(app *CLI, name string) (string, error) {
+	if app.engine.Config == nil || len(app.engine.Config.Templates) == 0 {
 		return "", fmt.Errorf("template not found: %s", name)
 	}
-	tmpl, ok := g.cfg.Templates[name]
+	tmpl, ok := app.engine.Config.Templates[name]
 	if !ok {
 		return "", fmt.Errorf("template not found: %s", name)
 	}

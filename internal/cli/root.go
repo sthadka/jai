@@ -11,14 +11,17 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/sthadka/jai/internal/cli/configloader"
 	"github.com/sthadka/jai/pkg/config"
+	"github.com/sthadka/jai/pkg/core"
 	"github.com/sthadka/jai/pkg/jira"
-	"github.com/sthadka/jai/pkg/query"
 	db "github.com/sthadka/jai/pkg/store"
 	synce "github.com/sthadka/jai/pkg/sync"
 )
 
-// globals holds shared state passed to sub-commands.
-type globals struct {
+// CLI holds one invocation's flag values and the assembled engine. It replaces
+// the former process-global `var g globals`: Execute constructs exactly one CLI
+// and threads it to every subcommand through the command context (see cliFrom),
+// so no package reaches for process-global engine state.
+type CLI struct {
 	cfgPath  string
 	dbPath   string
 	jsonOut  bool
@@ -28,15 +31,22 @@ type globals struct {
 	fields   string
 	format   string
 
-	cfg      *config.Config
-	db       *db.DB
-	jira     *jira.Client
-	query    *query.Engine
-	sync     *synce.Engine
+	engine   *core.Engine
 	bgWorker *synce.BackgroundWorker
 }
 
-var g globals
+// cliCtxKey is the context key under which the active *CLI is stored.
+type cliCtxKey struct{}
+
+// cliFrom returns the *CLI threaded through the command context by the root
+// command's PersistentPreRunE. It is the accessor every subcommand uses instead
+// of a package global.
+func cliFrom(cmd *cobra.Command) *CLI {
+	if v, ok := cmd.Context().Value(cliCtxKey{}).(*CLI); ok {
+		return v
+	}
+	return nil
+}
 
 // noAutoSync lists commands that should never trigger auto-sync.
 var noAutoSync = map[string]bool{
@@ -66,64 +76,78 @@ var noDBRequired = map[string]bool{
 	"path":  true,
 }
 
-func newRootCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "jai",
-		Short: "Query Jira with SQL",
-		Long:  "jai syncs Jira Cloud data to a local SQLite database and lets you query it with SQL.",
-		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-			if cmd.Name() == "help" || cmd.Name() == "completion" {
-				return nil
-			}
+// rootCmd is the cobra command tree. Subcommand files register themselves on it
+// in their init funcs; Execute binds an invocation's CLI to it.
+var rootCmd = &cobra.Command{
+	Use:   "jai",
+	Short: "Query Jira with SQL",
+	Long:  "jai syncs Jira Cloud data to a local SQLite database and lets you query it with SQL.",
+}
 
-			cfgPath := g.cfgPath
-			if cfgPath == "" {
-				cfgPath = config.DefaultConfigPath()
-			}
+// bindRoot wires one invocation's CLI to the root command: persistent flags bind
+// to app's fields, and PersistentPreRunE loads config, assembles the engine via
+// core.New, and stores app in the command context for subcommands to retrieve.
+func bindRoot(root *cobra.Command, app *CLI) {
+	root.PersistentFlags().StringVar(&app.cfgPath, "config", "", "config file (default: ~/.config/jai/config.yaml)")
+	root.PersistentFlags().StringVar(&app.dbPath, "db", "", "database file path")
+	root.PersistentFlags().BoolVar(&app.jsonOut, "json", false, "output as JSON")
+	root.PersistentFlags().BoolVar(&app.rawOut, "raw", false, "dump full Jira API JSON (get, query --jql)")
+	root.PersistentFlags().BoolVar(&app.noSync, "no-sync", false, "skip auto-sync")
+	root.PersistentFlags().BoolVar(&app.waitSync, "wait-sync", false, "wait for sync to complete before returning results")
+	root.PersistentFlags().StringVar(&app.fields, "fields", "", "comma-separated field names to include in output")
+	root.PersistentFlags().StringVar(&app.format, "format", "table", "output format: table, json, csv, tsv, markdown")
 
-			cfg, err := configloader.Load(cfgPath)
-			if err != nil {
-				return fmt.Errorf("loading config: %w -- run 'jai init' to set up jai", err)
-			}
-			if err := cfg.Validate(); err != nil {
-				return err
-			}
-			g.cfg = cfg
+	root.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
+		// Make the invocation's CLI available to every subcommand's RunE.
+		cmd.SetContext(context.WithValue(cmd.Context(), cliCtxKey{}, app))
 
-			if g.dbPath != "" {
-				g.cfg.DB.Path = g.dbPath
-			}
-
-			underDB := cmd.Parent() != nil && cmd.Parent().Name() == "db"
-			if underDB && noDBRequired[cmd.Name()] {
-				return nil
-			}
-
-			database, err := db.Open(g.cfg.DB.Path)
-			if err != nil {
-				return fmt.Errorf("opening database: %w", err)
-			}
-			g.db = database
-
-			g.jira = jira.New(cfg.Jira.URL, cfg.Jira.Email, cfg.Jira.Token, cfg.Sync.RateLimit)
-			g.query = query.New(database, cfg)
-			g.sync = synce.New(database, g.jira, cfg)
-
-			if !g.noSync && !noAutoSync[cmd.Name()] && !underDB {
-				if shouldAutoSync(database, cfg) {
-					runAutoSync(cmd.Context())
-				}
-			}
-
+		if cmd.Name() == "help" || cmd.Name() == "completion" {
 			return nil
-		},
+		}
+
+		cfgPath := app.cfgPath
+		if cfgPath == "" {
+			cfgPath = config.DefaultConfigPath()
+		}
+
+		cfg, err := configloader.Load(cfgPath)
+		if err != nil {
+			return fmt.Errorf("loading config: %w -- run 'jai init' to set up jai", err)
+		}
+		if err := cfg.Validate(); err != nil {
+			return err
+		}
+		if app.dbPath != "" {
+			cfg.DB.Path = app.dbPath
+		}
+
+		client := jira.New(cfg.Jira.URL, cfg.Jira.Email, cfg.Jira.Token, cfg.Sync.RateLimit)
+
+		underDB := cmd.Parent() != nil && cmd.Parent().Name() == "db"
+		if underDB && noDBRequired[cmd.Name()] {
+			// No DB connection needed; assemble an engine with config+client only.
+			app.engine = core.New(cfg, nil, client)
+			return nil
+		}
+
+		database, err := db.Open(cfg.DB.Path)
+		if err != nil {
+			return fmt.Errorf("opening database: %w", err)
+		}
+		app.engine = core.New(cfg, database, client)
+
+		if !app.noSync && !noAutoSync[cmd.Name()] && !underDB {
+			if shouldAutoSync(database, cfg) {
+				app.runAutoSync(cmd.Context())
+			}
+		}
+
+		return nil
 	}
 }
 
-var rootCmd = newRootCmd()
-
 // shouldAutoSync returns true if any sync source's last sync is older than the configured interval.
-func shouldAutoSync(database *db.DB, cfg *config.Config) bool {
+func shouldAutoSync(database db.Store, cfg *config.Config) bool {
 	interval, err := time.ParseDuration(cfg.Sync.Interval)
 	if err != nil {
 		interval = 15 * time.Minute
@@ -142,7 +166,7 @@ func shouldAutoSync(database *db.DB, cfg *config.Config) bool {
 	return false
 }
 
-func runAutoSync(ctx context.Context) {
+func (app *CLI) runAutoSync(ctx context.Context) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -152,7 +176,7 @@ func runAutoSync(ctx context.Context) {
 	// anonymous sync pull the wrong results — Jira returns very different data
 	// depending on auth. Transient (non-auth) failures fall through so cached
 	// reads still work offline; run with --no-sync to skip this entirely.
-	if err := g.sync.VerifyAuth(ctx); err != nil {
+	if err := app.engine.Sync.VerifyAuth(ctx); err != nil {
 		var authErr *jira.AuthError
 		if errors.As(err, &authErr) {
 			fmt.Fprintf(os.Stderr, "✗ Jira authentication failed: %v\n", authErr)
@@ -164,26 +188,26 @@ func runAutoSync(ctx context.Context) {
 	}
 
 	// If --wait-sync is set, use synchronous behavior
-	if g.waitSync {
-		runSyncSynchronous(ctx)
+	if app.waitSync {
+		app.runSyncSynchronous(ctx)
 		return
 	}
 
 	// Non-blocking: start background worker and return immediately
-	if g.bgWorker == nil {
-		interval, err := time.ParseDuration(g.cfg.Sync.Interval)
+	if app.bgWorker == nil {
+		interval, err := time.ParseDuration(app.engine.Config.Sync.Interval)
 		if err != nil {
 			interval = 15 * time.Minute
 		}
-		g.bgWorker = synce.NewBackgroundWorker(g.sync, interval)
-		g.bgWorker.Start(ctx)
+		app.bgWorker = synce.NewBackgroundWorker(app.engine.Sync, interval)
+		app.bgWorker.Start(ctx)
 	}
 
 	fmt.Fprintln(os.Stderr, "(syncing...)")
 }
 
-func runSyncSynchronous(ctx context.Context) {
-	ch, err := g.sync.Sync(ctx, false, false, "")
+func (app *CLI) runSyncSynchronous(ctx context.Context) {
+	ch, err := app.engine.Sync.Sync(ctx, false, false, "")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "sync: %v\n", err)
 		return
@@ -229,26 +253,26 @@ func runSyncSynchronous(ctx context.Context) {
 	}
 }
 
-// GetSyncAge returns the age of the last sync in seconds.
-// Returns -1 if never synced. First checks background worker,
-// then falls back to database sync metadata.
-func GetSyncAge() int {
+// syncAge returns the age of the last sync in seconds. Returns -1 if never
+// synced. First checks the background worker, then falls back to database sync
+// metadata.
+func (app *CLI) syncAge() int {
 	// Check background worker first
-	if g.bgWorker != nil {
-		age := g.bgWorker.SyncAge()
+	if app.bgWorker != nil {
+		age := app.bgWorker.SyncAge()
 		if age >= 0 {
 			return int(age.Seconds())
 		}
 	}
 
 	// Fall back to database sync metadata
-	if g.db == nil || g.cfg == nil {
+	if app.engine == nil || app.engine.Store == nil || app.engine.Config == nil {
 		return -1
 	}
 
 	var oldestSync time.Time
-	for _, src := range g.cfg.SyncSources {
-		meta, err := g.db.GetSyncMeta(src.Name)
+	for _, src := range app.engine.Config.SyncSources {
+		meta, err := app.engine.Store.GetSyncMeta(src.Name)
 		if err != nil || !meta.LastSyncTime.Valid || meta.LastSyncTime.String == "" {
 			continue
 		}
@@ -267,18 +291,9 @@ func GetSyncAge() int {
 	return int(time.Since(oldestSync).Seconds())
 }
 
-// Execute runs the root command.
+// Execute assembles the CLI and runs the root command.
 func Execute() error {
+	app := &CLI{}
+	bindRoot(rootCmd, app)
 	return rootCmd.Execute()
-}
-
-func init() {
-	rootCmd.PersistentFlags().StringVar(&g.cfgPath, "config", "", "config file (default: ~/.config/jai/config.yaml)")
-	rootCmd.PersistentFlags().StringVar(&g.dbPath, "db", "", "database file path")
-	rootCmd.PersistentFlags().BoolVar(&g.jsonOut, "json", false, "output as JSON")
-	rootCmd.PersistentFlags().BoolVar(&g.rawOut, "raw", false, "dump full Jira API JSON (get, query --jql)")
-	rootCmd.PersistentFlags().BoolVar(&g.noSync, "no-sync", false, "skip auto-sync")
-	rootCmd.PersistentFlags().BoolVar(&g.waitSync, "wait-sync", false, "wait for sync to complete before returning results")
-	rootCmd.PersistentFlags().StringVar(&g.fields, "fields", "", "comma-separated field names to include in output")
-	rootCmd.PersistentFlags().StringVar(&g.format, "format", "table", "output format: table, json, csv, tsv, markdown")
 }

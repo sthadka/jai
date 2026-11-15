@@ -18,14 +18,14 @@ const activeGenSub = `(SELECT generation FROM metrics_active_generation WHERE id
 // the database handle plus the canonical advisory-lock path derived from dbPath; every
 // writer takes that lock across its whole read/build/activation window.
 type Store struct {
-	db     *db.DB
+	db     db.Store
 	dbPath string
 }
 
-// NewStore binds a Store to a database and the on-disk path of that database. dbPath is
-// required to derive the cross-process advisory-lock sidecar path; pass the same path
-// used to open the DB.
-func NewStore(database *db.DB, dbPath string) *Store {
+// NewStore binds a Store to a persistence Store and the on-disk path of that
+// database. dbPath is required to derive the cross-process advisory-lock sidecar
+// path; pass the same path used to open the DB.
+func NewStore(database db.Store, dbPath string) *Store {
 	return &Store{db: database, dbPath: dbPath}
 }
 

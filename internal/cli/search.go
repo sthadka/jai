@@ -15,6 +15,8 @@ var searchCmd = &cobra.Command{
 	Short: "Full-text search across issues",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+
+		app := cliFrom(cmd)
 		text := args[0]
 
 		sql := fmt.Sprintf(`
@@ -25,16 +27,16 @@ var searchCmd = &cobra.Command{
 			ORDER BY issues_fts.rank
 			LIMIT %d`, searchLimit)
 
-		results, err := g.query.Execute(sql, text)
+		results, err := app.engine.Query.Execute(sql, text)
 		if err != nil && strings.Contains(err.Error(), "fts5: missing row") {
 			fmt.Fprintln(cmd.ErrOrStderr(), "FTS index out of sync, rebuilding...")
-			if rbErr := g.db.RebuildFTS(); rbErr != nil {
+			if rbErr := app.engine.Store.RebuildFTS(); rbErr != nil {
 				return fmt.Errorf("rebuilding FTS index: %w", rbErr)
 			}
-			results, err = g.query.Execute(sql, text)
+			results, err = app.engine.Query.Execute(sql, text)
 		}
 		if err != nil {
-			if g.jsonOut {
+			if app.jsonOut {
 				fmt.Println(string(output.Err("QueryError", err.Error())))
 				return nil
 			}
@@ -42,18 +44,18 @@ var searchCmd = &cobra.Command{
 		}
 
 		cols, rows := results.Columns, results.Rows
-		if g.fields != "" {
-			cols, rows = output.FilterColumns(cols, rows, output.ParseFields(g.fields))
+		if app.fields != "" {
+			cols, rows = output.FilterColumns(cols, rows, output.ParseFields(app.fields))
 		}
 
 		// --json flag takes precedence over --format for backward compatibility.
-		if g.jsonOut {
+		if app.jsonOut {
 			fmt.Println(string(output.OKQuery(cols, rows, len(rows))))
 			return nil
 		}
 
 		// Use --format flag.
-		switch g.format {
+		switch app.format {
 		case "json":
 			fmt.Println(string(output.OKQuery(cols, rows, len(rows))))
 		case "csv":

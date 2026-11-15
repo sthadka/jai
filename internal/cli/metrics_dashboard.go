@@ -49,19 +49,21 @@ Examples:
   jai metrics dashboard --port 8099
   jai metrics dashboard --snapshot flow.html --project ENG`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+
+		app := cliFrom(cmd)
 		if dashboardSnapshot != "" {
-			return runMetricsDashboardSnapshot()
+			return app.runMetricsDashboardSnapshot()
 		}
-		return runMetricsDashboardLive()
+		return app.runMetricsDashboardLive()
 	},
 }
 
 // runMetricsDashboardLive starts the persistent DuckDB-backed localhost server.
-func runMetricsDashboardLive() error {
-	_, pol, store := metricsService()
+func (app *CLI) runMetricsDashboardLive() error {
+	_, pol, store := app.metricsService()
 
 	engine, err := live.NewEngine(live.EngineConfig{
-		DBPath:           g.cfg.DB.Path,
+		DBPath:           app.engine.Config.DB.Path,
 		DoneResolutions:  pol.DoneResolutions(),
 		BlockerLinkTypes: pol.BlockerLinkTypes(),
 	})
@@ -71,15 +73,15 @@ func runMetricsDashboardLive() error {
 			fmt.Fprintln(os.Stderr, "  Install it with:  brew install duckdb")
 			fmt.Fprintln(os.Stderr, "  Or download from: https://duckdb.org/docs/installation/")
 			fmt.Fprintln(os.Stderr, "  (Alternatively, `jai metrics dashboard --snapshot dashboard.html` writes an offline snapshot with no duckdb dependency.)")
-			return metricErr("DuckDBNotFound", err)
+			return app.metricErr("DuckDBNotFound", err)
 		}
-		return metricErr("DashboardError", err)
+		return app.metricErr("DashboardError", err)
 	}
 	defer engine.Close()
 
 	projects, err := live.FetchProjects(engine)
 	if err != nil {
-		return metricErr("DashboardError", fmt.Errorf("list active-generation projects: %w", err))
+		return app.metricErr("DashboardError", fmt.Errorf("list active-generation projects: %w", err))
 	}
 
 	var gen any
@@ -88,11 +90,11 @@ func runMetricsDashboardLive() error {
 	}
 
 	srv := live.NewServer(engine, projects, gen)
-	srv.SetDashboards(dashboardCapabilities(pol), nil)
-	srv.SetJiraBaseURL(strings.TrimRight(g.cfg.Jira.URL, "/"))
+	srv.SetDashboards(app.dashboardCapabilities(pol), nil)
+	srv.SetJiraBaseURL(strings.TrimRight(app.engine.Config.Jira.URL, "/"))
 	url, httpSrv, err := srv.ListenAndServe(dashboardPort)
 	if err != nil {
-		return metricErr("DashboardError", fmt.Errorf("bind localhost server: %w", err))
+		return app.metricErr("DashboardError", fmt.Errorf("bind localhost server: %w", err))
 	}
 
 	fmt.Printf("Live flow-metrics dashboard: %s\n", url)
@@ -117,11 +119,11 @@ func runMetricsDashboardLive() error {
 // metrics policy/config so config-dependent panels (blocker ageing, security SLA)
 // render live only when their taxonomy is configured, and otherwise fall back to
 // explicit unavailable cards instead of fabricated data.
-func dashboardCapabilities(pol *metrics.Policy) map[string]bool {
+func (app *CLI) dashboardCapabilities(pol *metrics.Policy) map[string]bool {
 	caps := map[string]bool{
 		"blocker_link_types": len(pol.BlockerLinkTypes()) > 0,
 	}
-	if m := g.cfg.Metrics; m.SLA != nil && m.SLA.Security != nil {
+	if m := app.engine.Config.Metrics; m.SLA != nil && m.SLA.Security != nil {
 		caps["security_sla"] = true
 	}
 	return caps
@@ -130,20 +132,20 @@ func dashboardCapabilities(pol *metrics.Policy) map[string]bool {
 // runMetricsDashboardSnapshot freezes the current view to a self-contained offline HTML
 // artifact (pure-SVG, inlined JSON, no server, no deps) and exits without serving. Reachable
 // via --snapshot.
-func runMetricsDashboardSnapshot() error {
-	svc, pol, _ := metricsService()
+func (app *CLI) runMetricsDashboardSnapshot() error {
+	svc, pol, _ := app.metricsService()
 
 	asOf, err := parseMetricTime(metricAsOf)
 	if err != nil {
-		return metricErr("InvalidArgument", err)
+		return app.metricErr("InvalidArgument", err)
 	}
 	from, err := parseMetricTime(dashboardFrom)
 	if err != nil {
-		return metricErr("InvalidArgument", err)
+		return app.metricErr("InvalidArgument", err)
 	}
 	to, err := parseMetricTime(dashboardTo)
 	if err != nil {
-		return metricErr("InvalidArgument", err)
+		return app.metricErr("InvalidArgument", err)
 	}
 
 	opts := metrics.DashboardOptions{
@@ -157,7 +159,7 @@ func runMetricsDashboardSnapshot() error {
 
 	html, err := metrics.ExportDashboard(svc, opts)
 	if err != nil {
-		return metricErr("DashboardError", err)
+		return app.metricErr("DashboardError", err)
 	}
 
 	// Config rejections are already scoped to the affected metric (those sections render as
@@ -166,10 +168,10 @@ func runMetricsDashboardSnapshot() error {
 
 	path := dashboardSnapshot
 	if err := os.WriteFile(path, html, 0o644); err != nil {
-		return metricErr("DashboardError", fmt.Errorf("write %s: %w", path, err))
+		return app.metricErr("DashboardError", fmt.Errorf("write %s: %w", path, err))
 	}
 
-	if g.jsonOut || g.format == "json" {
+	if app.jsonOut || app.format == "json" {
 		fmt.Println(string(output.OK(map[string]interface{}{
 			"path":       path,
 			"bytes":      len(html),

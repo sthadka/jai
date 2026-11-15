@@ -11,7 +11,7 @@ import (
 // DetectDeletions identifies issues that exist locally but not in Jira and
 // removes them, returning the number deleted. It is a thin wrapper over
 // DetectDeletedKeys for callers that only need the count. Runs during full sync.
-func DetectDeletions(ctx context.Context, database *db.DB, client *jira.Client, project string) (int, error) {
+func DetectDeletions(ctx context.Context, database db.Store, client jira.JiraClient, project string) (int, error) {
 	keys, err := DetectDeletedKeys(ctx, database, client, project)
 	return len(keys), err
 }
@@ -19,7 +19,7 @@ func DetectDeletions(ctx context.Context, database *db.DB, client *jira.Client, 
 // DetectDeletedKeys identifies issues that exist locally but not in Jira, removes
 // them, and returns the deleted issue keys so the caller can purge their derived
 // facts (metric rollups) within the active generation. Runs during full sync.
-func DetectDeletedKeys(ctx context.Context, database *db.DB, client *jira.Client, project string) ([]string, error) {
+func DetectDeletedKeys(ctx context.Context, database db.Store, client jira.JiraClient, project string) ([]string, error) {
 	// Fetch all issue keys from Jira.
 	jql := fmt.Sprintf(`project = "%s" ORDER BY key ASC`, project)
 	remoteKeys := make(map[string]bool)

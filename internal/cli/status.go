@@ -43,31 +43,33 @@ var statusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show sync and queue status",
 	RunE: func(cmd *cobra.Command, args []string) error {
+
+		app := cliFrom(cmd)
 		ctx := cmd.Context()
 
 		// Auth check.
-		me, authErr := g.jira.MySelf(ctx)
+		me, authErr := app.engine.Client.MySelf(ctx)
 
-		metas, err := g.db.AllSyncMeta()
+		metas, err := app.engine.Store.AllSyncMeta()
 		if err != nil {
-			if g.jsonOut {
+			if app.jsonOut {
 				fmt.Println(string(output.Err("QueryError", err.Error())))
 				return nil
 			}
 			return err
 		}
 
-		totalIssues, _ := g.db.TotalIssueCount()
-		countByProject, _ := g.db.IssueCountByProject()
+		totalIssues, _ := app.engine.Store.TotalIssueCount()
+		countByProject, _ := app.engine.Store.IssueCountByProject()
 
-		pendingCount, err := g.db.CountPendingChanges()
+		pendingCount, err := app.engine.Store.CountPendingChanges()
 		if err != nil {
 			pendingCount = 0
 		}
 
-		dbInfo, _ := os.Stat(g.cfg.DB.Path)
+		dbInfo, _ := os.Stat(app.engine.Config.DB.Path)
 
-		if g.jsonOut {
+		if app.jsonOut {
 			auth := map[string]any{"ok": authErr == nil}
 			if authErr != nil {
 				auth["error"] = authErr.Error()

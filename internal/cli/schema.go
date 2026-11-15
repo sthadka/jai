@@ -190,6 +190,8 @@ var schemaDBCmd = &cobra.Command{
 	Use:   "db [table]",
 	Short: "Show database schema (for AI agents)",
 	RunE: func(cmd *cobra.Command, args []string) error {
+
+		app := cliFrom(cmd)
 		tableName := "issues"
 		if len(args) > 0 {
 			tableName = args[0]
@@ -197,7 +199,7 @@ var schemaDBCmd = &cobra.Command{
 
 		// Handle changelog table separately.
 		if tableName == "changelog" {
-			rows, err := g.db.Query("PRAGMA table_info(changelog)")
+			rows, err := app.engine.Store.Query("PRAGMA table_info(changelog)")
 			if err != nil {
 				fmt.Println(string(output.Err("QueryError", err.Error())))
 				return nil
@@ -230,7 +232,7 @@ var schemaDBCmd = &cobra.Command{
 		}
 
 		// Handle issues table.
-		rows, err := g.db.Query("PRAGMA table_info(issues)")
+		rows, err := app.engine.Store.Query("PRAGMA table_info(issues)")
 		if err != nil {
 			fmt.Println(string(output.Err("QueryError", err.Error())))
 			return nil
@@ -262,7 +264,7 @@ var schemaDBCmd = &cobra.Command{
 		rows.Close()
 
 		// Enrich columns with jira_name and custom flag from field_map.
-		metaRows, err := g.db.Query("SELECT name, jira_name, is_custom FROM field_map WHERE is_column = 1")
+		metaRows, err := app.engine.Store.Query("SELECT name, jira_name, is_custom FROM field_map WHERE is_column = 1")
 		if err == nil {
 			type fieldMeta struct {
 				jiraName string
@@ -303,6 +305,8 @@ var schemaValuesCmd = &cobra.Command{
 	Short: "List distinct values for a column with frequency counts (for AI agents)",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+
+		app := cliFrom(cmd)
 		col := args[0]
 		if !safeColumnRe.MatchString(col) {
 			fmt.Println(string(output.Err("InvalidColumn", "column name contains invalid characters")))
@@ -310,7 +314,7 @@ var schemaValuesCmd = &cobra.Command{
 		}
 
 		sql := fmt.Sprintf(`SELECT "%s", COUNT(*) as count FROM issues WHERE "%s" IS NOT NULL AND "%s" != '' GROUP BY "%s" ORDER BY count DESC LIMIT 200`, col, col, col, col)
-		rows, err := g.db.Query(sql)
+		rows, err := app.engine.Store.Query(sql)
 		if err != nil {
 			fmt.Println(string(output.Err("QueryError", err.Error())))
 			return nil
@@ -342,7 +346,9 @@ var schemaTemplatesCmd = &cobra.Command{
 	Use:   "templates",
 	Short: "List available issue templates (for AI agents)",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if g.cfg == nil || len(g.cfg.Templates) == 0 {
+
+		app := cliFrom(cmd)
+		if app.engine.Config == nil || len(app.engine.Config.Templates) == 0 {
 			fmt.Println(string(output.OK(map[string]interface{}{
 				"templates": []string{},
 				"count":     0,
@@ -350,8 +356,8 @@ var schemaTemplatesCmd = &cobra.Command{
 			return nil
 		}
 
-		names := make([]string, 0, len(g.cfg.Templates))
-		for name := range g.cfg.Templates {
+		names := make([]string, 0, len(app.engine.Config.Templates))
+		for name := range app.engine.Config.Templates {
 			names = append(names, name)
 		}
 		sort.Strings(names)
@@ -370,7 +376,9 @@ var schemaSnippetsCmd = &cobra.Command{
 	Use:   "snippets",
 	Short: "List available SQL snippets (for AI agents)",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if g.cfg == nil || len(g.cfg.Snippets) == 0 {
+
+		app := cliFrom(cmd)
+		if app.engine.Config == nil || len(app.engine.Config.Snippets) == 0 {
 			fmt.Println(string(output.OK(map[string]interface{}{
 				"snippets": []interface{}{},
 				"count":    0,
@@ -378,8 +386,8 @@ var schemaSnippetsCmd = &cobra.Command{
 			return nil
 		}
 
-		names := make([]string, 0, len(g.cfg.Snippets))
-		for name := range g.cfg.Snippets {
+		names := make([]string, 0, len(app.engine.Config.Snippets))
+		for name := range app.engine.Config.Snippets {
 			names = append(names, name)
 		}
 		sort.Strings(names)
@@ -393,8 +401,8 @@ var schemaSnippetsCmd = &cobra.Command{
 		snippets := make([]snippetInfo, 0, len(names))
 		now := time.Now()
 		for _, name := range names {
-			raw := g.cfg.Snippets[name]
-			expanded, err := query.ExpandSnippet(raw, now, g.cfg)
+			raw := app.engine.Config.Snippets[name]
+			expanded, err := query.ExpandSnippet(raw, now, app.engine.Config)
 			if err != nil {
 				expanded = fmt.Sprintf("<error: %s>", err.Error())
 			}

@@ -30,19 +30,21 @@ var viewCmd = &cobra.Command{
 	Use:   "view [name]",
 	Short: "Execute a named view query",
 	RunE: func(cmd *cobra.Command, args []string) error {
+
+		app := cliFrom(cmd)
 		// Surface generated metric fragments/views (in-memory; never persisted).
-		if _, _, collisions := applyGeneratedMetrics(g.cfg); len(collisions) > 0 {
+		if _, _, collisions := applyGeneratedMetrics(app.engine.Config); len(collisions) > 0 {
 			fmt.Fprintf(os.Stderr, "note: generated metric names overridden by user config: %v\n", collisions)
 		}
 
 		if len(args) == 0 {
 			// List available views.
-			views := g.cfg.Views
+			views := app.engine.Config.Views
 			if len(views) == 0 {
 				fmt.Println("No views configured. Add views to your config file.")
 				return nil
 			}
-			if g.jsonOut {
+			if app.jsonOut {
 				list := make([]map[string]string, len(views))
 				for i, v := range views {
 					list[i] = map[string]string{"name": v.Name, "title": v.Title}
@@ -58,19 +60,19 @@ var viewCmd = &cobra.Command{
 		}
 
 		name := args[0]
-		view := g.cfg.ViewByName(name)
+		view := app.engine.Config.ViewByName(name)
 		if view == nil {
 			msg := fmt.Sprintf("unknown view: %s", name)
-			if g.jsonOut {
+			if app.jsonOut {
 				fmt.Println(string(output.Err("NotFoundError", msg)))
 				return nil
 			}
 			return fmt.Errorf("%s", msg)
 		}
 
-		results, err := g.query.Execute(view.Query)
+		results, err := app.engine.Query.Execute(view.Query)
 		if err != nil {
-			if g.jsonOut {
+			if app.jsonOut {
 				fmt.Println(string(output.Err("QueryError", err.Error())))
 				return nil
 			}
@@ -85,22 +87,22 @@ var viewCmd = &cobra.Command{
 		}
 
 		// Apply --fields override.
-		if g.fields != "" {
-			cols, rows = output.FilterColumns(cols, rows, output.ParseFields(g.fields))
+		if app.fields != "" {
+			cols, rows = output.FilterColumns(cols, rows, output.ParseFields(app.fields))
 		}
 
 		// --json flag takes precedence over --format for backward compatibility.
-		if g.jsonOut {
+		if app.jsonOut {
 			fmt.Println(string(output.OKQuery(cols, rows, len(rows))))
 			return nil
 		}
 
-		if view.Title != "" && (g.format == "table" || g.format == "") {
+		if view.Title != "" && (app.format == "table" || app.format == "") {
 			fmt.Printf("=== %s ===\n", view.Title)
 		}
 
 		// Use --format flag.
-		switch g.format {
+		switch app.format {
 		case "json":
 			fmt.Println(string(output.OKQuery(cols, rows, len(rows))))
 		case "csv":

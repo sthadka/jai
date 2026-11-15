@@ -13,7 +13,7 @@ import (
 )
 
 // insertTestIssue inserts a test issue into the database.
-func insertTestIssue(t *testing.T, database *db.DB, key, project, summary, status string) {
+func insertTestIssue(t *testing.T, database db.Store, key, project, summary, status string) {
 	t.Helper()
 
 	issue := &db.Issue{

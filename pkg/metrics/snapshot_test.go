@@ -17,7 +17,7 @@ func snapshotService(t *testing.T, pol *Policy) (*db.DB, *Service) {
 }
 
 // upIssueA inserts an issue including an assignee (upIssue omits it).
-func upIssueA(t *testing.T, database *db.DB, key, project, itype, status, category, created, resolved, resolution, assignee string) {
+func upIssueA(t *testing.T, database db.Store, key, project, itype, status, category, created, resolved, resolution, assignee string) {
 	t.Helper()
 	iss := &db.Issue{
 		Key: key, Project: project, Type: itype, Summary: key,

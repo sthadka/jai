@@ -35,7 +35,7 @@ func newFactStore(t *testing.T) (*db.DB, *Store) {
 
 // upIssue inserts/updates an issue with the given current fields; synced marks the
 // changelog as fetched (HistoryComplete).
-func upIssue(t *testing.T, database *db.DB, key, project, itype, status, category, created, resolved, resolution string, synced bool) {
+func upIssue(t *testing.T, database db.Store, key, project, itype, status, category, created, resolved, resolution string, synced bool) {
 	t.Helper()
 	iss := &db.Issue{
 		Key: key, Project: project, Type: itype, Summary: key,
@@ -51,7 +51,7 @@ func upIssue(t *testing.T, database *db.DB, key, project, itype, status, categor
 	}
 }
 
-func cl(t *testing.T, database *db.DB, id, key, fromS, toS, at string) {
+func cl(t *testing.T, database db.Store, id, key, fromS, toS, at string) {
 	t.Helper()
 	if err := database.InsertChangelog(&db.ChangelogEntry{
 		ID: id, IssueKey: key, Field: "status",
@@ -70,7 +70,7 @@ func findFlow(rows []FlowRow, key string) *FlowRow {
 	return nil
 }
 
-func genCount(t *testing.T, database *db.DB) int {
+func genCount(t *testing.T, database db.Store) int {
 	t.Helper()
 	var n int
 	if err := database.QueryRow(`SELECT COUNT(*) FROM metrics_generation`).Scan(&n); err != nil {

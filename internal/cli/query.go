@@ -51,6 +51,8 @@ Use --sql or --local-jql to override auto-detection explicitly.`,
 		return cobra.ExactArgs(1)(cmd, args)
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
+
+		app := cliFrom(cmd)
 		arg := ""
 		if len(args) > 0 {
 			arg = args[0]
@@ -60,18 +62,18 @@ Use --sql or --local-jql to override auto-detection explicitly.`,
 			return err
 		}
 		if route == routeLiveJQL {
-			if g.rawOut {
-				return runJQLQueryRaw(queryJQL)
+			if app.rawOut {
+				return app.runJQLQueryRaw(queryJQL)
 			}
-			return runJQLQuery(queryJQL)
+			return app.runJQLQuery(queryJQL)
 		}
-		if g.rawOut {
+		if app.rawOut {
 			return fmt.Errorf("--raw is only supported with --jql")
 		}
 		if route == routeSQL {
-			return runSQLQuery(arg)
+			return app.runSQLQuery(arg)
 		}
-		return runLocalJQLQuery(arg)
+		return app.runLocalJQLQuery(arg)
 	},
 }
 
@@ -127,10 +129,10 @@ func leadingTokenIsSQL(arg string) bool {
 	}
 }
 
-func runSQLQuery(sql string) error {
-	results, err := g.query.Execute(sql)
+func (app *CLI) runSQLQuery(sql string) error {
+	results, err := app.engine.Query.Execute(sql)
 	if err != nil {
-		if g.jsonOut {
+		if app.jsonOut {
 			fmt.Println(string(output.Err("QueryError", err.Error())))
 			return nil
 		}
@@ -138,21 +140,21 @@ func runSQLQuery(sql string) error {
 	}
 
 	cols, rows := results.Columns, results.Rows
-	if g.fields != "" {
-		cols, rows = output.FilterColumns(cols, rows, output.ParseFields(g.fields))
+	if app.fields != "" {
+		cols, rows = output.FilterColumns(cols, rows, output.ParseFields(app.fields))
 	}
 
 	// --json flag takes precedence over --format for backward compatibility.
-	if g.jsonOut {
-		syncAge := GetSyncAge()
+	if app.jsonOut {
+		syncAge := app.syncAge()
 		fmt.Println(string(output.OKQueryWithMeta(cols, rows, len(rows), syncAge)))
 		return nil
 	}
 
 	// Use --format flag.
-	switch g.format {
+	switch app.format {
 	case "json":
-		syncAge := GetSyncAge()
+		syncAge := app.syncAge()
 		fmt.Println(string(output.OKQueryWithMeta(cols, rows, len(rows), syncAge)))
 	case "csv":
 		fmt.Print(output.CSV(cols, rows))
@@ -176,41 +178,41 @@ var jqlColumnRe = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 // internal/jql translator and runs the compiled SQL through the existing SQL
 // path, so --format/--fields and the --json envelope behave identically to a
 // bare SQL query (design §16.3/§16.4).
-func runLocalJQLQuery(jqlStr string) error {
-	fieldMap, err := buildJQLFieldMap()
+func (app *CLI) runLocalJQLQuery(jqlStr string) error {
+	fieldMap, err := app.buildJQLFieldMap()
 	if err != nil {
-		return jqlLocalError(err)
+		return app.jqlLocalError(err)
 	}
 
 	opts := jql.Options{
 		Dialect:    jql.SQLite,
 		FieldMap:   fieldMap,
-		IDResolver: jqlIDResolver(fieldMap),
+		IDResolver: app.jqlIDResolver(fieldMap),
 		Now:        time.Now(),
 	}
-	if g.cfg != nil {
-		opts.CurrentUser = g.cfg.Jira.Email
+	if app.engine.Config != nil {
+		opts.CurrentUser = app.engine.Config.Jira.Email
 	}
 	// The shared default projection names columns (e.g. team) that may not exist
 	// in this snapshot's issues table; restrict it to columns actually present so
 	// the compiled SELECT is valid SQLite (design §16.4).
-	cols, err := localJQLSelectColumns()
+	cols, err := app.localJQLSelectColumns()
 	if err != nil {
-		return jqlLocalError(err)
+		return app.jqlLocalError(err)
 	}
 	opts.SelectColumns = cols
 
 	res, err := jql.Translate(jqlStr, opts)
 	if err != nil {
-		return jqlLocalError(err)
+		return app.jqlLocalError(err)
 	}
-	return runSQLQuery(res.SQL)
+	return app.runSQLQuery(res.SQL)
 }
 
 // jqlLocalError reports a local-JQL translation failure, honoring the --json
 // error envelope the same way runSQLQuery does for SQL errors.
-func jqlLocalError(err error) error {
-	if g.jsonOut {
+func (app *CLI) jqlLocalError(err error) error {
+	if app.jsonOut {
 		fmt.Println(string(output.Err("JQLError", err.Error())))
 		return nil
 	}
@@ -224,8 +226,8 @@ var localJQLDefaultColumns = []string{"key", "type", "priority", "status", "team
 
 // localJQLSelectColumns returns the default projection restricted to columns that
 // exist in the local issues table.
-func localJQLSelectColumns() ([]string, error) {
-	existing, err := issuesColumnSet()
+func (app *CLI) localJQLSelectColumns() ([]string, error) {
+	existing, err := app.issuesColumnSet()
 	if err != nil {
 		return nil, err
 	}
@@ -242,8 +244,8 @@ func localJQLSelectColumns() ([]string, error) {
 }
 
 // issuesColumnSet reads the physical column names of the issues table.
-func issuesColumnSet() (map[string]bool, error) {
-	rows, err := g.db.Query("PRAGMA table_info(issues)")
+func (app *CLI) issuesColumnSet() (map[string]bool, error) {
+	rows, err := app.engine.Store.Query("PRAGMA table_info(issues)")
 	if err != nil {
 		return nil, err
 	}
@@ -269,8 +271,8 @@ func issuesColumnSet() (map[string]bool, error) {
 // buildJQLFieldMap builds the translator's field map from the local field_map,
 // mapping both the canonical Name and the Jira display name (JiraName),
 // case-insensitively, to the physical column (design §16.3).
-func buildJQLFieldMap() (jql.FieldMap, error) {
-	mappings, err := g.db.AllFieldMappings()
+func (app *CLI) buildJQLFieldMap() (jql.FieldMap, error) {
+	mappings, err := app.engine.Store.AllFieldMappings()
 	if err != nil {
 		return nil, err
 	}
@@ -316,7 +318,7 @@ func jqlIsEntity(m *db.FieldMapping) bool {
 // snapshot. It finds the id anywhere in the stored raw_json and reads back the
 // field's column; a unique value wins, zero or ambiguous (>1) matches fail so
 // the resolver can reject the id with guidance (design §8.5/§16.3).
-func jqlIDResolver(fm jql.FieldMap) jql.IDResolver {
+func (app *CLI) jqlIDResolver(fm jql.FieldMap) jql.IDResolver {
 	return func(field, id string) (string, bool, error) {
 		def, ok := fm[strings.ToLower(field)]
 		if !ok || !jqlColumnRe.MatchString(def.Column) {
@@ -325,7 +327,7 @@ func jqlIDResolver(fm jql.FieldMap) jql.IDResolver {
 		col := def.Column
 		q := "SELECT DISTINCT " + col + " FROM issues WHERE raw_json LIKE '%'||?||'%' AND " +
 			col + " IS NOT NULL AND " + col + " <> '' LIMIT 2"
-		rows, err := g.db.Query(q, id)
+		rows, err := app.engine.Store.Query(q, id)
 		if err != nil {
 			return "", false, err
 		}
@@ -386,18 +388,18 @@ func jqlColumnsToAPIFields(cols []string) []string {
 	return fields
 }
 
-func runJQLQuery(jql string) error {
+func (app *CLI) runJQLQuery(jql string) error {
 	cols := jqlColumns
 	apiFields := jqlAPIFields
-	if g.fields != "" {
-		cols = output.ParseFields(g.fields)
+	if app.fields != "" {
+		cols = output.ParseFields(app.fields)
 		apiFields = jqlColumnsToAPIFields(cols)
 	}
 
 	var rows [][]interface{}
-	for page, err := range g.jira.SearchAll(context.Background(), jql, apiFields) {
+	for page, err := range app.engine.Client.SearchAll(context.Background(), jql, apiFields) {
 		if err != nil {
-			if g.jsonOut {
+			if app.jsonOut {
 				fmt.Println(string(output.Err("JQLError", err.Error())))
 				return nil
 			}
@@ -413,16 +415,16 @@ func runJQLQuery(jql string) error {
 	}
 
 	// --json flag takes precedence over --format for backward compatibility.
-	if g.jsonOut {
-		syncAge := GetSyncAge()
+	if app.jsonOut {
+		syncAge := app.syncAge()
 		fmt.Println(string(output.OKQueryWithMeta(cols, rows, len(rows), syncAge)))
 		return nil
 	}
 
 	// Use --format flag.
-	switch g.format {
+	switch app.format {
 	case "json":
-		syncAge := GetSyncAge()
+		syncAge := app.syncAge()
 		fmt.Println(string(output.OKQueryWithMeta(cols, rows, len(rows), syncAge)))
 	case "csv":
 		fmt.Print(output.CSV(cols, rows))
@@ -437,11 +439,11 @@ func runJQLQuery(jql string) error {
 	return nil
 }
 
-func runJQLQueryRaw(jql string) error {
+func (app *CLI) runJQLQueryRaw(jql string) error {
 	var issues []*jira.Issue
-	for page, err := range g.jira.SearchAll(context.Background(), jql, []string{"*all"}) {
+	for page, err := range app.engine.Client.SearchAll(context.Background(), jql, []string{"*all"}) {
 		if err != nil {
-			if g.jsonOut {
+			if app.jsonOut {
 				fmt.Println(string(output.Err("JQLError", err.Error())))
 				return nil
 			}
@@ -450,7 +452,7 @@ func runJQLQueryRaw(jql string) error {
 		issues = append(issues, page...)
 	}
 
-	if g.jsonOut {
+	if app.jsonOut {
 		b, _ := json.Marshal(issues)
 		result := map[string]interface{}{
 			"ok":    true,

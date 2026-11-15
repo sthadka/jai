@@ -37,8 +37,8 @@ type App struct {
 	cfg        *config.Config
 	queryEng   *query.Engine
 	syncEngine *synce.Engine
-	database   *db.DB
-	jiraClient *jira.Client
+	database   db.Store
+	jiraClient jira.JiraClient
 	views      []config.ViewConfig
 	activeView int
 	tables     []*TableModel
@@ -76,7 +76,7 @@ type App struct {
 }
 
 // New creates a new App model.
-func New(cfg *config.Config, queryEng *query.Engine, syncEng *synce.Engine, database *db.DB, jiraClient *jira.Client) *App {
+func New(cfg *config.Config, queryEng *query.Engine, syncEng *synce.Engine, database db.Store, jiraClient jira.JiraClient) *App {
 	ti := textinput.New()
 	ti.Placeholder = "filter..."
 	ti.CharLimit = 100

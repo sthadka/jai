@@ -22,7 +22,7 @@ func workloadPolicy() *Policy {
 }
 
 // upIssueFull inserts an issue carrying an assignee; synced marks changelog history complete.
-func upIssueFull(t *testing.T, database *db.DB, key, project, itype, status, category, created, resolved, resolution, assignee string, synced bool) {
+func upIssueFull(t *testing.T, database db.Store, key, project, itype, status, category, created, resolved, resolution, assignee string, synced bool) {
 	t.Helper()
 	iss := &db.Issue{
 		Key: key, Project: project, Type: itype, Summary: key,

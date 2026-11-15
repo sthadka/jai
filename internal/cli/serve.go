@@ -27,6 +27,8 @@ Examples:
   jai serve --toolsets read,schema    # enable only read and schema tools
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
+
+		app := cliFrom(cmd)
 		transport, _ := cmd.Flags().GetString("transport")
 		port, _ := cmd.Flags().GetInt("port")
 		readOnly, _ := cmd.Flags().GetBool("read-only")
@@ -34,32 +36,32 @@ Examples:
 
 		// Override config with CLI flags
 		if readOnly {
-			g.cfg.MCP.ReadOnly = true
+			app.engine.Config.MCP.ReadOnly = true
 		}
 		if toolsets != "" {
-			g.cfg.MCP.Toolsets = strings.Split(toolsets, ",")
+			app.engine.Config.MCP.Toolsets = strings.Split(toolsets, ",")
 		}
 
 		// Discover fields first (non-fatal for serve - will retry in background sync)
 		var overrides map[string]string
-		if g.cfg.Fields.Overrides != nil {
-			overrides = g.cfg.Fields.Overrides
+		if app.engine.Config.Fields.Overrides != nil {
+			overrides = app.engine.Config.Fields.Overrides
 		}
-		if err := g.sync.DiscoverFields(cmd.Context(), overrides); err != nil {
+		if err := app.engine.Sync.DiscoverFields(cmd.Context(), overrides); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: field discovery failed (will retry in background): %v\n", err)
 		}
 
 		// Start background sync worker
-		interval, err := time.ParseDuration(g.cfg.Sync.Interval)
+		interval, err := time.ParseDuration(app.engine.Config.Sync.Interval)
 		if err != nil {
 			interval = 15 * time.Minute
 		}
-		bgWorker := synce.NewBackgroundWorker(g.sync, interval)
+		bgWorker := synce.NewBackgroundWorker(app.engine.Sync, interval)
 		bgWorker.Start(cmd.Context())
 		defer bgWorker.Stop()
 
 		// Create MCP server
-		srv := mcpkg.New(g.cfg, g.db, g.jira, g.query, g.sync)
+		srv := mcpkg.New(app.engine.Config, app.engine.Store, app.engine.Client, app.engine.Query, app.engine.Sync)
 
 		ctx := cmd.Context()
 		switch transport {

@@ -32,14 +32,14 @@ func setupTestGlobals(t *testing.T) {
 		t.Fatalf("upsert issue: %v", err)
 	}
 
-	g.db = database
-	g.query = query.New(database, &config.Config{})
+	g.engine.Store = database
+	g.engine.Query = query.New(database, &config.Config{})
 	g.jsonOut = false
 	g.fields = ""
 	g.format = ""
 	t.Cleanup(func() {
-		g.db = nil
-		g.query = nil
+		g.engine.Store = nil
+		g.engine.Query = nil
 		g.jsonOut = false
 		g.fields = ""
 		g.format = ""
@@ -72,7 +72,7 @@ func TestGetFieldsHumanOutput(t *testing.T) {
 	g.fields = "status"
 
 	out := captureStdout(t, func() {
-		if err := getCmd.RunE(getCmd, []string{"TEST-1"}); err != nil {
+		if err := callRunE(getCmd, []string{"TEST-1"}); err != nil {
 			t.Fatalf("RunE: %v", err)
 		}
 	})
@@ -95,7 +95,7 @@ func TestGetFieldsHumanOutput_KeySummary(t *testing.T) {
 	g.fields = "key,summary"
 
 	out := captureStdout(t, func() {
-		if err := getCmd.RunE(getCmd, []string{"TEST-1"}); err != nil {
+		if err := callRunE(getCmd, []string{"TEST-1"}); err != nil {
 			t.Fatalf("RunE: %v", err)
 		}
 	})
@@ -121,7 +121,7 @@ func TestGetFieldsJSONOutput(t *testing.T) {
 	g.fields = "summary,status"
 
 	out := captureStdout(t, func() {
-		if err := getCmd.RunE(getCmd, []string{"TEST-1"}); err != nil {
+		if err := callRunE(getCmd, []string{"TEST-1"}); err != nil {
 			t.Fatalf("RunE: %v", err)
 		}
 	})
@@ -150,7 +150,7 @@ func TestGetNoFields(t *testing.T) {
 	setupTestGlobals(t)
 
 	out := captureStdout(t, func() {
-		if err := getCmd.RunE(getCmd, []string{"TEST-1"}); err != nil {
+		if err := callRunE(getCmd, []string{"TEST-1"}); err != nil {
 			t.Fatalf("RunE: %v", err)
 		}
 	})
@@ -173,7 +173,7 @@ func TestGetFormatMarkdown(t *testing.T) {
 	g.format = "markdown"
 
 	out := captureStdout(t, func() {
-		if err := getCmd.RunE(getCmd, []string{"TEST-1"}); err != nil {
+		if err := callRunE(getCmd, []string{"TEST-1"}); err != nil {
 			t.Fatalf("RunE: %v", err)
 		}
 	})
@@ -195,7 +195,7 @@ func TestGetFormatCSV(t *testing.T) {
 	g.format = "csv"
 
 	out := captureStdout(t, func() {
-		if err := getCmd.RunE(getCmd, []string{"TEST-1"}); err != nil {
+		if err := callRunE(getCmd, []string{"TEST-1"}); err != nil {
 			t.Fatalf("RunE: %v", err)
 		}
 	})
@@ -214,7 +214,7 @@ func TestGetFormatsUseSameCuratedFieldsByDefault(t *testing.T) {
 	for _, format := range []string{"table", "json", "csv", "tsv", "markdown"} {
 		g.format = format
 		out := captureStdout(t, func() {
-			if err := getCmd.RunE(getCmd, []string{"TEST-1"}); err != nil {
+			if err := callRunE(getCmd, []string{"TEST-1"}); err != nil {
 				t.Fatalf("format %s: RunE: %v", format, err)
 			}
 		})
@@ -243,7 +243,7 @@ func TestGetFieldsAll(t *testing.T) {
 	for format, want := range wantByFormat {
 		g.format = format
 		out := captureStdout(t, func() {
-			if err := getCmd.RunE(getCmd, []string{"TEST-1"}); err != nil {
+			if err := callRunE(getCmd, []string{"TEST-1"}); err != nil {
 				t.Fatalf("format %s: RunE: %v", format, err)
 			}
 		})
@@ -261,7 +261,7 @@ func TestGetFieldsAll(t *testing.T) {
 func TestGetFormatMarkdownUsesReadableLabels(t *testing.T) {
 	setupTestGlobals(t)
 
-	database := g.db
+	database := g.engine.Store
 	if err := database.UpsertFieldMapping(&db.FieldMapping{
 		JiraID: "parent", JiraName: "Parent", Name: "parent_key", Type: "issuelink",
 	}); err != nil {
@@ -277,7 +277,7 @@ func TestGetFormatMarkdownUsesReadableLabels(t *testing.T) {
 
 	g.format = "markdown"
 	out := captureStdout(t, func() {
-		if err := getCmd.RunE(getCmd, []string{"TEST-2"}); err != nil {
+		if err := callRunE(getCmd, []string{"TEST-2"}); err != nil {
 			t.Fatalf("RunE: %v", err)
 		}
 	})
@@ -302,7 +302,7 @@ func TestGetFormatJSON(t *testing.T) {
 	g.format = "json"
 
 	out := captureStdout(t, func() {
-		if err := getCmd.RunE(getCmd, []string{"TEST-1"}); err != nil {
+		if err := callRunE(getCmd, []string{"TEST-1"}); err != nil {
 			t.Fatalf("RunE: %v", err)
 		}
 	})
@@ -320,7 +320,7 @@ func TestGetFormatDefaultUnchanged(t *testing.T) {
 	g.format = "table"
 
 	out := captureStdout(t, func() {
-		if err := getCmd.RunE(getCmd, []string{"TEST-1"}); err != nil {
+		if err := callRunE(getCmd, []string{"TEST-1"}); err != nil {
 			t.Fatalf("RunE: %v", err)
 		}
 	})

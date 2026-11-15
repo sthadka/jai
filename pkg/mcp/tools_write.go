@@ -1183,7 +1183,7 @@ func extractCloneFields(rawJSON string, fieldMap map[string]*db.FieldMapping) (m
 }
 
 // applyFieldOverride applies a field override
-func applyFieldOverride(fields map[string]interface{}, fieldMap map[string]*db.FieldMapping, name, value string, jiraClient *jira.Client, ctx context.Context) error {
+func applyFieldOverride(fields map[string]interface{}, fieldMap map[string]*db.FieldMapping, name, value string, jiraClient jira.JiraClient, ctx context.Context) error {
 	switch strings.ToLower(name) {
 	case "summary":
 		fields["summary"] = value

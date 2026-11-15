@@ -20,6 +20,8 @@ var changelogCmd = &cobra.Command{
 	Short: "Show changelog history for an issue",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+
+		app := cliFrom(cmd)
 		key := strings.ToUpper(args[0])
 
 		// Build query with optional field filter.
@@ -33,9 +35,9 @@ var changelogCmd = &cobra.Command{
 
 		query += " ORDER BY changed_at ASC"
 
-		rows, err := g.db.Query(query, params...)
+		rows, err := app.engine.Store.Query(query, params...)
 		if err != nil {
-			if g.jsonOut {
+			if app.jsonOut {
 				fmt.Println(string(output.Err("QueryError", err.Error())))
 				return nil
 			}
@@ -60,7 +62,7 @@ var changelogCmd = &cobra.Command{
 			entries = append(entries, e)
 		}
 
-		if g.jsonOut {
+		if app.jsonOut {
 			fmt.Println(string(output.OK(map[string]interface{}{
 				"issue_key": key,
 				"entries":   entries,
@@ -126,18 +128,20 @@ fetch never changes the issue snapshot's "updated" timestamp. The refresh is a
 no-op when flow metrics are not configured.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
+
+		app := cliFrom(cmd)
 		ctx := context.Background()
 
 		// Capture the keys that will be (re)fetched before the sync stamps them
 		// as checked, so the metric refresh advances exactly those facts. This
 		// mirrors SyncChangelogs' own candidate scoping (a single named source is
 		// limited to its projects).
-		touched, err := g.db.GetChangelogSyncCandidates(changelogSyncProjectFilter())
+		touched, err := app.engine.Store.GetChangelogSyncCandidates(changelogSyncProjectFilter(app))
 		if err != nil {
 			return fmt.Errorf("finding changelog candidates: %w", err)
 		}
 
-		ch, err := g.sync.SyncChangelogs(ctx, changelogSyncSource, changelogSyncForce)
+		ch, err := app.engine.Sync.SyncChangelogs(ctx, changelogSyncSource, changelogSyncForce)
 		if err != nil {
 			return fmt.Errorf("changelog sync: %w", err)
 		}
@@ -146,7 +150,7 @@ no-op when flow metrics are not configured.`,
 		// Advance flow-metric facts for the issues whose history changed. Metric
 		// publication is separate from the changelog fetch: a build failure is
 		// logged but never fails an otherwise-successful sync.
-		if err := refreshMetricFacts(touched); err != nil {
+		if err := refreshMetricFacts(app, touched); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: metric refresh after changelog sync failed: %v\n", err)
 		}
 		return nil
@@ -156,11 +160,11 @@ no-op when flow metrics are not configured.`,
 // changelogSyncProjectFilter mirrors SyncChangelogs' scoping: a single named
 // source restricts the candidate (and refresh) set to that source's projects;
 // no filter — or a source with no project keys (JQL) — covers all candidates.
-func changelogSyncProjectFilter() []string {
-	if changelogSyncSource == "" || g.cfg == nil {
+func changelogSyncProjectFilter(app *CLI) []string {
+	if changelogSyncSource == "" || app.engine.Config == nil {
 		return nil
 	}
-	for _, s := range g.cfg.SyncSources {
+	for _, s := range app.engine.Config.SyncSources {
 		if s.Name == changelogSyncSource {
 			return s.Projects
 		}
@@ -180,12 +184,12 @@ func changelogSyncProjectFilter() []string {
 // metrics.ErrFullRebuildRequired and falls back to a full restatement
 // (invariant #7). A nil metrics config, or an empty key set, is a no-op so the
 // commands work unchanged when flow metrics are not configured.
-func refreshMetricFacts(keys []string) error {
-	if g.cfg == nil || g.cfg.Metrics == nil || len(keys) == 0 {
+func refreshMetricFacts(app *CLI, keys []string) error {
+	if app.engine.Config == nil || app.engine.Config.Metrics == nil || len(keys) == 0 {
 		return nil
 	}
-	pol := metrics.CompilePolicy(g.cfg.Metrics)
-	store := metrics.NewStore(g.db, g.cfg.DB.Path)
+	pol := metrics.CompilePolicy(app.engine.Config.Metrics)
+	store := metrics.NewStore(app.engine.Store, app.engine.Config.DB.Path)
 	builder := metrics.NewBuilder(store, pol)
 
 	asOf := time.Now().UTC()

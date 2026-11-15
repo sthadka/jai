@@ -9,7 +9,7 @@ import (
 )
 
 func TestSchemaSnippetsCmd_Empty(t *testing.T) {
-	g.cfg = &config.Config{}
+	g.engine.Config = &config.Config{}
 
 	var buf bytes.Buffer
 	schemaSnippetsCmd.SetOut(&buf)
@@ -19,13 +19,13 @@ func TestSchemaSnippetsCmd_Empty(t *testing.T) {
 	old := schemaSnippetsCmd.OutOrStdout()
 	_ = old
 
-	if err := schemaSnippetsCmd.RunE(schemaSnippetsCmd, nil); err != nil {
+	if err := callRunE(schemaSnippetsCmd, nil); err != nil {
 		t.Fatalf("RunE error: %v", err)
 	}
 }
 
 func TestSchemaSnippetsCmd_WithSnippets(t *testing.T) {
-	g.cfg = &config.Config{
+	g.engine.Config = &config.Config{
 		Me: "user@example.com",
 		Snippets: map[string]string{
 			"active":  "status NOT IN ('Done', 'Closed')",
@@ -33,13 +33,13 @@ func TestSchemaSnippetsCmd_WithSnippets(t *testing.T) {
 		},
 	}
 
-	if err := schemaSnippetsCmd.RunE(schemaSnippetsCmd, nil); err != nil {
+	if err := callRunE(schemaSnippetsCmd, nil); err != nil {
 		t.Fatalf("RunE error: %v", err)
 	}
 }
 
 func TestSchemaSnippetsCmd_JSONStructure(t *testing.T) {
-	g.cfg = &config.Config{
+	g.engine.Config = &config.Config{
 		Me: "user@example.com",
 		Snippets: map[string]string{
 			"active": "status != 'Done'",
@@ -48,7 +48,7 @@ func TestSchemaSnippetsCmd_JSONStructure(t *testing.T) {
 
 	// We can't easily capture fmt.Println output in this test setup,
 	// but we can at least verify the command runs without error.
-	if err := schemaSnippetsCmd.RunE(schemaSnippetsCmd, nil); err != nil {
+	if err := callRunE(schemaSnippetsCmd, nil); err != nil {
 		t.Fatalf("RunE error: %v", err)
 	}
 }

@@ -35,8 +35,8 @@ type Progress struct {
 
 // Engine orchestrates Jira sync operations.
 type Engine struct {
-	db       *db.DB
-	client   *jira.Client
+	db       db.Store
+	client   jira.JiraClient
 	cfg      *config.Config
 	clk      clock.Clock
 	jiraTZMu sync.RWMutex
@@ -47,7 +47,7 @@ type Engine struct {
 }
 
 // New creates a new sync Engine with the default system clock.
-func New(database *db.DB, client *jira.Client, cfg *config.Config) *Engine {
+func New(database db.Store, client jira.JiraClient, cfg *config.Config) *Engine {
 	mw := newMetricWriter(database, cfg)
 	e := &Engine{db: database, client: client, cfg: cfg, clk: clock.System{}, mw: mw}
 	if mw != nil {

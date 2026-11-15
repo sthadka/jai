@@ -39,14 +39,14 @@ func setupCLIMetrics(t *testing.T, cfg *config.Config) *db.DB {
 	}
 	t.Cleanup(func() { database.Close() })
 
-	g.db = database
-	g.cfg = cfg
-	g.query = query.New(database, cfg)
+	g.engine.Store = database
+	g.engine.Config = cfg
+	g.engine.Query = query.New(database, cfg)
 	g.jsonOut = false
 	t.Cleanup(func() {
-		g.db = nil
-		g.cfg = nil
-		g.query = nil
+		g.engine.Store = nil
+		g.engine.Config = nil
+		g.engine.Query = nil
 		g.jsonOut = false
 	})
 	return database
@@ -129,7 +129,7 @@ func TestChangelogSyncMetricRefresh(t *testing.T) {
 
 				// Initial build: no status history yet, so the issue never entered
 				// an active stage and cycle time is unknown.
-				if err := refreshMetricFacts([]string{"TEST-1"}); err != nil {
+				if err := refreshMetricFacts(g, []string{"TEST-1"}); err != nil {
 					t.Fatalf("initial refreshMetricFacts: %v", err)
 				}
 				gen0 := activeGenMeta(t, store)
@@ -151,7 +151,7 @@ func TestChangelogSyncMetricRefresh(t *testing.T) {
 				// snapshot is untouched.
 				seedStatusChangelog(t, database, "TEST-1")
 
-				if err := refreshMetricFacts([]string{"TEST-1"}); err != nil {
+				if err := refreshMetricFacts(g, []string{"TEST-1"}); err != nil {
 					t.Fatalf("post-backfill refreshMetricFacts: %v", err)
 				}
 				gen1 := activeGenMeta(t, store)
@@ -184,7 +184,7 @@ func TestChangelogSyncMetricRefresh(t *testing.T) {
 				seedResolvedIssue(t, database, "TEST-1", "TEST")
 				seedStatusChangelog(t, database, "TEST-1")
 
-				if err := refreshMetricFacts([]string{"TEST-1"}); err != nil {
+				if err := refreshMetricFacts(g, []string{"TEST-1"}); err != nil {
 					t.Fatalf("refreshMetricFacts (unconfigured): %v", err)
 				}
 				if gen := activeGenMeta(t, store); gen != nil {
@@ -217,7 +217,7 @@ func TestChangelogSyncMetricRefresh(t *testing.T) {
 				}
 				for _, c := range cases {
 					changelogSyncSource = c.source
-					got := changelogSyncProjectFilter()
+					got := changelogSyncProjectFilter(g)
 					if !equalStrings(got, c.want) {
 						t.Fatalf("source %q: got filter %v, want %v", c.source, got, c.want)
 					}

@@ -38,16 +38,16 @@ func TestOpenURLConstruction(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			origCfg := g.cfg
+			origCfg := g.engine.Config
 			origJSON := g.jsonOut
 			origOpener := browserOpener
 			defer func() {
-				g.cfg = origCfg
+				g.engine.Config = origCfg
 				g.jsonOut = origJSON
 				browserOpener = origOpener
 			}()
 
-			g.cfg = &config.Config{
+			g.engine.Config = &config.Config{
 				Jira: config.JiraConfig{URL: tt.baseURL},
 			}
 			g.jsonOut = false
@@ -60,7 +60,7 @@ func TestOpenURLConstruction(t *testing.T) {
 
 			// Bypass PersistentPreRunE by calling RunE directly.
 			openCmd.SetOut(&bytes.Buffer{})
-			if err := openCmd.RunE(openCmd, []string{tt.key}); err != nil {
+			if err := callRunE(openCmd, []string{tt.key}); err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
 
@@ -72,18 +72,18 @@ func TestOpenURLConstruction(t *testing.T) {
 }
 
 func TestOpenURLOnly(t *testing.T) {
-	origCfg := g.cfg
+	origCfg := g.engine.Config
 	origJSON := g.jsonOut
 	origOpener := browserOpener
 	origURLOnly := openFlags.urlOnly
 	defer func() {
-		g.cfg = origCfg
+		g.engine.Config = origCfg
 		g.jsonOut = origJSON
 		browserOpener = origOpener
 		openFlags.urlOnly = origURLOnly
 	}()
 
-	g.cfg = &config.Config{
+	g.engine.Config = &config.Config{
 		Jira: config.JiraConfig{URL: "https://mycompany.atlassian.net"},
 	}
 	g.jsonOut = false
@@ -98,7 +98,7 @@ func TestOpenURLOnly(t *testing.T) {
 	var buf bytes.Buffer
 	openCmd.SetOut(&buf)
 
-	if err := openCmd.RunE(openCmd, []string{"PROJ-123"}); err != nil {
+	if err := callRunE(openCmd, []string{"PROJ-123"}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -114,16 +114,16 @@ func TestOpenURLOnly(t *testing.T) {
 }
 
 func TestOpenJSON(t *testing.T) {
-	origCfg := g.cfg
+	origCfg := g.engine.Config
 	origJSON := g.jsonOut
 	origOpener := browserOpener
 	defer func() {
-		g.cfg = origCfg
+		g.engine.Config = origCfg
 		g.jsonOut = origJSON
 		browserOpener = origOpener
 	}()
 
-	g.cfg = &config.Config{
+	g.engine.Config = &config.Config{
 		Jira: config.JiraConfig{URL: "https://mycompany.atlassian.net"},
 	}
 	g.jsonOut = true
@@ -137,7 +137,7 @@ func TestOpenJSON(t *testing.T) {
 	var buf bytes.Buffer
 	openCmd.SetOut(&buf)
 
-	if err := openCmd.RunE(openCmd, []string{"PROJ-123"}); err != nil {
+	if err := callRunE(openCmd, []string{"PROJ-123"}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 

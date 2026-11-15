@@ -465,7 +465,7 @@ func openBrowser(issueKey, baseURL string) tea.Cmd {
 }
 
 // BuildParentChain walks the parent_key links from an issue upward and returns the chain.
-func BuildParentChain(database *db.DB, issueData map[string]interface{}) []ChainItem {
+func BuildParentChain(database db.Store, issueData map[string]interface{}) []ChainItem {
 	var chain []ChainItem
 	seen := map[string]bool{}
 	current := issueStr(issueData, "parent_key")
