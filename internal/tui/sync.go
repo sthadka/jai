@@ -5,7 +5,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	synce "github.com/sthadka/jai/pkg/sync"
+	synce "github.com/sthadka/jai/v5/pkg/sync"
 )
 
 // SyncMsg is sent when a background sync completes.

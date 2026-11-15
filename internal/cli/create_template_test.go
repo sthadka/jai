@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sthadka/jai/pkg/config"
+	"github.com/sthadka/jai/v5/pkg/config"
 )
 
 func TestResolveTemplate(t *testing.T) {

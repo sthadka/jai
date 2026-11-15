@@ -4,7 +4,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/sthadka/jai/pkg/config"
+	"github.com/sthadka/jai/v5/pkg/config"
 )
 
 // Generated fragment names. These are the shared SQL fragments (`jai snippet`)

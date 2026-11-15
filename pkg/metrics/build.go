@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sthadka/jai/pkg/clock"
+	"github.com/sthadka/jai/v5/pkg/clock"
 )
 
 // ErrFullRebuildRequired is returned by Incremental when no compatible active

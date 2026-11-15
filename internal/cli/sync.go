@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	synce "github.com/sthadka/jai/pkg/sync"
+	synce "github.com/sthadka/jai/v5/pkg/sync"
 )
 
 var syncFull bool

@@ -14,9 +14,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sthadka/jai/pkg/config"
-	"github.com/sthadka/jai/pkg/jira"
-	db "github.com/sthadka/jai/pkg/store"
+	"github.com/sthadka/jai/v5/pkg/config"
+	"github.com/sthadka/jai/v5/pkg/jira"
+	db "github.com/sthadka/jai/v5/pkg/store"
 )
 
 func newTestEngine(t *testing.T, srvURL string) *Engine {

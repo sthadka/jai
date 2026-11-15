@@ -8,8 +8,8 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
-	"github.com/sthadka/jai/pkg/output"
-	synce "github.com/sthadka/jai/pkg/sync"
+	"github.com/sthadka/jai/v5/pkg/output"
+	synce "github.com/sthadka/jai/v5/pkg/sync"
 )
 
 // registerSyncTools registers all sync-related tools.

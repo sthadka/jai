@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/sthadka/jai/pkg/jira"
-	db "github.com/sthadka/jai/pkg/store"
+	"github.com/sthadka/jai/v5/pkg/jira"
+	db "github.com/sthadka/jai/v5/pkg/store"
 )
 
 // DetectDeletions identifies issues that exist locally but not in Jira and

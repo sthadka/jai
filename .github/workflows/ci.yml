@@ -31,6 +31,20 @@ jobs:
       - name: Test
         run: make test
 
+      - name: Verify module path matches release major
+        run: |
+          maj=$(jq -r '."." | split(".")[0]' .release-please-manifest.json)
+          mod=$(go list -m)
+          if [ "$maj" -ge 2 ]; then
+            case "$mod" in
+              */v$maj) echo "ok: $mod matches v$maj" ;;
+              *) echo "::error::module path '$mod' must end in /v$maj (release manifest major is $maj) — bump go.mod + imports on every major"; exit 1 ;;
+            esac
+          fi
+
+      - name: Verify library is embeddable (separate module)
+        run: cd examples/embed && go test -tags fts5 ./...
+
       - name: Lint
         uses: golangci/golangci-lint-action@v7
         with:

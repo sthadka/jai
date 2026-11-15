@@ -25,8 +25,8 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/sthadka/jai/pkg/jql"
-	"github.com/sthadka/jai/pkg/metrics/dashboard/specs"
+	"github.com/sthadka/jai/v5/pkg/jql"
+	"github.com/sthadka/jai/v5/pkg/metrics/dashboard/specs"
 	"gopkg.in/yaml.v3"
 )
 

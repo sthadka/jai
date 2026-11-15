@@ -1,6 +1,6 @@
 // Package configloader reads jai configuration from a YAML file on disk,
 // expands ${ENV} references, and returns the pure engine-policy
-// github.com/sthadka/jai/pkg/config.Config struct. File and environment access
+// github.com/sthadka/jai/v5/pkg/config.Config struct. File and environment access
 // live here, in the CLI layer, so that pkg/config stays free of I/O and can be
 // embedded by other Go applications that supply configuration however they like.
 package configloader
@@ -14,7 +14,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/sthadka/jai/pkg/config"
+	"github.com/sthadka/jai/v5/pkg/config"
 )
 
 var envVarRe = regexp.MustCompile(`\$\{([^}]+)\}`)

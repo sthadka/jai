@@ -3,10 +3,10 @@ package sync
 import (
 	"errors"
 
-	"github.com/sthadka/jai/pkg/clock"
-	"github.com/sthadka/jai/pkg/config"
-	"github.com/sthadka/jai/pkg/metrics"
-	db "github.com/sthadka/jai/pkg/store"
+	"github.com/sthadka/jai/v5/pkg/clock"
+	"github.com/sthadka/jai/v5/pkg/config"
+	"github.com/sthadka/jai/v5/pkg/metrics"
+	db "github.com/sthadka/jai/v5/pkg/store"
 )
 
 // metricWriter drives the flow-metric fact store (internal/metrics) from sync

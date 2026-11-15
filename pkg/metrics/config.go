@@ -15,7 +15,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/sthadka/jai/pkg/config"
+	"github.com/sthadka/jai/v5/pkg/config"
 )
 
 // Canonical default stage names. These are this package's own vocabulary, not tenant

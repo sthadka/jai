@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sthadka/jai/pkg/config"
+	"github.com/sthadka/jai/v5/pkg/config"
 )
 
 // --- shared fixture loader (consumed by replay and reconcile tests) ---

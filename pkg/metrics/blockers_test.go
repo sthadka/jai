@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sthadka/jai/pkg/config"
-	db "github.com/sthadka/jai/pkg/store"
+	"github.com/sthadka/jai/v5/pkg/config"
+	db "github.com/sthadka/jai/v5/pkg/store"
 )
 
 // blockerPolicy maps a waiting status and configures blocker link types.

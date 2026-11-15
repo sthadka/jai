@@ -616,6 +616,37 @@ For cross-compilation (linux from macOS), install [zig](https://ziglang.org/down
 goreleaser build --snapshot --clean
 ```
 
+## Use as a Go library
+
+The engine is extracted into importable `pkg/` packages, so other Go programs can
+embed the same sync/query/metrics/JQL engine without pulling in the CLI, cobra,
+or the TUI. The module is published under the `/v5` major-version path:
+
+```sh
+go get github.com/sthadka/jai/v5@latest
+```
+
+```go
+import (
+    "github.com/sthadka/jai/v5/pkg/config"
+    "github.com/sthadka/jai/v5/pkg/core"
+    "github.com/sthadka/jai/v5/pkg/jira"
+    "github.com/sthadka/jai/v5/pkg/store"
+)
+
+st, _ := store.Open("jai.db")                 // SQLite impl of the store.Store seam
+cfg := config.Defaults()                      // pure engine policy (no file/env I/O)
+client := jira.New(cfg.Jira.URL, email, token, cfg.Sync.RateLimit) // Basic auth;
+                                              // use jira.NewWithClient for OAuth
+eng := core.New(cfg, st, client)              // assemble; no process globals
+// eng.Sync / eng.Query / eng.Metrics are ready to use.
+```
+
+The seams are interfaces (`store.Store`, `jira.JiraClient`, `clock.Clock`,
+`jira.RateLimiter`), so consumers can substitute mocks or alternative
+implementations. A complete, runnable example lives in
+[`examples/embed`](examples/embed).
+
 ---
 
 ## License

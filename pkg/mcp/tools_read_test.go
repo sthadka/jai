@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/mark3labs/mcp-go/mcp"
-	db "github.com/sthadka/jai/pkg/store"
+	db "github.com/sthadka/jai/v5/pkg/store"
 )
 
 // insertTestIssue inserts a test issue into the database.
