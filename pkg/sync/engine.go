@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"regexp"
 	"strings"
 	"sync"
@@ -114,7 +113,7 @@ func (e *Engine) VerifyAuth(ctx context.Context) error {
 	} else {
 		resolved, err := time.LoadLocation(me.TimeZone)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "warning: could not resolve Jira timezone %q; falling back to UTC: %v\n", me.TimeZone, err)
+			e.warnf("warning: could not resolve Jira timezone %q; falling back to UTC: %v\n", me.TimeZone, err)
 		} else {
 			loc = resolved
 		}
@@ -151,11 +150,11 @@ func (e *Engine) SyncProjects(ctx context.Context) {
 	for _, k := range keys {
 		p, err := e.client.GetProject(ctx, k)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "warning: fetching project %s: %v\n", k, err)
+			e.warnf("warning: fetching project %s: %v\n", k, err)
 			continue
 		}
 		if err := e.db.UpsertProject(p.Key, p.Name); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: storing project %s: %v\n", k, err)
+			e.warnf("warning: storing project %s: %v\n", k, err)
 		}
 	}
 }
@@ -199,7 +198,7 @@ func (e *Engine) DiscoverFields(ctx context.Context, overrides map[string]string
 		if ownerID, taken := takenNames[name]; taken && ownerID != f.ID {
 			suffix := f.ID
 			suffix = strings.TrimPrefix(suffix, "customfield_")
-			fmt.Fprintf(os.Stderr, "warning: field %q (%s) renamed to %s_%s (name collision with %s)\n",
+			e.warnf("warning: field %q (%s) renamed to %s_%s (name collision with %s)\n",
 				f.Name, f.ID, name, suffix, ownerID)
 			name = name + "_" + suffix
 		}
@@ -221,7 +220,7 @@ func (e *Engine) DiscoverFields(ctx context.Context, overrides map[string]string
 
 		if err := e.db.UpsertFieldMapping(mapping); err != nil {
 			// Non-fatal: log and continue so one bad field doesn't abort discovery.
-			fmt.Fprintf(os.Stderr, "warning: skipping field %s (%s): %v\n", f.ID, name, err)
+			e.warnf("warning: skipping field %s (%s): %v\n", f.ID, name, err)
 			continue
 		}
 	}
@@ -564,7 +563,7 @@ func (e *Engine) syncSource(ctx context.Context, src config.SyncSource, full, re
 	// generation stays published with honest freshness. No-op when metrics are
 	// unconfigured.
 	if err := e.mw.refreshTouched(touchedKeys); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: metric refresh for %s failed: %v\n", src.Name, err)
+		e.warnf("warning: metric refresh for %s failed: %v\n", src.Name, err)
 	}
 
 	elapsed := time.Since(start).Seconds()
@@ -734,7 +733,7 @@ func (e *Engine) SyncChangelogs(ctx context.Context, sourceFilter string, force 
 		}
 
 		if bulkFailed {
-			fmt.Fprintf(os.Stderr, "  ⚠ bulk changelog API unavailable, falling back to per-issue fetch\n")
+			e.warnf("  ⚠ bulk changelog API unavailable, falling back to per-issue fetch\n")
 		}
 
 		// Per-issue fallback for issues without ID mapping or if bulk failed.

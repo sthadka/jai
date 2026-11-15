@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -86,7 +85,7 @@ func (e *Engine) ReconcileFields(ctx context.Context, sourceFilter string, field
 	for _, col := range fields {
 		jiraID, ok := colToJiraID[col]
 		if !ok {
-			fmt.Fprintf(os.Stderr, "  ⚠ reconcile: unknown field %q (not in field_map), skipping\n", col)
+			e.warnf("  ⚠ reconcile: unknown field %q (not in field_map), skipping\n", col)
 			continue
 		}
 		resolved = append(resolved, reconcileField{col: col, jiraID: jiraID})

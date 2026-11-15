@@ -2,8 +2,6 @@ package sync
 
 import (
 	"context"
-	"fmt"
-	"os"
 	"sync"
 	"time"
 )
