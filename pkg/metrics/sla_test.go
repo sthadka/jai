@@ -18,7 +18,7 @@ func slaService(t *testing.T, mc *config.MetricsConfig) (*db.DB, *Service) {
 }
 
 // upSec inserts a security-cohort issue with a priority (categorical severity source).
-func upSec(t *testing.T, database *db.DB, key, itype, priority, created, resolved string) {
+func upSec(t *testing.T, database db.Store, key, itype, priority, created, resolved string) {
 	t.Helper()
 	cat := "In Progress"
 	res := ""

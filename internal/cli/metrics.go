@@ -47,10 +47,12 @@ Examples:
   jai metrics rebuild               # full fact-store restatement`,
 	Args: cobra.ArbitraryArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
+
+		app := cliFrom(cmd)
 		if len(args) == 0 {
-			return runMetricList()
+			return app.runMetricList()
 		}
-		return runMetric(cmd, args[0])
+		return app.runMetric(cmd, args[0])
 	},
 }
 
@@ -58,7 +60,9 @@ var metricsListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List available metrics",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runMetricList()
+
+		app := cliFrom(cmd)
+		return app.runMetricList()
 	},
 }
 
@@ -66,7 +70,9 @@ var metricsCoverageCmd = &cobra.Command{
 	Use:   "coverage",
 	Short: "Report flow-metric data coverage diagnostics",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runMetricCoverage()
+
+		app := cliFrom(cmd)
+		return app.runMetricCoverage()
 	},
 }
 
@@ -79,22 +85,24 @@ The rebuild takes the same cross-process advisory writer lock as incremental
 sync, so a rebuild invoked from a second process never publishes stale facts
 over a newer incremental update.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runMetricRebuild()
+
+		app := cliFrom(cmd)
+		return app.runMetricRebuild()
 	},
 }
 
 // metricsService builds the shared service, compiled policy and store from the
 // active config and DB. There is one definition of each metric behind this.
-func metricsService() (*metrics.Service, *metrics.Policy, *metrics.Store) {
-	pol := metrics.CompilePolicy(g.cfg.Metrics)
-	store := metrics.NewStore(g.db, g.cfg.DB.Path)
-	svc := metrics.NewService(g.db, store, pol, g.cfg)
+func (app *CLI) metricsService() (*metrics.Service, *metrics.Policy, *metrics.Store) {
+	pol := metrics.CompilePolicy(app.engine.Config.Metrics)
+	store := metrics.NewStore(app.engine.Store, app.engine.Config.DB.Path)
+	svc := metrics.NewService(app.engine.Store, store, pol, app.engine.Config)
 	return svc, pol, store
 }
 
-func runMetricList() error {
+func (app *CLI) runMetricList() error {
 	names := metrics.Metrics()
-	if g.jsonOut || g.format == "json" {
+	if app.jsonOut || app.format == "json" {
 		fmt.Println(string(output.OK(map[string]interface{}{"metrics": names})))
 		return nil
 	}
@@ -109,20 +117,20 @@ func runMetricList() error {
 	return nil
 }
 
-func runMetric(cmd *cobra.Command, name string) error {
-	svc, pol, _ := metricsService()
+func (app *CLI) runMetric(cmd *cobra.Command, name string) error {
+	svc, pol, _ := app.metricsService()
 
 	asOf, err := parseMetricTime(metricAsOf)
 	if err != nil {
-		return metricErr("InvalidArgument", err)
+		return app.metricErr("InvalidArgument", err)
 	}
 	from, err := parseMetricTime(metricFrom)
 	if err != nil {
-		return metricErr("InvalidArgument", err)
+		return app.metricErr("InvalidArgument", err)
 	}
 	to, err := parseMetricTime(metricTo)
 	if err != nil {
-		return metricErr("InvalidArgument", err)
+		return app.metricErr("InvalidArgument", err)
 	}
 
 	q := metrics.Query{
@@ -140,7 +148,7 @@ func runMetric(cmd *cobra.Command, name string) error {
 
 	r, err := computeWithTimeout(cmd.Context(), svc, q, metricTimeout)
 	if err != nil {
-		return metricErr("MetricError", err)
+		return app.metricErr("MetricError", err)
 	}
 
 	// Surface fail-closed config rejections as warnings (the affected metric
@@ -150,7 +158,7 @@ func runMetric(cmd *cobra.Command, name string) error {
 			fmt.Sprintf("config: metric %q rejected: %s", m, strings.Join(pol.Rejections()[m], "; ")))
 	}
 
-	renderResult(r)
+	app.renderResult(r)
 	return nil
 }
 
@@ -182,13 +190,13 @@ func computeWithTimeout(ctx context.Context, svc *metrics.Service, q metrics.Que
 	}
 }
 
-func renderResult(r *metrics.Result) {
-	if g.jsonOut || g.format == "json" {
+func (app *CLI) renderResult(r *metrics.Result) {
+	if app.jsonOut || app.format == "json" {
 		fmt.Println(string(output.OK(r)))
 		return
 	}
 	cols, rows := resultToTable(r)
-	switch g.format {
+	switch app.format {
 	case "csv":
 		fmt.Print(output.CSV(cols, rows))
 		printDiagnostics(os.Stderr, r)
@@ -287,13 +295,13 @@ func printDiagnostics(w io.Writer, r *metrics.Result) {
 	}
 }
 
-func runMetricCoverage() error {
-	pol := metrics.CompilePolicy(g.cfg.Metrics)
-	report, err := metrics.ReportCoverage(g.db, splitProjects(metricProjects), pol, g.cfg)
+func (app *CLI) runMetricCoverage() error {
+	pol := metrics.CompilePolicy(app.engine.Config.Metrics)
+	report, err := metrics.ReportCoverage(app.engine.Store, splitProjects(metricProjects), pol, app.engine.Config)
 	if err != nil {
-		return metricErr("CoverageError", err)
+		return app.metricErr("CoverageError", err)
 	}
-	if g.jsonOut || g.format == "json" {
+	if app.jsonOut || app.format == "json" {
 		fmt.Println(string(output.OK(report)))
 		return nil
 	}
@@ -309,7 +317,7 @@ func runMetricCoverage() error {
 		})
 	}
 
-	switch g.format {
+	switch app.format {
 	case "csv":
 		fmt.Print(output.CSV(cols, rows))
 	case "tsv":
@@ -344,26 +352,26 @@ func printCoverageCaveats(w io.Writer, report *metrics.CoverageReport) {
 	}
 }
 
-func runMetricRebuild() error {
-	pol := metrics.CompilePolicy(g.cfg.Metrics)
-	store := metrics.NewStore(g.db, g.cfg.DB.Path)
+func (app *CLI) runMetricRebuild() error {
+	pol := metrics.CompilePolicy(app.engine.Config.Metrics)
+	store := metrics.NewStore(app.engine.Store, app.engine.Config.DB.Path)
 	builder := metrics.NewBuilder(store, pol)
 
 	asOf := time.Now().UTC()
 	if metricAsOf != "" {
 		t, err := parseMetricTime(metricAsOf)
 		if err != nil {
-			return metricErr("InvalidArgument", err)
+			return app.metricErr("InvalidArgument", err)
 		}
 		asOf = t
 	}
 
 	res, err := builder.BuildAll(asOf, splitProjects(metricProjects))
 	if err != nil {
-		return metricErr("RebuildError", err)
+		return app.metricErr("RebuildError", err)
 	}
 
-	if g.jsonOut || g.format == "json" {
+	if app.jsonOut || app.format == "json" {
 		fmt.Println(string(output.OK(res)))
 		return nil
 	}
@@ -374,8 +382,8 @@ func runMetricRebuild() error {
 
 // metricErr renders an error on the JSON path as a structured envelope (so
 // JSON consumers never see a bare stderr line) and otherwise returns it.
-func metricErr(kind string, err error) error {
-	if g.jsonOut || g.format == "json" {
+func (app *CLI) metricErr(kind string, err error) error {
+	if app.jsonOut || app.format == "json" {
 		fmt.Println(string(output.Err(kind, err.Error())))
 		return nil
 	}

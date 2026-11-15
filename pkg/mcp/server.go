@@ -15,8 +15,8 @@ import (
 // Server wraps an MCP server with jai-specific handlers.
 type Server struct {
 	cfg      *config.Config
-	db       *db.DB
-	jira     *jira.Client
+	db       db.Store
+	jira     jira.JiraClient
 	query    *query.Engine
 	sync     *synce.Engine
 	toolsets *ToolsetRegistry
@@ -24,7 +24,7 @@ type Server struct {
 }
 
 // New creates a new MCP server with all tools, resources, and prompts registered.
-func New(cfg *config.Config, database *db.DB, jiraClient *jira.Client, queryEngine *query.Engine, syncEngine *synce.Engine) *Server {
+func New(cfg *config.Config, database db.Store, jiraClient jira.JiraClient, queryEngine *query.Engine, syncEngine *synce.Engine) *Server {
 	s := &Server{
 		cfg:   cfg,
 		db:    database,

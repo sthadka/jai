@@ -8,7 +8,7 @@ import (
 
 // clSprint inserts a Sprint-membership changelog transition. from/to carry the full id/name
 // sets (comma-separated) before/after the change — the set-valued shape M14 replays.
-func clSprint(t *testing.T, database *db.DB, id, key, fromID, fromName, toID, toName, at string) {
+func clSprint(t *testing.T, database db.Store, id, key, fromID, fromName, toID, toName, at string) {
 	t.Helper()
 	clField(t, database, id, key, sprintField, fromID, fromName, toID, toName, at)
 }

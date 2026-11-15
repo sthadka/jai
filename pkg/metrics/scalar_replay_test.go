@@ -298,7 +298,7 @@ func scalarFactPolicy(tracked []string) *Policy {
 }
 
 // clField inserts a changelog row for an arbitrary field.
-func clField(t *testing.T, database *db.DB, id, key, field, fromV, fromS, toV, toS, at string) {
+func clField(t *testing.T, database db.Store, id, key, field, fromV, fromS, toV, toS, at string) {
 	t.Helper()
 	if err := database.InsertChangelog(&db.ChangelogEntry{
 		ID: id, IssueKey: key, Field: field,

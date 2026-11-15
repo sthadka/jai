@@ -34,12 +34,14 @@ Examples:
   jai clone PROJ-123 --summary "New title" --set assignee=user@example.com --json`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+
+		app := cliFrom(cmd)
 		sourceKey := strings.ToUpper(args[0])
 
 		// Read source issue from local DB.
-		issue, err := g.db.GetIssue(sourceKey)
+		issue, err := app.engine.Store.GetIssue(sourceKey)
 		if err != nil {
-			if g.jsonOut {
+			if app.jsonOut {
 				fmt.Println(string(output.Err("QueryError", err.Error())))
 				return nil
 			}
@@ -47,7 +49,7 @@ Examples:
 		}
 		if issue == nil {
 			msg := fmt.Sprintf("issue %s not found in local database (try: jai sync)", sourceKey)
-			if g.jsonOut {
+			if app.jsonOut {
 				fmt.Println(string(output.Err("NotFoundError", msg)))
 				return nil
 			}
@@ -58,21 +60,21 @@ Examples:
 		rawJSON, ok := issue["raw_json"].(string)
 		if !ok || rawJSON == "" {
 			msg := fmt.Sprintf("issue %s has no raw_json data (try: jai sync)", sourceKey)
-			if g.jsonOut {
+			if app.jsonOut {
 				fmt.Println(string(output.Err("DataError", msg)))
 				return nil
 			}
 			return fmt.Errorf("%s", msg)
 		}
 
-		fieldMap, err := g.db.FieldMapByJiraID()
+		fieldMap, err := app.engine.Store.FieldMapByJiraID()
 		if err != nil {
 			return err
 		}
 
 		fields, project, err := extractCloneFields(rawJSON, fieldMap)
 		if err != nil {
-			if g.jsonOut {
+			if app.jsonOut {
 				fmt.Println(string(output.Err("DataError", err.Error())))
 				return nil
 			}
@@ -89,7 +91,7 @@ Examples:
 			find, repl, ok := parseReplace(r)
 			if !ok {
 				msg := fmt.Sprintf("invalid --replace format %q (expected find:replace)", r)
-				if g.jsonOut {
+				if app.jsonOut {
 					fmt.Println(string(output.Err("ValidationError", msg)))
 					return nil
 				}
@@ -109,7 +111,7 @@ Examples:
 				parts := strings.SplitN(kv, "=", 2)
 				if len(parts) != 2 {
 					msg := fmt.Sprintf("invalid --set format %q (expected key=value)", kv)
-					if g.jsonOut {
+					if app.jsonOut {
 						fmt.Println(string(output.Err("ValidationError", msg)))
 						return nil
 					}
@@ -117,10 +119,10 @@ Examples:
 				}
 				name, value := parts[0], parts[1]
 				resolveAccountID := func(v string) (string, error) {
-					return g.jira.ResolveAccountID(cmd.Context(), v)
+					return app.engine.Client.ResolveAccountID(cmd.Context(), v)
 				}
 				if err := applyFieldOverride(fields, fieldMap, name, value, resolveAccountID); err != nil {
-					if g.jsonOut {
+					if app.jsonOut {
 						fmt.Println(string(output.Err("ValidationError", err.Error())))
 						return nil
 					}
@@ -130,9 +132,9 @@ Examples:
 		}
 
 		// Create the issue via Jira API.
-		resp, err := g.jira.CreateIssue(cmd.Context(), fields)
+		resp, err := app.engine.Client.CreateIssue(cmd.Context(), fields)
 		if err != nil {
-			if g.jsonOut {
+			if app.jsonOut {
 				fmt.Println(string(output.Err("JiraError", err.Error())))
 				return nil
 			}
@@ -140,19 +142,19 @@ Examples:
 		}
 
 		// Fetch the full issue and insert into local DB.
-		apiIssue, fetchErr := g.jira.GetIssue(cmd.Context(), resp.Key)
+		apiIssue, fetchErr := app.engine.Client.GetIssue(cmd.Context(), resp.Key)
 		if fetchErr == nil {
 			rawJSON, _ := json.Marshal(apiIssue)
-			fieldMap, fmErr := g.db.FieldMapByJiraID()
+			fieldMap, fmErr := app.engine.Store.FieldMapByJiraID()
 			if fmErr == nil {
 				dbIssue, extra, denormErr := synce.Denormalize(rawJSON, fieldMap)
 				if denormErr == nil {
-					_ = g.db.UpsertIssue(dbIssue, extra)
+					_ = app.engine.Store.UpsertIssue(dbIssue, extra)
 				}
 			}
 		}
 
-		if g.jsonOut {
+		if app.jsonOut {
 			fmt.Println(string(output.OK(map[string]string{
 				"key":     resp.Key,
 				"id":      resp.ID,

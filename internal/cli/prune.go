@@ -23,13 +23,15 @@ reminder for removed sources.
 
 Runs as a dry run by default — pass --yes to apply.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+
+		app := cliFrom(cmd)
 		// Orphan sources: sync_metadata rows keyed by a source name that is no
 		// longer configured.
-		configuredSources := make(map[string]bool, len(g.cfg.SyncSources))
-		for _, s := range g.cfg.SyncSources {
+		configuredSources := make(map[string]bool, len(app.engine.Config.SyncSources))
+		for _, s := range app.engine.Config.SyncSources {
 			configuredSources[s.Name] = true
 		}
-		metas, err := g.db.AllSyncMeta()
+		metas, err := app.engine.Store.AllSyncMeta()
 		if err != nil {
 			return fmt.Errorf("reading sync metadata: %w", err)
 		}
@@ -45,11 +47,11 @@ Runs as a dry run by default — pass --yes to apply.`,
 		// source. When coverage is ambiguous (a JQL source with no parseable
 		// project), skip issue pruning entirely rather than risk deleting live
 		// data — orphan sync_metadata rows are still safe to remove by name.
-		counts, err := g.db.IssueCountByProject()
+		counts, err := app.engine.Store.IssueCountByProject()
 		if err != nil {
 			return fmt.Errorf("counting issues: %w", err)
 		}
-		keys, ambiguous := query.ConfiguredProjectKeys(g.cfg)
+		keys, ambiguous := query.ConfiguredProjectKeys(app.engine.Config)
 		configuredProjects := make(map[string]bool, len(keys))
 		for _, k := range keys {
 			configuredProjects[k] = true
@@ -70,7 +72,7 @@ Runs as a dry run by default — pass --yes to apply.`,
 		}
 		sort.Strings(sortedProjects)
 
-		if g.jsonOut {
+		if app.jsonOut {
 			fmt.Println(string(output.OK(map[string]any{
 				"orphan_sources":  orphanSources,
 				"orphan_projects": orphanProjects,
@@ -81,7 +83,7 @@ Runs as a dry run by default — pass --yes to apply.`,
 		}
 
 		if len(orphanSources) == 0 && len(orphanProjects) == 0 {
-			if !g.jsonOut {
+			if !app.jsonOut {
 				if ambiguous {
 					fmt.Println("Nothing to prune. (Issue pruning skipped: a JQL source has no parseable project key, so coverage can't be determined.)")
 				} else {
@@ -91,7 +93,7 @@ Runs as a dry run by default — pass --yes to apply.`,
 			return nil
 		}
 
-		if !g.jsonOut {
+		if !app.jsonOut {
 			fmt.Println("Local data not covered by any configured sync source:")
 			if len(orphanProjects) > 0 {
 				fmt.Printf("  Projects (%d issues + changelog/comments):\n", totalIssues)
@@ -108,7 +110,7 @@ Runs as a dry run by default — pass --yes to apply.`,
 		}
 
 		if !pruneYes {
-			if !g.jsonOut {
+			if !app.jsonOut {
 				fmt.Println("\nDry run. Re-run with --yes to delete.")
 			}
 			return nil
@@ -117,16 +119,16 @@ Runs as a dry run by default — pass --yes to apply.`,
 		// derived flow-metric facts can be removed afterwards. Once PruneProjects
 		// runs, these keys no longer exist in `issues`, and the metric refresh
 		// purges their facts (no visible orphan facts remain).
-		prunedKeys, err := issueKeysForProjects(sortedProjects)
+		prunedKeys, err := app.issueKeysForProjects(sortedProjects)
 		if err != nil {
 			return fmt.Errorf("listing issues to prune: %w", err)
 		}
 
-		removed, err := g.db.PruneProjects(sortedProjects)
+		removed, err := app.engine.Store.PruneProjects(sortedProjects)
 		if err != nil {
 			return fmt.Errorf("pruning issues: %w", err)
 		}
-		deletedMeta, err := g.db.DeleteSyncMetadata(orphanSources)
+		deletedMeta, err := app.engine.Store.DeleteSyncMetadata(orphanSources)
 		if err != nil {
 			return fmt.Errorf("deleting sync metadata: %w", err)
 		}
@@ -134,10 +136,10 @@ Runs as a dry run by default — pass --yes to apply.`,
 		// Remove the pruned issues' flow-metric facts (and their rollup
 		// contributions) through the shared writer lock. No-op when metrics are
 		// unconfigured; a build failure is logged, never failing the prune.
-		if err := refreshMetricFacts(prunedKeys); err != nil {
+		if err := refreshMetricFacts(app, prunedKeys); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: metric refresh after prune failed: %v\n", err)
 		}
-		if !g.jsonOut {
+		if !app.jsonOut {
 			fmt.Printf("✓ Pruned %d issues across %d project(s), %d sync metadata row(s).\n",
 				removed, len(sortedProjects), deletedMeta)
 		}
@@ -148,7 +150,7 @@ Runs as a dry run by default — pass --yes to apply.`,
 // issueKeysForProjects returns the keys of all issues in the given Jira project
 // keys. Called before PruneProjects so the pruned issues' metric facts can be
 // removed once the issues themselves are gone.
-func issueKeysForProjects(projects []string) ([]string, error) {
+func (app *CLI) issueKeysForProjects(projects []string) ([]string, error) {
 	if len(projects) == 0 {
 		return nil, nil
 	}
@@ -158,7 +160,7 @@ func issueKeysForProjects(projects []string) ([]string, error) {
 		placeholders[i] = "?"
 		args[i] = p
 	}
-	rows, err := g.db.Query(
+	rows, err := app.engine.Store.Query(
 		"SELECT key FROM issues WHERE project IN ("+strings.Join(placeholders, ",")+")", args...)
 	if err != nil {
 		return nil, err

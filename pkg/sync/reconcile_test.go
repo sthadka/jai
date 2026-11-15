@@ -229,7 +229,7 @@ func TestNormalizeRaw_CanonicalizesObjectKeyOrder(t *testing.T) {
 
 // seedRankIssue registers rank as a custom column and inserts an issue with the
 // given stored rank in both the column and raw_json.
-func seedRankIssue(t *testing.T, database *db.DB, key, storedRank string) {
+func seedRankIssue(t *testing.T, database db.Store, key, storedRank string) {
 	t.Helper()
 	if err := database.UpsertFieldMapping(&db.FieldMapping{
 		JiraID: "customfield_10019", JiraName: "Rank", Name: "rank",
@@ -449,7 +449,7 @@ func TestFullSyncOverdue(t *testing.T) {
 
 // registerRankColumn registers "rank" (customfield_10019) as a custom column so
 // ReconcileFields can resolve it. Shared by the scope/cadence tests.
-func registerRankColumn(t *testing.T, database *db.DB) {
+func registerRankColumn(t *testing.T, database db.Store) {
 	t.Helper()
 	if err := database.UpsertFieldMapping(&db.FieldMapping{
 		JiraID: "customfield_10019", JiraName: "Rank", Name: "rank",

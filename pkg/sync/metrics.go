@@ -26,7 +26,7 @@ type metricWriter struct {
 // nil when metrics are not configured. The Builder resolves its cross-process
 // advisory-lock path from cfg.DB.Path (the same path used to open the DB), so
 // every process — CLI auto-sync, serve/MCP, TUI — serializes on one sidecar.
-func newMetricWriter(database *db.DB, cfg *config.Config) *metricWriter {
+func newMetricWriter(database db.Store, cfg *config.Config) *metricWriter {
 	if cfg == nil || cfg.Metrics == nil {
 		return nil
 	}

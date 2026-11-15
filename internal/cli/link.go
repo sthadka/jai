@@ -41,13 +41,15 @@ Examples:
   jai link --list-types                                          # show available link types`,
 	Args: cobra.RangeArgs(0, 3),
 	RunE: func(cmd *cobra.Command, args []string) error {
+
+		app := cliFrom(cmd)
 		if linkFlags.listTypes {
-			return runListLinkTypes(cmd)
+			return app.runListLinkTypes(cmd)
 		}
 
 		if len(args) < 2 {
 			msg := "requires at least two arguments: jai link <issue-key> <target>"
-			if g.jsonOut {
+			if app.jsonOut {
 				fmt.Println(string(output.Err("ValidationError", msg)))
 				return nil
 			}
@@ -59,13 +61,13 @@ Examples:
 
 		// Remote link: second arg is a URL
 		if isURL(target) {
-			return runRemoteLink(cmd, issueKey, target, args)
+			return app.runRemoteLink(cmd, issueKey, target, args)
 		}
 
 		// Issue-to-issue link
 		if len(args) > 2 {
 			msg := "too many arguments for issue link; use --type flag for link type"
-			if g.jsonOut {
+			if app.jsonOut {
 				fmt.Println(string(output.Err("ValidationError", msg)))
 				return nil
 			}
@@ -75,9 +77,9 @@ Examples:
 		toKey := strings.ToUpper(target)
 		linkType := linkFlags.linkType
 
-		resolved, err := resolveLinkType(cmd, linkType)
+		resolved, err := app.resolveLinkType(cmd, linkType)
 		if err != nil {
-			if g.jsonOut {
+			if app.jsonOut {
 				fmt.Println(string(output.Err("JiraError", err.Error())))
 				return nil
 			}
@@ -85,15 +87,15 @@ Examples:
 		}
 		linkType = resolved
 
-		if err := g.jira.CreateLink(cmd.Context(), linkType, issueKey, toKey); err != nil {
-			if g.jsonOut {
+		if err := app.engine.Client.CreateLink(cmd.Context(), linkType, issueKey, toKey); err != nil {
+			if app.jsonOut {
 				fmt.Println(string(output.Err("JiraError", err.Error())))
 				return nil
 			}
 			return fmt.Errorf("creating link: %w", err)
 		}
 
-		if g.jsonOut {
+		if app.jsonOut {
 			fmt.Println(string(output.OK(map[string]string{
 				"from_key":  issueKey,
 				"to_key":    toKey,
@@ -108,21 +110,21 @@ Examples:
 	},
 }
 
-func runRemoteLink(cmd *cobra.Command, issueKey, url string, args []string) error {
+func (app *CLI) runRemoteLink(cmd *cobra.Command, issueKey, url string, args []string) error {
 	title := url
 	if len(args) > 2 {
 		title = args[2]
 	}
 
-	if err := g.jira.CreateRemoteLink(cmd.Context(), issueKey, url, title); err != nil {
-		if g.jsonOut {
+	if err := app.engine.Client.CreateRemoteLink(cmd.Context(), issueKey, url, title); err != nil {
+		if app.jsonOut {
 			fmt.Println(string(output.Err("JiraError", err.Error())))
 			return nil
 		}
 		return fmt.Errorf("creating remote link: %w", err)
 	}
 
-	if g.jsonOut {
+	if app.jsonOut {
 		fmt.Println(string(output.OK(map[string]string{
 			"issue_key": issueKey,
 			"url":       url,
@@ -136,17 +138,17 @@ func runRemoteLink(cmd *cobra.Command, issueKey, url string, args []string) erro
 	return nil
 }
 
-func runListLinkTypes(cmd *cobra.Command) error {
-	linkTypes, err := g.jira.GetLinkTypes(cmd.Context())
+func (app *CLI) runListLinkTypes(cmd *cobra.Command) error {
+	linkTypes, err := app.engine.Client.GetLinkTypes(cmd.Context())
 	if err != nil {
-		if g.jsonOut {
+		if app.jsonOut {
 			fmt.Println(string(output.Err("JiraError", err.Error())))
 			return nil
 		}
 		return fmt.Errorf("fetching link types: %w", err)
 	}
 
-	if g.jsonOut {
+	if app.jsonOut {
 		fmt.Println(string(output.OK(map[string]interface{}{
 			"link_types": linkTypes,
 		})))
@@ -165,8 +167,8 @@ func runListLinkTypes(cmd *cobra.Command) error {
 	return nil
 }
 
-func resolveLinkType(cmd *cobra.Command, name string) (string, error) {
-	linkTypes, err := g.jira.GetLinkTypes(cmd.Context())
+func (app *CLI) resolveLinkType(cmd *cobra.Command, name string) (string, error) {
+	linkTypes, err := app.engine.Client.GetLinkTypes(cmd.Context())
 	if err != nil {
 		return "", fmt.Errorf("fetching link types: %w", err)
 	}

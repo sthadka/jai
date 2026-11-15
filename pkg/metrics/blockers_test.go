@@ -23,7 +23,7 @@ func blockerPolicy() *Policy {
 	})
 }
 
-func links(t *testing.T, database *db.DB, blockedKey string, ls ...db.IssueLink) {
+func links(t *testing.T, database db.Store, blockedKey string, ls ...db.IssueLink) {
 	t.Helper()
 	if err := database.UpsertIssueLinks(blockedKey, ls); err != nil {
 		t.Fatalf("UpsertIssueLinks %s: %v", blockedKey, err)

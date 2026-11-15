@@ -18,15 +18,15 @@ var (
 )
 
 // handleFieldsSearch performs a LIKE search on field_map.name and field_map.jira_name.
-func handleFieldsSearch(keyword string) error {
+func (app *CLI) handleFieldsSearch(keyword string) error {
 	sql := `SELECT name, jira_id, jira_name, type, is_custom, searchable, is_column
 			FROM field_map
 			WHERE name LIKE ? OR jira_name LIKE ?
 			ORDER BY is_column DESC, name ASC`
 	pattern := "%" + keyword + "%"
-	rows, err := g.db.Query(sql, pattern, pattern)
+	rows, err := app.engine.Store.Query(sql, pattern, pattern)
 	if err != nil {
-		if g.jsonOut {
+		if app.jsonOut {
 			fmt.Println(string(output.Err("QueryError", err.Error())))
 			return nil
 		}
@@ -43,7 +43,7 @@ func handleFieldsSearch(keyword string) error {
 		mappings = append(mappings, m)
 	}
 
-	if g.jsonOut {
+	if app.jsonOut {
 		fields := make([]map[string]interface{}, len(mappings))
 		for i, m := range mappings {
 			fields[i] = map[string]interface{}{
@@ -72,7 +72,7 @@ func handleFieldsSearch(keyword string) error {
 		rows2[i] = []interface{}{m.Name, m.JiraName, m.JiraID, m.Type, fts}
 	}
 
-	switch g.format {
+	switch app.format {
 	case "json":
 		fields := make([]map[string]interface{}, len(mappings))
 		for i, m := range mappings {
@@ -103,12 +103,12 @@ func handleFieldsSearch(keyword string) error {
 }
 
 // handleFieldsSuggest shows which custom fields have non-null values for a given issue key.
-func handleFieldsSuggest(key string) error {
+func (app *CLI) handleFieldsSuggest(key string) error {
 	// Get all custom column fields from field_map.
 	sql := `SELECT name, jira_name, type FROM field_map WHERE is_column = 1 AND is_custom = 1`
-	rows, err := g.db.Query(sql)
+	rows, err := app.engine.Store.Query(sql)
 	if err != nil {
-		if g.jsonOut {
+		if app.jsonOut {
 			fmt.Println(string(output.Err("QueryError", err.Error())))
 			return nil
 		}
@@ -136,7 +136,7 @@ func handleFieldsSuggest(key string) error {
 	for _, cf := range customFields {
 		// Use dynamic SQL to check if the field is non-null for this issue.
 		checkSQL := fmt.Sprintf(`SELECT 1 FROM issues WHERE key = ? AND "%s" IS NOT NULL AND "%s" != '' LIMIT 1`, cf.Name, cf.Name)
-		checkRows, err := g.db.Query(checkSQL, key)
+		checkRows, err := app.engine.Store.Query(checkSQL, key)
 		if err != nil {
 			continue
 		}
@@ -152,7 +152,7 @@ func handleFieldsSuggest(key string) error {
 		}
 	}
 
-	if g.jsonOut {
+	if app.jsonOut {
 		fmt.Println(string(output.OK(map[string]interface{}{
 			"issue":  key,
 			"fields": populated,
@@ -167,7 +167,7 @@ func handleFieldsSuggest(key string) error {
 		rows2[i] = []interface{}{f["name"], f["jira_name"], f["type"]}
 	}
 
-	switch g.format {
+	switch app.format {
 	case "json":
 		fmt.Println(string(output.OK(map[string]interface{}{
 			"issue":  key,
@@ -191,19 +191,21 @@ var fieldsCmd = &cobra.Command{
 	Use:   "fields",
 	Short: "List available fields and their Jira mappings",
 	RunE: func(cmd *cobra.Command, args []string) error {
+
+		app := cliFrom(cmd)
 		// Handle --suggest flag.
 		if fieldsSuggest != "" {
-			return handleFieldsSuggest(fieldsSuggest)
+			return app.handleFieldsSuggest(fieldsSuggest)
 		}
 
 		// Handle --search flag.
 		if fieldsSearch != "" {
-			return handleFieldsSearch(fieldsSearch)
+			return app.handleFieldsSearch(fieldsSearch)
 		}
 
-		mappings, err := g.db.AllFieldMappings()
+		mappings, err := app.engine.Store.AllFieldMappings()
 		if err != nil {
-			if g.jsonOut {
+			if app.jsonOut {
 				fmt.Println(string(output.Err("QueryError", err.Error())))
 				return nil
 			}
@@ -232,10 +234,10 @@ var fieldsCmd = &cobra.Command{
 					colNames = append(colNames, m.Name)
 				}
 			}
-			stats, _ = g.db.FieldPopulationStats(colNames, fieldsProject)
+			stats, _ = app.engine.Store.FieldPopulationStats(colNames, fieldsProject)
 		}
 
-		if g.jsonOut {
+		if app.jsonOut {
 			fields := make([]map[string]interface{}, len(mappings))
 			for i, m := range mappings {
 				f := map[string]interface{}{
@@ -289,7 +291,7 @@ var fieldsCmd = &cobra.Command{
 		}
 
 		// Use --format flag (--json already handled above).
-		switch g.format {
+		switch app.format {
 		case "json":
 			// Already handled above with the full JSON envelope.
 			fields := make([]map[string]interface{}, len(mappings))

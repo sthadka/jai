@@ -36,9 +36,9 @@ func setupMetricsGlobals(t *testing.T, issues []*db.Issue, mc *config.MetricsCon
 	cfg := &config.Config{Metrics: mc}
 	cfg.DB.Path = dbPath
 
-	g.db = database
-	g.cfg = cfg
-	g.query = query.New(database, cfg)
+	g.engine.Store = database
+	g.engine.Config = cfg
+	g.engine.Query = query.New(database, cfg)
 	g.jsonOut = false
 	g.fields = ""
 	g.format = ""
@@ -47,9 +47,9 @@ func setupMetricsGlobals(t *testing.T, issues []*db.Issue, mc *config.MetricsCon
 	metricTimeout = 10 * time.Second
 
 	t.Cleanup(func() {
-		g.db = nil
-		g.cfg = nil
-		g.query = nil
+		g.engine.Store = nil
+		g.engine.Config = nil
+		g.engine.Query = nil
 		g.jsonOut = false
 		g.format = ""
 		resetMetricFlags()
@@ -145,7 +145,7 @@ func TestMetricCSVSharedService(t *testing.T) {
 	g.format = "csv"
 
 	out := captureStdout(t, func() {
-		if err := runMetric(metricsCmd, "aged_open"); err != nil {
+		if err := g.runMetric(metricsCmd, "aged_open"); err != nil {
 			t.Fatalf("runMetric: %v", err)
 		}
 	})
@@ -185,7 +185,7 @@ func TestMetricRatioUndefinedPreserved(t *testing.T) {
 	g.format = "csv"
 
 	out := captureStdout(t, func() {
-		if err := runMetric(metricsCmd, "ratio"); err != nil {
+		if err := g.runMetric(metricsCmd, "ratio"); err != nil {
 			t.Fatalf("runMetric: %v", err)
 		}
 	})
@@ -200,7 +200,7 @@ func TestMetricRatioUndefinedPreserved(t *testing.T) {
 func TestMetricRatioNotConfiguredFailsClosed(t *testing.T) {
 	setupMetricsGlobals(t, nil, &config.MetricsConfig{})
 	g.format = "table"
-	err := runMetric(metricsCmd, "ratio")
+	err := g.runMetric(metricsCmd, "ratio")
 	if err == nil {
 		t.Fatalf("expected error for unconfigured ratio")
 	}
@@ -213,7 +213,7 @@ func TestMetricRatioNotConfiguredFailsClosed(t *testing.T) {
 func TestMetricUnknownMetric(t *testing.T) {
 	setupMetricsGlobals(t, nil, &config.MetricsConfig{})
 	g.format = "table"
-	if err := runMetric(metricsCmd, "does_not_exist"); err == nil {
+	if err := g.runMetric(metricsCmd, "does_not_exist"); err == nil {
 		t.Fatalf("expected error for unknown metric")
 	}
 }

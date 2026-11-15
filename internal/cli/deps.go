@@ -25,8 +25,10 @@ Project mode:
   jai deps --project ROX          # show cross-project summary`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+
+		app := cliFrom(cmd)
 		if depsProject != "" {
-			return runDepsProject(depsProject)
+			return app.runDepsProject(depsProject)
 		}
 
 		if len(args) == 0 {
@@ -34,7 +36,7 @@ Project mode:
 		}
 
 		issueKey := strings.ToUpper(args[0])
-		return runDepsTree(issueKey, depsDepth)
+		return app.runDepsTree(issueKey, depsDepth)
 	},
 }
 
@@ -52,7 +54,7 @@ type linkSummary struct {
 }
 
 // runDepsTree shows a tree view of dependencies for a single issue.
-func runDepsTree(issueKey string, depth int) error {
+func (app *CLI) runDepsTree(issueKey string, depth int) error {
 	if depth < 1 {
 		depth = 1
 	}
@@ -61,7 +63,7 @@ func runDepsTree(issueKey string, depth int) error {
 	}
 
 	// Get the root issue.
-	issue, err := g.db.GetIssue(issueKey)
+	issue, err := app.engine.Store.GetIssue(issueKey)
 	if err != nil {
 		return fmt.Errorf("fetching issue: %w", err)
 	}
@@ -70,9 +72,9 @@ func runDepsTree(issueKey string, depth int) error {
 	}
 
 	// Build the tree.
-	tree := buildDepsTree(issueKey, depth, make(map[string]bool))
+	tree := app.buildDepsTree(issueKey, depth, make(map[string]bool))
 
-	if g.jsonOut {
+	if app.jsonOut {
 		fmt.Println(string(output.OK(tree)))
 		return nil
 	}
@@ -87,10 +89,10 @@ func runDepsTree(issueKey string, depth int) error {
 		status = st
 	}
 	fmt.Printf("%s: %s (%s)\n", issueKey, summary, status)
-	printDepsTree(tree.Links, "", true)
+	app.printDepsTree(tree.Links, "", true)
 
 	// Check for unsynced projects.
-	unsynced := findUnsyncedProjects(tree)
+	unsynced := app.findUnsyncedProjects(tree)
 	if len(unsynced) > 0 {
 		fmt.Println()
 		for _, proj := range unsynced {
@@ -102,7 +104,7 @@ func runDepsTree(issueKey string, depth int) error {
 }
 
 // runDepsProject shows a cross-project dependency summary.
-func runDepsProject(project string) error {
+func (app *CLI) runDepsProject(project string) error {
 	query := `
 		SELECT l.linked_project, l.link_type, COUNT(*) as count
 		FROM issue_links l
@@ -114,7 +116,7 @@ func runDepsProject(project string) error {
 		ORDER BY l.linked_project, count DESC
 	`
 
-	rows, err := g.db.Query(query, project)
+	rows, err := app.engine.Store.Query(query, project)
 	if err != nil {
 		return fmt.Errorf("querying links: %w", err)
 	}
@@ -130,13 +132,13 @@ func runDepsProject(project string) error {
 		results = append(results, ls)
 	}
 
-	if g.jsonOut {
+	if app.jsonOut {
 		type response struct {
 			Project          string        `json:"project"`
 			Links            []linkSummary `json:"links"`
 			UnsyncedProjects []string      `json:"unsynced_projects"`
 		}
-		unsynced := findUnsyncedProjectsFromResults(results)
+		unsynced := app.findUnsyncedProjectsFromResults(results)
 		fmt.Println(string(output.OK(response{
 			Project:          project,
 			Links:            results,
@@ -177,7 +179,7 @@ func runDepsProject(project string) error {
 	}
 
 	// Check for unsynced projects.
-	unsynced := findUnsyncedProjectsFromResults(results)
+	unsynced := app.findUnsyncedProjectsFromResults(results)
 	if len(unsynced) > 0 {
 		fmt.Println()
 		for _, proj := range unsynced {
@@ -205,13 +207,13 @@ type depsTreeLink struct {
 }
 
 // buildDepsTree recursively builds a dependency tree.
-func buildDepsTree(issueKey string, depth int, visited map[string]bool) depsTreeNode {
+func (app *CLI) buildDepsTree(issueKey string, depth int, visited map[string]bool) depsTreeNode {
 	if visited[issueKey] {
 		return depsTreeNode{Key: issueKey, Summary: "(circular)", Status: "", Links: nil}
 	}
 	visited[issueKey] = true
 
-	issue, _ := g.db.GetIssue(issueKey)
+	issue, _ := app.engine.Store.GetIssue(issueKey)
 	node := depsTreeNode{Key: issueKey}
 	if issue != nil {
 		if s, ok := issue["summary"].(string); ok {
@@ -235,7 +237,7 @@ func buildDepsTree(issueKey string, depth int, visited map[string]bool) depsTree
 		FROM issue_links
 		WHERE issue_key = ?
 	`
-	rows, err := g.db.Query(query, issueKey)
+	rows, err := app.engine.Store.Query(query, issueKey)
 	if err != nil {
 		return node
 	}
@@ -248,7 +250,7 @@ func buildDepsTree(issueKey string, depth int, visited map[string]bool) depsTree
 		}
 
 		// Build child node recursively.
-		childNode := buildDepsTree(linkedKey, depth-1, visited)
+		childNode := app.buildDepsTree(linkedKey, depth-1, visited)
 		if childNode.Summary == "" {
 			childNode.Summary = linkedSummary
 		}
@@ -275,7 +277,7 @@ func buildDepsTree(issueKey string, depth int, visited map[string]bool) depsTree
 }
 
 // printDepsTree prints the dependency tree in human-readable format.
-func printDepsTree(links []depsTreeLink, prefix string, isLast bool) {
+func (app *CLI) printDepsTree(links []depsTreeLink, prefix string, isLast bool) {
 	for i, link := range links {
 		isLastLink := i == len(links)-1
 		branch := "├── "
@@ -291,7 +293,7 @@ func printDepsTree(links []depsTreeLink, prefix string, isLast bool) {
 			statusIcon = " ✓"
 		} else if link.Target.Project != "" {
 			// Check if target project is synced.
-			if !isProjectSynced(link.Target.Project) {
+			if !app.isProjectSynced(link.Target.Project) {
 				statusIcon = " ⚠️"
 			}
 		}
@@ -308,13 +310,13 @@ func printDepsTree(links []depsTreeLink, prefix string, isLast bool) {
 			} else {
 				childPrefix += "│   "
 			}
-			printDepsTree(link.Target.Links, childPrefix, true)
+			app.printDepsTree(link.Target.Links, childPrefix, true)
 		}
 	}
 }
 
 // findUnsyncedProjects finds projects referenced in links that are not synced locally.
-func findUnsyncedProjects(tree depsTreeNode) []string {
+func (app *CLI) findUnsyncedProjects(tree depsTreeNode) []string {
 	seen := make(map[string]bool)
 	var unsynced []string
 
@@ -322,7 +324,7 @@ func findUnsyncedProjects(tree depsTreeNode) []string {
 	walk = func(node depsTreeNode) {
 		if node.Project != "" && !seen[node.Project] {
 			seen[node.Project] = true
-			if !isProjectSynced(node.Project) {
+			if !app.isProjectSynced(node.Project) {
 				unsynced = append(unsynced, node.Project)
 			}
 		}
@@ -336,14 +338,14 @@ func findUnsyncedProjects(tree depsTreeNode) []string {
 }
 
 // findUnsyncedProjectsFromResults finds unsynced projects from link summary results.
-func findUnsyncedProjectsFromResults(results []linkSummary) []string {
+func (app *CLI) findUnsyncedProjectsFromResults(results []linkSummary) []string {
 	seen := make(map[string]bool)
 	var unsynced []string
 
 	for _, r := range results {
 		if !seen[r.TargetProject] {
 			seen[r.TargetProject] = true
-			if !isProjectSynced(r.TargetProject) {
+			if !app.isProjectSynced(r.TargetProject) {
 				unsynced = append(unsynced, r.TargetProject)
 			}
 		}
@@ -353,8 +355,8 @@ func findUnsyncedProjectsFromResults(results []linkSummary) []string {
 }
 
 // isProjectSynced checks if a project is in the sync sources.
-func isProjectSynced(project string) bool {
-	for _, src := range g.cfg.SyncSources {
+func (app *CLI) isProjectSynced(project string) bool {
+	for _, src := range app.engine.Config.SyncSources {
 		for _, p := range src.Projects {
 			if p == project {
 				return true

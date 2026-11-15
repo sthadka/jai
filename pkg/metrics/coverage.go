@@ -257,7 +257,7 @@ func storyPointsDiagnostic(totalIssues, withSP int) GatingDiagnostic {
 
 // ReportCoverage builds the diagnostic directly from the local DB. Read-only: it never
 // enables sync, edits config, or makes API calls. projects empty means all projects.
-func ReportCoverage(database *db.DB, projects []string, pol *Policy, cfg *config.Config) (*CoverageReport, error) {
+func ReportCoverage(database db.Store, projects []string, pol *Policy, cfg *config.Config) (*CoverageReport, error) {
 	in := CoverageInput{Freshness: map[string]SourceFreshness{}, ChangelogFields: map[string]bool{}}
 
 	// Issues snapshot with any-history flag.
@@ -385,7 +385,7 @@ func scanFreshness(rows *sql.Rows, out map[string]SourceFreshness) {
 	}
 }
 
-func countRows(database *db.DB, table string) int {
+func countRows(database db.Store, table string) int {
 	var n int
 	// table is a fixed literal, not user input.
 	if err := database.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&n); err != nil {

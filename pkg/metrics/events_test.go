@@ -22,7 +22,7 @@ func eventsService(t *testing.T, tracked []string) (*db.DB, *Service) {
 	return database, NewService(database, store, pol, nil)
 }
 
-func upComment(t *testing.T, database *db.DB, id, key, created string) {
+func upComment(t *testing.T, database db.Store, id, key, created string) {
 	t.Helper()
 	if err := database.UpsertComment(&db.Comment{ID: id, IssueKey: key, Body: "c", Created: created}); err != nil {
 		t.Fatalf("UpsertComment %s: %v", id, err)

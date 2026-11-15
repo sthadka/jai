@@ -35,11 +35,13 @@ Examples:
   jai update ROX-789 --transition Done --queue`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+
+		app := cliFrom(cmd)
 		issueKey := args[0]
 
 		if len(updateSetValues) == 0 && updateTransition == "" && updateComment == "" {
 			msg := "at least one of --set, --transition, or --comment is required"
-			if g.jsonOut {
+			if app.jsonOut {
 				fmt.Println(string(output.Err("ValidationError", msg)))
 				return nil
 			}
@@ -47,7 +49,7 @@ Examples:
 		}
 
 		if updateQueue {
-			if err := g.db.EnsurePendingChangesTable(); err != nil {
+			if err := app.engine.Store.EnsurePendingChangesTable(); err != nil {
 				return err
 			}
 		}
@@ -65,27 +67,27 @@ Examples:
 
 		// Phase 1: Set fields
 		if len(updateSetValues) > 0 {
-			if err := updateSetFields(cmd, issueKey, result); err != nil {
+			if err := app.updateSetFields(cmd, issueKey, result); err != nil {
 				return err
 			}
 		}
 
 		// Phase 2: Execute transition
 		if updateTransition != "" {
-			if err := updateExecuteTransition(cmd, issueKey, updateTransition, result); err != nil {
+			if err := app.updateExecuteTransition(cmd, issueKey, updateTransition, result); err != nil {
 				return err
 			}
 		}
 
 		// Phase 3: Add comment
 		if updateComment != "" {
-			if err := updateAddComment(cmd, issueKey, updateComment, result); err != nil {
+			if err := app.updateAddComment(cmd, issueKey, updateComment, result); err != nil {
 				return err
 			}
 		}
 
 		// Output results
-		if g.jsonOut {
+		if app.jsonOut {
 			fmt.Println(string(output.OK(result)))
 			return nil
 		}
@@ -145,8 +147,8 @@ type updateResult struct {
 	Status           string   `json:"status"`
 }
 
-func updateSetFields(cmd *cobra.Command, issueKey string, result *updateResult) error {
-	fieldMap, err := g.db.FieldMapByJiraID()
+func (app *CLI) updateSetFields(cmd *cobra.Command, issueKey string, result *updateResult) error {
+	fieldMap, err := app.engine.Store.FieldMapByJiraID()
 	if err != nil {
 		return err
 	}
@@ -181,7 +183,7 @@ func updateSetFields(cmd *cobra.Command, issueKey string, result *updateResult) 
 
 		if fieldType == "array" {
 			resolveAccountID := func(v string) (string, error) {
-				return g.jira.ResolveAccountID(cmd.Context(), v)
+				return app.engine.Client.ResolveAccountID(cmd.Context(), v)
 			}
 			items := fieldwrap.ParseArrayInput(value)
 			wrapped, wrapErr := fieldwrap.WrapArrayItems(jiraID, itemType, items, resolveAccountID)
@@ -194,7 +196,7 @@ func updateSetFields(cmd *cobra.Command, issueKey string, result *updateResult) 
 			localVal = string(j)
 		} else {
 			resolveAccountID := func(v string) (string, error) {
-				return g.jira.ResolveAccountID(cmd.Context(), v)
+				return app.engine.Client.ResolveAccountID(cmd.Context(), v)
 			}
 			if wrapped, ok, wrapErr := fieldwrap.WrapScalarFieldValue(jiraID, value, resolveAccountID); ok {
 				if wrapErr != nil {
@@ -209,18 +211,18 @@ func updateSetFields(cmd *cobra.Command, issueKey string, result *updateResult) 
 
 		if updateQueue {
 			payload, _ := json.Marshal(map[string]interface{}{"field": jiraID, "value": payloadVal})
-			if err := g.db.InsertPendingChange(issueKey, "set_field", string(payload)); err != nil {
+			if err := app.engine.Store.InsertPendingChange(issueKey, "set_field", string(payload)); err != nil {
 				result.FieldsFailed = append(result.FieldsFailed, fmt.Sprintf("%s (%v)", fieldName, err))
 				continue
 			}
 		} else {
-			if err := g.jira.UpdateField(cmd.Context(), issueKey, jiraID, payloadVal); err != nil {
+			if err := app.engine.Client.UpdateField(cmd.Context(), issueKey, jiraID, payloadVal); err != nil {
 				result.FieldsFailed = append(result.FieldsFailed, fmt.Sprintf("%s (%v)", fieldName, err))
 				continue
 			}
 		}
 
-		_, err := g.db.Exec(
+		_, err := app.engine.Store.Exec(
 			fmt.Sprintf("UPDATE issues SET %s = ?, synced_at = datetime('now') WHERE key = ?", fieldName),
 			localVal, issueKey,
 		)
@@ -234,8 +236,8 @@ func updateSetFields(cmd *cobra.Command, issueKey string, result *updateResult) 
 	return nil
 }
 
-func updateExecuteTransition(cmd *cobra.Command, issueKey, targetName string, result *updateResult) error {
-	transitions, err := g.jira.GetTransitions(cmd.Context(), issueKey)
+func (app *CLI) updateExecuteTransition(cmd *cobra.Command, issueKey, targetName string, result *updateResult) error {
+	transitions, err := app.engine.Client.GetTransitions(cmd.Context(), issueKey)
 	if err != nil {
 		result.TransitionStatus = "failed"
 		result.TransitionError = fmt.Sprintf("fetching transitions: %v", err)
@@ -260,25 +262,25 @@ func updateExecuteTransition(cmd *cobra.Command, issueKey, targetName string, re
 
 	if updateQueue {
 		payload, _ := json.Marshal(map[string]string{"transition_id": match.ID})
-		if err := g.db.InsertPendingChange(issueKey, "transition", string(payload)); err != nil {
+		if err := app.engine.Store.InsertPendingChange(issueKey, "transition", string(payload)); err != nil {
 			result.TransitionStatus = "failed"
 			result.TransitionError = err.Error()
 			return nil
 		}
 		result.TransitionStatus = "ok"
 	} else {
-		if err := g.jira.ExecuteTransition(cmd.Context(), issueKey, match.ID); err != nil {
+		if err := app.engine.Client.ExecuteTransition(cmd.Context(), issueKey, match.ID); err != nil {
 			result.TransitionStatus = "failed"
 			result.TransitionError = err.Error()
 			return nil
 		}
 
 		// Refresh the local DB so status is immediately queryable.
-		if apiIssue, fetchErr := g.jira.GetIssue(cmd.Context(), issueKey); fetchErr == nil {
+		if apiIssue, fetchErr := app.engine.Client.GetIssue(cmd.Context(), issueKey); fetchErr == nil {
 			rawJSON, _ := json.Marshal(apiIssue)
-			if fieldMapRefresh, fmErr := g.db.FieldMapByJiraID(); fmErr == nil {
+			if fieldMapRefresh, fmErr := app.engine.Store.FieldMapByJiraID(); fmErr == nil {
 				if dbIssue, extra, denormErr := synce.Denormalize(rawJSON, fieldMapRefresh); denormErr == nil {
-					_ = g.db.UpsertIssue(dbIssue, extra)
+					_ = app.engine.Store.UpsertIssue(dbIssue, extra)
 				}
 			}
 		}
@@ -289,12 +291,12 @@ func updateExecuteTransition(cmd *cobra.Command, issueKey, targetName string, re
 	return nil
 }
 
-func updateAddComment(cmd *cobra.Command, issueKey, text string, result *updateResult) error {
+func (app *CLI) updateAddComment(cmd *cobra.Command, issueKey, text string, result *updateResult) error {
 	var commentID string
 
 	if updateQueue {
 		payload, _ := json.Marshal(map[string]string{"body": text})
-		if err := g.db.InsertPendingChange(issueKey, "add_comment", string(payload)); err != nil {
+		if err := app.engine.Store.InsertPendingChange(issueKey, "add_comment", string(payload)); err != nil {
 			result.CommentStatus = "failed"
 			result.CommentError = err.Error()
 			return nil
@@ -302,7 +304,7 @@ func updateAddComment(cmd *cobra.Command, issueKey, text string, result *updateR
 		commentID = fmt.Sprintf("local_%d", time.Now().UnixNano())
 		result.CommentStatus = "ok"
 	} else {
-		id, err := g.jira.AddComment(cmd.Context(), issueKey, text)
+		id, err := app.engine.Client.AddComment(cmd.Context(), issueKey, text)
 		if err != nil {
 			result.CommentStatus = "failed"
 			result.CommentError = err.Error()
@@ -316,13 +318,13 @@ func updateAddComment(cmd *cobra.Command, issueKey, text string, result *updateR
 	localComment := &db.Comment{
 		ID:       commentID,
 		IssueKey: issueKey,
-		Author:   g.cfg.Me,
+		Author:   app.engine.Config.Me,
 		Body:     text,
 		Created:  now,
 		Updated:  now,
 	}
-	_ = g.db.UpsertComment(localComment)
-	_ = g.db.UpdateIssueCommentsText(issueKey)
+	_ = app.engine.Store.UpsertComment(localComment)
+	_ = app.engine.Store.UpdateIssueCommentsText(issueKey)
 
 	return nil
 }

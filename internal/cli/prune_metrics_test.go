@@ -44,7 +44,7 @@ func TestPruneMetricRefresh(t *testing.T) {
 				seedResolvedIssue(t, database, "DROP-1", "DROP")
 				seedStatusChangelog(t, database, "DROP-1")
 
-				if err := refreshMetricFacts([]string{"KEEP-1", "DROP-1"}); err != nil {
+				if err := refreshMetricFacts(g, []string{"KEEP-1", "DROP-1"}); err != nil {
 					t.Fatalf("initial refreshMetricFacts: %v", err)
 				}
 				gen0 := activeGenMeta(t, store)
@@ -60,7 +60,7 @@ func TestPruneMetricRefresh(t *testing.T) {
 				pruneYes, g.jsonOut = true, true
 				t.Cleanup(func() { pruneYes, g.jsonOut = prevYes, prevJSON })
 
-				if err := syncPruneCmd.RunE(syncPruneCmd, nil); err != nil {
+				if err := callRunE(syncPruneCmd, nil); err != nil {
 					t.Fatalf("prune RunE: %v", err)
 				}
 
@@ -107,7 +107,7 @@ func TestPruneMetricRefresh(t *testing.T) {
 				pruneYes, g.jsonOut = true, true
 				t.Cleanup(func() { pruneYes, g.jsonOut = prevYes, prevJSON })
 
-				if err := syncPruneCmd.RunE(syncPruneCmd, nil); err != nil {
+				if err := callRunE(syncPruneCmd, nil); err != nil {
 					t.Fatalf("prune RunE (unconfigured): %v", err)
 				}
 

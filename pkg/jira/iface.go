@@ -1,0 +1,37 @@
+package jira
+
+import "context"
+
+// JiraClient is the Jira REST surface the engine depends on. *Client is the
+// production implementation; engine packages (sync, mcp) accept this interface
+// so an embedding application can supply a mock or an alternative transport.
+// The auth mechanism is orthogonal: see New (Basic) and NewWithClient (custom).
+type JiraClient interface {
+	AddComment(ctx context.Context, issueKey, body string) (string, error)
+	AddWatcher(ctx context.Context, issueKey, accountID string) error
+	BulkFetchChangelogs(ctx context.Context, keys []string) ([]BulkChangelogEntry, error)
+	CreateIssue(ctx context.Context, fields map[string]interface{}) (*CreateIssueResponse, error)
+	CreateLink(ctx context.Context, linkType, inwardKey, outwardKey string) error
+	CreateRemoteLink(ctx context.Context, issueKey, url, title string) error
+	ExecuteTransition(ctx context.Context, issueKey, transitionID string) error
+	Fields(ctx context.Context) ([]*Field, error)
+	GetBoards(ctx context.Context, projectKey string) ([]Board, error)
+	GetDevInfo(ctx context.Context, issueID string) (*DevInfoResponse, error)
+	GetIssue(ctx context.Context, key string) (*Issue, error)
+	GetIssueChangelog(ctx context.Context, key string) (*ChangelogResponse, error)
+	GetLinkTypes(ctx context.Context) ([]LinkType, error)
+	GetProject(ctx context.Context, key string) (*ProjectInfo, error)
+	GetSprintIssues(ctx context.Context, sprintID int) ([]string, error)
+	GetSprints(ctx context.Context, boardID int) ([]Sprint, error)
+	GetTransitions(ctx context.Context, issueKey string) ([]*Transition, error)
+	MySelf(ctx context.Context) (*MySelf, error)
+	RemoveWatcher(ctx context.Context, issueKey, accountID string) error
+	ResolveAccountID(ctx context.Context, identifier string) (string, error)
+	SearchAll(ctx context.Context, jql string, fields []string) func(yield func([]*Issue, error) bool)
+	SearchCount(ctx context.Context, jql string) (int, error)
+	UpdateField(ctx context.Context, issueKey, fieldID string, value interface{}) error
+	UpdateFieldOp(ctx context.Context, issueKey, fieldID, op string, value interface{}) error
+}
+
+// Ensure *Client satisfies JiraClient.
+var _ JiraClient = (*Client)(nil)

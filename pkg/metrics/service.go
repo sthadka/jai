@@ -13,7 +13,7 @@ import (
 // dashboard, and view definitions). There is exactly one definition of each metric, routed
 // through the provider registry, so the three consumers never fork the SQL or the policy.
 type Service struct {
-	db    *db.DB
+	db    db.Store
 	store *Store
 	pol   *Policy
 	cfg   *config.Config
@@ -23,7 +23,7 @@ type Service struct {
 // NewService builds the shared service. store is used by fact-based metrics (delivery);
 // issues-only metrics read db directly. cfg is optional (used for freshness/coverage).
 // The default as-of (when a query omits one) comes from the system clock.
-func NewService(database *db.DB, store *Store, pol *Policy, cfg *config.Config) *Service {
+func NewService(database db.Store, store *Store, pol *Policy, cfg *config.Config) *Service {
 	return &Service{db: database, store: store, pol: pol, cfg: cfg, clk: clock.System{}}
 }
 

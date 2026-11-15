@@ -29,12 +29,14 @@ Examples:
   jai open PROJ-123 --json       # output JSON with URL`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+
+		app := cliFrom(cmd)
 		key := strings.ToUpper(args[0])
 
-		baseURL := strings.TrimRight(g.cfg.Jira.URL, "/")
+		baseURL := strings.TrimRight(app.engine.Config.Jira.URL, "/")
 		issueURL := baseURL + "/browse/" + key
 
-		if g.jsonOut {
+		if app.jsonOut {
 			fmt.Fprintln(cmd.OutOrStdout(), string(output.OK(map[string]string{
 				"url": issueURL,
 			})))

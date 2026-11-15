@@ -21,24 +21,26 @@ var syncCmd = &cobra.Command{
 	Use:   "sync",
 	Short: "Sync Jira issues to local database",
 	RunE: func(cmd *cobra.Command, args []string) error {
+
+		app := cliFrom(cmd)
 		ctx := context.Background()
 
 		// Verify authentication before touching Jira: an unauthenticated sync
 		// can silently pull anonymous (or empty) data and overwrite the local DB.
-		if err := g.sync.VerifyAuth(ctx); err != nil {
+		if err := app.engine.Sync.VerifyAuth(ctx); err != nil {
 			return err
 		}
 
 		// Discover fields first.
 		var overrides map[string]string
-		if g.cfg.Fields.Overrides != nil {
-			overrides = g.cfg.Fields.Overrides
+		if app.engine.Config.Fields.Overrides != nil {
+			overrides = app.engine.Config.Fields.Overrides
 		}
-		if err := g.sync.DiscoverFields(ctx, overrides); err != nil {
+		if err := app.engine.Sync.DiscoverFields(ctx, overrides); err != nil {
 			return fmt.Errorf("discovering fields: %w", err)
 		}
 
-		ch, err := g.sync.Sync(ctx, syncFull, syncResume, syncSourceFlag)
+		ch, err := app.engine.Sync.Sync(ctx, syncFull, syncResume, syncSourceFlag)
 		if err != nil {
 			return err
 		}
@@ -49,8 +51,8 @@ var syncCmd = &cobra.Command{
 		// Reconcile silently-changed fields (rank etc.) that the "updated" gate
 		// misses. Only meaningful for incremental syncs — a full sync already
 		// re-fetches every issue. Skipped when reconcile_fields is empty.
-		if !syncFull && len(g.cfg.Sync.ReconcileFields) > 0 {
-			rcCh, err := g.sync.ReconcileFields(ctx, syncSourceFlag, g.cfg.Sync.ReconcileFields)
+		if !syncFull && len(app.engine.Config.Sync.ReconcileFields) > 0 {
+			rcCh, err := app.engine.Sync.ReconcileFields(ctx, syncSourceFlag, app.engine.Config.Sync.ReconcileFields)
 			if err != nil {
 				return fmt.Errorf("reconcile: %w", err)
 			}
@@ -61,7 +63,7 @@ var syncCmd = &cobra.Command{
 		// --changelogs). Incremental by default: only issues whose changelog was
 		// never synced or that were updated since are re-fetched. --force resets
 		// all changelog_synced_at timestamps first for a full re-fetch.
-		clCh, err := g.sync.SyncChangelogs(ctx, syncSourceFlag, syncChangelogsForce)
+		clCh, err := app.engine.Sync.SyncChangelogs(ctx, syncSourceFlag, syncChangelogsForce)
 		if err != nil {
 			return fmt.Errorf("changelog sync: %w", err)
 		}
@@ -70,8 +72,8 @@ var syncCmd = &cobra.Command{
 		// Remind the user if a full sync is overdue: the reconcile pass only
 		// covers configured fields, so arbitrary silently-changed fields still
 		// need a periodic full sync to reconcile.
-		if !syncFull && g.cfg.Sync.FullSyncWarning {
-			warnIfFullSyncOverdue(g, syncSourceFlag)
+		if !syncFull && app.engine.Config.Sync.FullSyncWarning {
+			warnIfFullSyncOverdue(app, syncSourceFlag)
 		}
 
 		return nil
@@ -270,8 +272,8 @@ func displayReconcileProgress(ch <-chan synce.ReconcileProgress) {
 // missing or older than the configured threshold. Only configured fields are
 // reconciled incrementally, so arbitrary silently-changed fields still rely on
 // a periodic full sync.
-func warnIfFullSyncOverdue(g globals, sourceFilter string) {
-	stale := g.sync.FullSyncOverdue(sourceFilter)
+func warnIfFullSyncOverdue(app *CLI, sourceFilter string) {
+	stale := app.engine.Sync.FullSyncOverdue(sourceFilter)
 	if len(stale) > 0 {
 		fmt.Fprintf(os.Stderr,
 			"  ⚠ full sync overdue for: %v — run 'jai sync --full' to reconcile all fields\n"+

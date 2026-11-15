@@ -29,12 +29,12 @@ type Results struct {
 
 // Engine executes SQL against the local database.
 type Engine struct {
-	db  *db.DB
+	db  db.Store
 	cfg *config.Config
 }
 
 // New creates a new query Engine.
-func New(database *db.DB, cfg *config.Config) *Engine {
+func New(database db.Store, cfg *config.Config) *Engine {
 	return &Engine{db: database, cfg: cfg}
 }
 

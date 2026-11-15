@@ -65,7 +65,7 @@ var initCmd = &cobra.Command{
 	Short: "Interactive setup wizard",
 	// Override PersistentPreRunE — init doesn't require existing config.
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error { return nil },
-	RunE:              runInit,
+	RunE:              func(cmd *cobra.Command, args []string) error { return cliFrom(cmd).runInit(cmd, args) },
 }
 
 // prompt prints a styled prompt with an optional default and reads a line.
@@ -85,7 +85,7 @@ func prompt(reader *bufio.Reader, label, defaultVal string) string {
 
 // ── Wizard ────────────────────────────────────────────────────────────────────
 
-func runInit(cmd *cobra.Command, args []string) error {
+func (app *CLI) runInit(cmd *cobra.Command, args []string) error {
 	reader := bufio.NewReader(os.Stdin)
 	ctx := context.Background()
 
@@ -99,7 +99,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  All Jira data is synced locally — fast queries, no rate limits.\n")
 
 	// Resolve config path: --config flag > default.
-	cfgPath := g.cfgPath
+	cfgPath := app.cfgPath
 	if cfgPath == "" {
 		cfgPath = config.DefaultConfigPath()
 	}
@@ -224,8 +224,8 @@ func runInit(cmd *cobra.Command, args []string) error {
 	if existing != nil && existing.DB.Path != "" {
 		dbPath = existing.DB.Path
 	}
-	if g.dbPath != "" {
-		dbPath = g.dbPath
+	if app.dbPath != "" {
+		dbPath = app.dbPath
 	}
 
 	// Show resolved paths.

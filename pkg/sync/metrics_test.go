@@ -39,7 +39,7 @@ func newMetricTestDB(t *testing.T) (*db.DB, string) {
 }
 
 // putIssue inserts/updates a resolved issue with its status changelog marked complete.
-func putIssue(t *testing.T, database *db.DB, key string) {
+func putIssue(t *testing.T, database db.Store, key string) {
 	t.Helper()
 	iss := &db.Issue{
 		Key: key, Project: "TEST", Type: "Bug", Summary: key,
@@ -93,11 +93,11 @@ func activeGen(t *testing.T, store *metrics.Store) *metrics.GenerationMeta {
 func TestMetricWriter(t *testing.T) {
 	tests := []struct {
 		name string
-		run  func(t *testing.T, database *db.DB, path string)
+		run  func(t *testing.T, database db.Store, path string)
 	}{
 		{
 			name: "incremental adds touched issue within active generation",
-			run: func(t *testing.T, database *db.DB, path string) {
+			run: func(t *testing.T, database db.Store, path string) {
 				mw := newMetricWriter(database, metricsCfg(path, []string{"Done"}))
 				store := metrics.NewStore(database, path)
 
@@ -129,7 +129,7 @@ func TestMetricWriter(t *testing.T) {
 		},
 		{
 			name: "fingerprint change forces full rebuild",
-			run: func(t *testing.T, database *db.DB, path string) {
+			run: func(t *testing.T, database db.Store, path string) {
 				store := metrics.NewStore(database, path)
 				putIssue(t, database, "TEST-1")
 
@@ -159,7 +159,7 @@ func TestMetricWriter(t *testing.T) {
 		},
 		{
 			name: "deletion removes facts",
-			run: func(t *testing.T, database *db.DB, path string) {
+			run: func(t *testing.T, database db.Store, path string) {
 				mw := newMetricWriter(database, metricsCfg(path, []string{"Done"}))
 				store := metrics.NewStore(database, path)
 
@@ -192,7 +192,7 @@ func TestMetricWriter(t *testing.T) {
 		},
 		{
 			name: "unconfigured metrics is a no-op",
-			run: func(t *testing.T, database *db.DB, path string) {
+			run: func(t *testing.T, database db.Store, path string) {
 				cfg := &config.Config{DB: config.DBConfig{Path: path}} // no metrics: block
 				mw := newMetricWriter(database, cfg)
 				if mw != nil {
