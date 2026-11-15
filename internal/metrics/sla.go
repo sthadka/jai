@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sthadka/jai/internal/config"
+	"github.com/sthadka/jai/pkg/config"
 )
 
 // MetricSecuritySLA is the security remediation-timing / SLA metric. It is deliberately

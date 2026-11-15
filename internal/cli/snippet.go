@@ -7,8 +7,9 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/sthadka/jai/internal/config"
+	"github.com/sthadka/jai/internal/cli/configloader"
 	"github.com/sthadka/jai/internal/output"
+	"github.com/sthadka/jai/pkg/config"
 	"gopkg.in/yaml.v3"
 )
 
@@ -25,7 +26,7 @@ var snippetListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all available snippets",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := config.Load(g.cfgPath)
+		cfg, err := configloader.Load(g.cfgPath)
 		if err != nil {
 			if g.jsonOut {
 				fmt.Println(string(output.Err("ConfigLoadError", err.Error())))
@@ -85,7 +86,7 @@ var snippetShowCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
 
-		cfg, err := config.Load(g.cfgPath)
+		cfg, err := configloader.Load(g.cfgPath)
 		if err != nil {
 			if g.jsonOut {
 				fmt.Println(string(output.Err("ConfigLoadError", err.Error())))
@@ -157,7 +158,7 @@ var snippetAddCmd = &cobra.Command{
 		}
 
 		// Load config to get current snippets.
-		cfg, err := config.Load(cfgPath)
+		cfg, err := configloader.Load(cfgPath)
 		if err != nil {
 			if g.jsonOut {
 				fmt.Println(string(output.Err("ConfigLoadError", err.Error())))
