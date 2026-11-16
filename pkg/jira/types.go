@@ -21,6 +21,40 @@ type Issue struct {
 	Fields json.RawMessage `json:"fields"`
 }
 
+// UnmarshalJSON decodes an issue, tolerating a numeric or string "id". Jira's
+// REST search/issue endpoints return id as a quoted string, but some payloads
+// (agile, webhooks) emit it as a bare JSON number; accept both so a move/rename
+// sync never fails to parse the stable numeric identity.
+func (i *Issue) UnmarshalJSON(b []byte) error {
+	var a struct {
+		ID     json.RawMessage `json:"id"`
+		Key    string          `json:"key"`
+		Fields json.RawMessage `json:"fields"`
+	}
+	if err := json.Unmarshal(b, &a); err != nil {
+		return err
+	}
+	i.Key = a.Key
+	i.Fields = a.Fields
+	i.ID = flexID(a.ID)
+	return nil
+}
+
+// flexID renders a JSON id token (quoted string or bare number) as a string.
+func flexID(raw json.RawMessage) string {
+	s := strings.TrimSpace(string(raw))
+	if s == "" || s == "null" {
+		return ""
+	}
+	if s[0] == '"' {
+		var unquoted string
+		if err := json.Unmarshal(raw, &unquoted); err == nil {
+			return unquoted
+		}
+	}
+	return s
+}
+
 // IssueFields contains the commonly-accessed fields from an issue.
 type IssueFields struct {
 	Summary     string          `json:"summary"`
