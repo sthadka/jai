@@ -233,3 +233,62 @@ func TestRunLocalJQLQuery_UnsupportedFunction(t *testing.T) {
 		t.Errorf("error = %q, want it to mention membersOf()", err.Error())
 	}
 }
+
+// TestRunLocalJQLQuery_CustomJSONField proves a non-promoted custom field stored
+// in the sparse custom_fields JSON is filterable via local JQL: buildJQLFieldMap
+// resolves it to a json_extract expression and the translated predicate matches.
+func TestRunLocalJQLQuery_CustomJSONField(t *testing.T) {
+	database := setupLocalJQL(t)
+	g.jsonOut = true
+
+	if err := database.UpsertFieldMapping(&db.FieldMapping{
+		JiraID: "customfield_55555", Name: "risk_level", Type: "text",
+		IsCustom: true, IsColumn: false, Searchable: true,
+	}); err != nil {
+		t.Fatalf("UpsertFieldMapping: %v", err)
+	}
+	iss := &db.Issue{
+		Key: "ROX-9", Project: "ROX", Type: "Bug", Summary: "has risk",
+		Status: "In Progress", StatusCategory: "In Progress", Priority: "High",
+		Created: "2024-01-01T00:00:00Z", Updated: "2024-01-02T00:00:00Z",
+	}
+	if err := database.UpsertIssue(iss, map[string]interface{}{
+		"custom_fields": `{"customfield_55555":"high"}`,
+	}); err != nil {
+		t.Fatalf("UpsertIssue: %v", err)
+	}
+
+	out := captureStdout(t, func() {
+		if err := g.runLocalJQLQuery(`risk_level = high`); err != nil {
+			t.Fatalf("runLocalJQLQuery: %v", err)
+		}
+	})
+
+	var env struct {
+		OK      bool            `json:"ok"`
+		Columns []string        `json:"columns"`
+		Rows    [][]interface{} `json:"rows"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &env); err != nil {
+		t.Fatalf("unmarshal envelope %q: %v", out, err)
+	}
+	if !env.OK {
+		t.Fatalf("expected ok envelope, got %q", out)
+	}
+	keyIdx := -1
+	for i, c := range env.Columns {
+		if c == "key" {
+			keyIdx = i
+		}
+	}
+	if keyIdx < 0 {
+		t.Fatalf("no key column in %v", env.Columns)
+	}
+	var keys []string
+	for _, row := range env.Rows {
+		keys = append(keys, row[keyIdx].(string))
+	}
+	if len(keys) != 1 || keys[0] != "ROX-9" {
+		t.Errorf("keys = %v, want [ROX-9] (filtered on JSON custom field)", keys)
+	}
+}
