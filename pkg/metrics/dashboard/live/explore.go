@@ -473,31 +473,59 @@ func (s *Server) refreshFieldMap() jql.FieldMap {
 // Query (which does not error on a failed statement), leaving the built-in alias
 // table to handle the common fields.
 func buildFieldMap(engine *Engine) jql.FieldMap {
-	rows, err := engine.Query("SELECT jira_name, name, type, item_type, is_column FROM jai.field_map")
+	rows, err := engine.Query("SELECT jira_id, jira_name, name, type, item_type, is_custom, is_column FROM jai.field_map")
 	if err != nil || len(rows) == 0 {
 		return jql.FieldMap{}
 	}
 	fm := make(jql.FieldMap, len(rows)*2)
 	for _, row := range rows {
-		if !truthy(row["is_column"]) {
-			continue
-		}
-		col := strValue(row["name"])
-		if col == "" {
+		name := strValue(row["name"])
+		if name == "" {
 			continue
 		}
 		typ := strValue(row["type"])
+		col := name
+		switch {
+		case truthy(row["is_column"]):
+			// promoted / core field: direct column.
+		case truthy(row["is_custom"]):
+			// Non-promoted custom field: read from the sparse custom_fields JSON.
+			// DuckDB reads the column as VARCHAR, so json_extract_string yields a
+			// scalar the kind-based casts (DOUBLE/TIMESTAMP) apply to directly.
+			jiraID := strValue(row["jira_id"])
+			if !isSafeJSONKey(jiraID) {
+				continue
+			}
+			col = fmt.Sprintf("json_extract_string(custom_fields, '$.%s')", jiraID)
+		default:
+			// Non-custom field without a column: nothing to query.
+			continue
+		}
 		fd := jql.FieldDef{
 			Column: col,
-			Kind:   fieldKind(typ, col),
+			Kind:   fieldKind(typ, name),
 			Entity: strings.EqualFold(typ, "user"),
 		}
-		fm[strings.ToLower(col)] = fd
+		fm[strings.ToLower(name)] = fd
 		if jiraName := strValue(row["jira_name"]); jiraName != "" {
 			fm[strings.ToLower(jiraName)] = fd
 		}
 	}
 	return fm
+}
+
+// isSafeJSONKey reports whether s is a safe JSON path key (letters, digits,
+// underscore) for interpolation into a json_extract_string path.
+func isSafeJSONKey(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if !(unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_') {
+			return false
+		}
+	}
+	return true
 }
 
 // fieldKind maps a field_map type (and column name) to the translator's storage
