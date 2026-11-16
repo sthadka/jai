@@ -2,7 +2,7 @@
 // using only exported APIs — no cobra, TUI, or internal/CLI packages.
 module github.com/sthadka/jai/examples/embed
 
-go 1.25.5
+go 1.27.4
 
 require github.com/sthadka/jai/v5 v5.2.0
 
