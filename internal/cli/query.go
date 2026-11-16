@@ -281,8 +281,16 @@ func (app *CLI) buildJQLFieldMap() (jql.FieldMap, error) {
 		if m.Name == "" || !jqlColumnRe.MatchString(m.Name) {
 			continue
 		}
+		col := m.Name
+		if m.IsCustom && !m.IsColumn && jqlColumnRe.MatchString(m.JiraID) {
+			// Non-promoted custom field: read from the sparse custom_fields JSON.
+			// json_extract reads it as a scalar; the compiler's kind-based casts
+			// (REAL for numbers, datetime() for dates, json_each for arrays) apply
+			// to this expression exactly as they would to a real column.
+			col = fmt.Sprintf("json_extract(custom_fields, '$.%s')", m.JiraID)
+		}
 		def := jql.FieldDef{
-			Column: m.Name,
+			Column: col,
 			Kind:   jqlFieldKind(m.Type),
 			Entity: jqlIsEntity(m),
 		}
