@@ -58,11 +58,14 @@ type IssueLink struct {
 // UpsertIssue inserts a new issue row or updates an existing one. Extra contains
 // additional dynamic columns.
 //
-// It uses INSERT ... ON CONFLICT(key) DO UPDATE rather than INSERT OR REPLACE:
-// REPLACE deletes the existing row and re-inserts it, which resets any column not
-// listed here to its default (NULL). That would wipe columns maintained outside
-// this function — notably changelog_synced_at — forcing a full changelog re-fetch
-// on the next sync. Upsert only touches the columns we explicitly set.
+// It upserts on the stable numeric id (ON CONFLICT(id)) rather than the mutable
+// key: when an issue moves project or a project is renamed its key changes, so
+// matching on key would insert a duplicate and orphan the old row's relations.
+// Matching on id updates the existing row in place and lets the key-rename
+// trigger cascade the new key to child tables and record a historical alias.
+// A second ON CONFLICT(key) arm keeps id-less rows (no Jira id yet) idempotent.
+// INSERT ... ON CONFLICT (not INSERT OR REPLACE) preserves columns maintained
+// outside this function — notably changelog_synced_at — that REPLACE would wipe.
 func (db *DB) UpsertIssue(issue *Issue, extra map[string]interface{}) error {
 	cols := []string{
 		"id", "key", "project", "type", "summary", "description",
@@ -96,22 +99,29 @@ func (db *DB) UpsertIssue(issue *Issue, extra map[string]interface{}) error {
 	}
 
 	placeholders := make([]string, len(cols))
-	updates := make([]string, 0, len(cols))
+	// Two SET lists: the id-conflict arm overwrites every column except id (so a
+	// moved issue's new key lands on the existing row); the key-conflict arm
+	// overwrites every column except key (idempotent re-sync of an id-less row).
+	idUpdates := make([]string, 0, len(cols))
+	keyUpdates := make([]string, 0, len(cols))
 	for i, c := range cols {
 		placeholders[i] = "?"
-		// The primary key is the conflict target and never changes; every other
-		// column is overwritten from the incoming row.
-		if c == "key" {
-			continue
+		if c != "id" {
+			idUpdates = append(idUpdates, fmt.Sprintf("%s = excluded.%s", c, c))
 		}
-		updates = append(updates, fmt.Sprintf("%s = excluded.%s", c, c))
+		if c != "key" {
+			keyUpdates = append(keyUpdates, fmt.Sprintf("%s = excluded.%s", c, c))
+		}
 	}
 
 	query := fmt.Sprintf(
-		"INSERT INTO issues (%s) VALUES (%s) ON CONFLICT(key) DO UPDATE SET %s",
+		"INSERT INTO issues (%s) VALUES (%s) "+
+			"ON CONFLICT(id) WHERE id <> '' DO UPDATE SET %s "+
+			"ON CONFLICT(key) DO UPDATE SET %s",
 		strings.Join(cols, ", "),
 		strings.Join(placeholders, ", "),
-		strings.Join(updates, ", "),
+		strings.Join(idUpdates, ", "),
+		strings.Join(keyUpdates, ", "),
 	)
 
 	_, err := db.Exec(query, vals...)
@@ -164,8 +174,36 @@ func (db *DB) GetIssuesRawJSON(keys []string) (map[string]string, error) {
 	return result, rows.Err()
 }
 
-// GetIssue retrieves a single issue by key.
+// GetIssue retrieves a single issue by key. If the key is not a live key it is
+// resolved through the issue_key_alias table, so historical keys (from moves or
+// project renames) and old URLs still return the current issue.
 func (db *DB) GetIssue(key string) (map[string]interface{}, error) {
+	result, err := db.getIssueByKey(key)
+	if err != nil || result != nil {
+		return result, err
+	}
+	if resolved := db.resolveKey(key); resolved != key {
+		return db.getIssueByKey(resolved)
+	}
+	return nil, nil
+}
+
+// resolveKey maps a possibly-historical issue key to the current live key via the
+// issue_key_alias table, returning the input unchanged when it is already live or
+// has no alias.
+func (db *DB) resolveKey(key string) string {
+	var current string
+	err := db.QueryRow(
+		`SELECT i.key FROM issue_key_alias a JOIN issues i ON i.id = a.id WHERE a.old_key = ?`,
+		key,
+	).Scan(&current)
+	if err == nil && current != "" {
+		return current
+	}
+	return key
+}
+
+func (db *DB) getIssueByKey(key string) (map[string]interface{}, error) {
 	rows, err := db.Query("SELECT * FROM issues WHERE key = ?", key)
 	if err != nil {
 		return nil, err

@@ -389,6 +389,139 @@ var migrations = []migration{
 			return addColumnIfNotExists(tx, "fact_issue_flow", "estimate", "REAL")
 		},
 	},
+	{
+		version:     18,
+		description: "stable id identity: dedup duplicate ids, unique id index, key-rename cascade + alias table",
+		up: func(tx *sql.Tx) error {
+			// Historical-key alias: keys retired by a move or project rename
+			// resolve to the stable numeric id so old keys and URLs still work.
+			if _, err := tx.Exec(`CREATE TABLE IF NOT EXISTS issue_key_alias (
+				old_key    TEXT PRIMARY KEY,
+				id         TEXT NOT NULL,
+				changed_at DATETIME NOT NULL
+			)`); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_issue_key_alias_id ON issue_key_alias(id)`); err != nil {
+				return err
+			}
+
+			// Collapse pre-existing duplicate-id rows (cross-project moves the old
+			// key-keyed upsert never detected) so id can carry a UNIQUE index.
+			if err := dedupIssuesByID(tx); err != nil {
+				return fmt.Errorf("deduplicating issues by id: %w", err)
+			}
+
+			// id becomes the upsert conflict target. Partial (id <> '') so id-less
+			// rows stay distinct — an empty id is not a shared identity.
+			if _, err := tx.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_issues_id ON issues(id) WHERE id <> ''`); err != nil {
+				return err
+			}
+
+			// Cascade a key change to every child relation and alias the old key.
+			if _, err := tx.Exec(issuesKeyRenameTrigger); err != nil {
+				return err
+			}
+			return nil
+		},
+	},
+}
+
+// issuesKeyRenameTrigger cascades a key change (issue moved project, or project
+// renamed) to every child relation keyed by issue_key and records the retired key
+// as an alias. It fires from UpsertIssue's ON CONFLICT(id) DO UPDATE, the only
+// place a live row's key changes. The child UPDATEs run before SQLite's
+// end-of-statement foreign-key check, so comments(issue_key) REFERENCES
+// issues(key) stays satisfied without ON UPDATE CASCADE.
+const issuesKeyRenameTrigger = `CREATE TRIGGER IF NOT EXISTS issues_key_rename
+AFTER UPDATE OF key ON issues
+WHEN old.key <> new.key
+BEGIN
+	UPDATE comments        SET issue_key = new.key WHERE issue_key = old.key;
+	UPDATE changelog       SET issue_key = new.key WHERE issue_key = old.key;
+	UPDATE issue_links     SET issue_key = new.key WHERE issue_key = old.key;
+	UPDATE dev_links       SET issue_key = new.key WHERE issue_key = old.key;
+	UPDATE attachments     SET issue_key = new.key WHERE issue_key = old.key;
+	UPDATE pending_changes SET issue_key = new.key WHERE issue_key = old.key;
+	INSERT OR REPLACE INTO issue_key_alias(old_key, id, changed_at)
+		VALUES (old.key, new.id, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'));
+END`
+
+// dedupIssuesByID collapses rows that share a Jira numeric id — the duplicates
+// left behind when an issue moved project under the old key-keyed upsert. For each
+// id it keeps the most recently synced row (the live key) and folds every stale
+// duplicate into it: child relations are repointed to the live key (colliding rows
+// dropped), the stale key is aliased to the id, and the stale issues row removed.
+// Must run before the UNIQUE(id) index is created.
+func dedupIssuesByID(tx *sql.Tx) error {
+	rows, err := tx.Query(`SELECT id FROM issues WHERE id IS NOT NULL AND id <> '' GROUP BY id HAVING count(*) > 1`)
+	if err != nil {
+		return err
+	}
+	var dupIDs []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		dupIDs = append(dupIDs, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	childTables := []string{"comments", "changelog", "issue_links", "dev_links", "attachments", "pending_changes"}
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	for _, id := range dupIDs {
+		var survivor string
+		if err := tx.QueryRow(
+			`SELECT key FROM issues WHERE id = ? ORDER BY synced_at DESC, rowid DESC LIMIT 1`, id,
+		).Scan(&survivor); err != nil {
+			return err
+		}
+
+		loserRows, err := tx.Query(`SELECT key FROM issues WHERE id = ? AND key <> ?`, id, survivor)
+		if err != nil {
+			return err
+		}
+		var losers []string
+		for loserRows.Next() {
+			var k string
+			if err := loserRows.Scan(&k); err != nil {
+				loserRows.Close()
+				return err
+			}
+			losers = append(losers, k)
+		}
+		loserRows.Close()
+		if err := loserRows.Err(); err != nil {
+			return err
+		}
+
+		for _, loser := range losers {
+			for _, t := range childTables {
+				if _, err := tx.Exec(fmt.Sprintf(`UPDATE OR IGNORE %s SET issue_key = ? WHERE issue_key = ?`, t), survivor, loser); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(fmt.Sprintf(`DELETE FROM %s WHERE issue_key = ?`, t), loser); err != nil {
+					return err
+				}
+			}
+			if _, err := tx.Exec(
+				`INSERT OR REPLACE INTO issue_key_alias(old_key, id, changed_at) VALUES (?, ?, ?)`,
+				loser, id, now,
+			); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(`DELETE FROM issues WHERE key = ?`, loser); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func addColumnIfNotExists(tx *sql.Tx, table, column, columnType string) error {
