@@ -453,19 +453,33 @@ END`
 // duplicate into it: child relations are repointed to the live key (colliding rows
 // dropped), the stale key is aliased to the id, and the stale issues row removed.
 // Must run before the UNIQUE(id) index is created.
+//
+// It resolves survivors and losers in a SINGLE ordered scan of issues. No id index
+// exists yet at this point, so a per-id `WHERE id = ?` lookup would full-scan the
+// wide issues table once per duplicate — O(duplicates × table) and minutes on a
+// multi-GB cache. The child/issues mutations below touch only the (few) duplicate
+// keys and hit the existing issue_key / key indexes.
 func dedupIssuesByID(tx *sql.Tx) error {
-	rows, err := tx.Query(`SELECT id FROM issues WHERE id IS NOT NULL AND id <> '' GROUP BY id HAVING count(*) > 1`)
+	rows, err := tx.Query(`SELECT id, key FROM issues
+		WHERE id IS NOT NULL AND id <> ''
+		ORDER BY id, synced_at DESC, rowid DESC`)
 	if err != nil {
 		return err
 	}
-	var dupIDs []string
+	// First row seen for an id is its survivor (most recent sync); the rest lose.
+	survivors := make(map[string]string)
+	losers := make(map[string][]string)
 	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
+		var id, key string
+		if err := rows.Scan(&id, &key); err != nil {
 			rows.Close()
 			return err
 		}
-		dupIDs = append(dupIDs, id)
+		if _, seen := survivors[id]; !seen {
+			survivors[id] = key
+			continue
+		}
+		losers[id] = append(losers[id], key)
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
@@ -475,33 +489,9 @@ func dedupIssuesByID(tx *sql.Tx) error {
 	childTables := []string{"comments", "changelog", "issue_links", "dev_links", "attachments", "pending_changes"}
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	for _, id := range dupIDs {
-		var survivor string
-		if err := tx.QueryRow(
-			`SELECT key FROM issues WHERE id = ? ORDER BY synced_at DESC, rowid DESC LIMIT 1`, id,
-		).Scan(&survivor); err != nil {
-			return err
-		}
-
-		loserRows, err := tx.Query(`SELECT key FROM issues WHERE id = ? AND key <> ?`, id, survivor)
-		if err != nil {
-			return err
-		}
-		var losers []string
-		for loserRows.Next() {
-			var k string
-			if err := loserRows.Scan(&k); err != nil {
-				loserRows.Close()
-				return err
-			}
-			losers = append(losers, k)
-		}
-		loserRows.Close()
-		if err := loserRows.Err(); err != nil {
-			return err
-		}
-
-		for _, loser := range losers {
+	for id, keys := range losers {
+		survivor := survivors[id]
+		for _, loser := range keys {
 			for _, t := range childTables {
 				if _, err := tx.Exec(fmt.Sprintf(`UPDATE OR IGNORE %s SET issue_key = ? WHERE issue_key = ?`, t), survivor, loser); err != nil {
 					return err
