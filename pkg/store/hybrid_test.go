@@ -54,3 +54,54 @@ func TestGetIssueNoCustomFields(t *testing.T) {
 		t.Error("custom_fields key should be absent for an issue with none")
 	}
 }
+
+// TestPromoteField verifies promote-on-demand: a JSON-stored custom field becomes
+// a typed column backfilled from JSON with no data loss, is recorded as a column,
+// and still reads identically through GetIssue. Idempotent.
+func TestPromoteField(t *testing.T) {
+	db := openTestDB(t)
+	if err := db.UpsertFieldMapping(&FieldMapping{
+		JiraID: "customfield_900", Name: "severity", Type: "text",
+		IsCustom: true, IsColumn: false, Searchable: true,
+	}); err != nil {
+		t.Fatalf("UpsertFieldMapping: %v", err)
+	}
+	if err := db.UpsertIssue(
+		&Issue{ID: "600", Key: "P-1", Project: "P", Summary: "x", RawJSON: "{}"},
+		map[string]interface{}{"custom_fields": `{"customfield_900":"Critical"}`},
+	); err != nil {
+		t.Fatalf("UpsertIssue P-1: %v", err)
+	}
+	if err := db.UpsertIssue(&Issue{ID: "601", Key: "P-2", Project: "P", Summary: "y", RawJSON: "{}"}, nil); err != nil {
+		t.Fatalf("UpsertIssue P-2: %v", err)
+	}
+
+	if err := db.PromoteField("customfield_900", "severity", "TEXT"); err != nil {
+		t.Fatalf("PromoteField: %v", err)
+	}
+
+	var sev string
+	if err := db.QueryRow(`SELECT severity FROM issues WHERE key='P-1'`).Scan(&sev); err != nil {
+		t.Fatalf("scan severity: %v", err)
+	}
+	if sev != "Critical" {
+		t.Errorf("backfilled severity = %q, want Critical", sev)
+	}
+	var isCol bool
+	if err := db.QueryRow(`SELECT is_column FROM field_map WHERE jira_id='customfield_900'`).Scan(&isCol); err != nil {
+		t.Fatal(err)
+	}
+	if !isCol {
+		t.Error("field not marked is_column after promotion")
+	}
+	got, err := db.GetIssue("P-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["severity"] != "Critical" {
+		t.Errorf("GetIssue severity = %v, want Critical", got["severity"])
+	}
+	if err := db.PromoteField("customfield_900", "severity", "TEXT"); err != nil {
+		t.Errorf("second PromoteField: %v", err)
+	}
+}

@@ -1,6 +1,9 @@
 package store
 
-import "regexp"
+import (
+	"fmt"
+	"regexp"
+)
 
 var safeColumnRe = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 
@@ -38,6 +41,34 @@ func (db *DB) UpsertFieldMapping(f *FieldMapping) error {
 func (db *DB) MarkFieldAsColumn(jiraID string) error {
 	_, err := db.Exec(`UPDATE field_map SET is_column = 1 WHERE jira_id = ?`, jiraID)
 	return err
+}
+
+// PromoteField promotes a non-column custom field to a typed column: it creates
+// the column, backfills it from the sparse custom_fields JSON for existing rows,
+// and marks the field as a column so later syncs populate the column directly.
+// Query results are unchanged — the value moves from a json_extract expression to
+// a typed column with no data loss. Idempotent; safe on an already-promoted field.
+func (db *DB) PromoteField(jiraID, name, colType string) error {
+	if !safeColumnRe.MatchString(name) {
+		return fmt.Errorf("invalid field name: %s", name)
+	}
+	if !safeColumnRe.MatchString(jiraID) {
+		return fmt.Errorf("invalid field id: %s", jiraID)
+	}
+	if err := db.EnsureColumn(name, colType); err != nil {
+		return err
+	}
+	// Backfill the column from JSON for rows that carry the field. json_extract
+	// returns NULL when the key is absent, so untouched rows stay NULL.
+	backfill := fmt.Sprintf(
+		`UPDATE issues SET "%s" = json_extract(custom_fields, '$.%s')
+		 WHERE json_extract(custom_fields, '$.%s') IS NOT NULL`,
+		name, jiraID, jiraID,
+	)
+	if _, err := db.Exec(backfill); err != nil {
+		return err
+	}
+	return db.MarkFieldAsColumn(jiraID)
 }
 
 // AllFieldMappings returns all field mappings.
