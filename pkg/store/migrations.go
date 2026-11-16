@@ -425,6 +425,16 @@ var migrations = []migration{
 			return nil
 		},
 	},
+	{
+		version:     19,
+		description: "hybrid custom-field storage: add sparse custom_fields JSON column",
+		up: func(tx *sql.Tx) error {
+			// Non-promoted custom fields live here as a sparse JSON object keyed by
+			// Jira field id (customfield_NNNNN). New custom fields require no ALTER
+			// TABLE; a field is promoted to a typed column only on demand.
+			return addColumnIfNotExists(tx, "issues", "custom_fields", "TEXT")
+		},
+	},
 }
 
 // issuesKeyRenameTrigger cascades a key change (issue moved project, or project
