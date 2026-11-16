@@ -67,14 +67,6 @@ func (e *Engine) ReconcileFields(ctx context.Context, sourceFilter string, field
 	if err != nil {
 		return nil, fmt.Errorf("loading field map: %w", err)
 	}
-
-	// Ensure custom columns exist: a drifted issue is re-fetched in full and
-	// upserted, which writes every custom column. Normal sync ensures these,
-	// but reconcile may run standalone (e.g. via MCP).
-	if err := e.ensureCustomColumns(fieldMap); err != nil {
-		return nil, err
-	}
-
 	// Resolve requested column names to Jira field IDs. Unknown fields are
 	// warned about and skipped rather than failing the whole pass.
 	colToJiraID := map[string]string{}

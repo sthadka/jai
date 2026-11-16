@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -179,13 +180,99 @@ func (db *DB) GetIssuesRawJSON(keys []string) (map[string]string, error) {
 // project renames) and old URLs still return the current issue.
 func (db *DB) GetIssue(key string) (map[string]interface{}, error) {
 	result, err := db.getIssueByKey(key)
-	if err != nil || result != nil {
-		return result, err
+	if err != nil {
+		return nil, err
 	}
-	if resolved := db.resolveKey(key); resolved != key {
-		return db.getIssueByKey(resolved)
+	if result == nil {
+		if resolved := db.resolveKey(key); resolved != key {
+			if result, err = db.getIssueByKey(resolved); err != nil {
+				return nil, err
+			}
+		}
 	}
-	return nil, nil
+	if result == nil {
+		return nil, nil
+	}
+	if err := db.mergeCustomFields(result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// mergeCustomFields expands the sparse custom_fields JSON (keyed by Jira field id)
+// into name-keyed entries on the result, so callers read a custom field the same
+// way whether it lives in a typed column or JSON. The raw custom_fields entry is
+// dropped from the returned map.
+func (db *DB) mergeCustomFields(result map[string]interface{}) error {
+	raw, ok := result["custom_fields"]
+	delete(result, "custom_fields")
+	if !ok || raw == nil {
+		return nil
+	}
+	var text string
+	switch v := raw.(type) {
+	case string:
+		text = v
+	case []byte:
+		text = string(v)
+	default:
+		return nil
+	}
+	if text == "" {
+		return nil
+	}
+	var fields map[string]interface{}
+	if err := json.Unmarshal([]byte(text), &fields); err != nil {
+		return nil // tolerate malformed JSON rather than failing the read
+	}
+	if len(fields) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(fields))
+	for id := range fields {
+		ids = append(ids, id)
+	}
+	names, err := db.fieldNamesByJiraID(ids)
+	if err != nil {
+		return err
+	}
+	for id, val := range fields {
+		name := names[id]
+		if name == "" {
+			name = id
+		}
+		if _, exists := result[name]; !exists {
+			result[name] = val
+		}
+	}
+	return nil
+}
+
+// fieldNamesByJiraID returns jira_id → field name for the given ids.
+func (db *DB) fieldNamesByJiraID(ids []string) (map[string]string, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	ph := make([]string, len(ids))
+	args := make([]interface{}, len(ids))
+	for i, id := range ids {
+		ph[i] = "?"
+		args[i] = id
+	}
+	rows, err := db.Query(`SELECT jira_id, name FROM field_map WHERE jira_id IN (`+strings.Join(ph, ",")+`)`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	m := make(map[string]string, len(ids))
+	for rows.Next() {
+		var jid, name string
+		if err := rows.Scan(&jid, &name); err != nil {
+			return nil, err
+		}
+		m[jid] = name
+	}
+	return m, rows.Err()
 }
 
 // resolveKey maps a possibly-historical issue key to the current live key via the

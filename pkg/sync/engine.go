@@ -40,7 +40,6 @@ type Engine struct {
 	clk      clock.Clock
 	jiraTZMu sync.RWMutex
 	jiraTZ   *time.Location
-	colMu    sync.Mutex // serializes ensureCustomColumns ALTER TABLEs across concurrent sources
 	mw       *metricWriter
 	warnf    Warnf
 	onChange ChangeHook
@@ -354,18 +353,6 @@ func (e *Engine) syncSource(ctx context.Context, src config.SyncSource, full, re
 		ch <- Progress{Project: src.Name, Error: fmt.Errorf("loading field map: %w", err), Done: true}
 		return
 	}
-
-	// Ensure custom field columns exist. Guard the check-then-ALTER against
-	// concurrent sources: two goroutines could otherwise both add the same
-	// column, and the second ALTER would fail with a duplicate-column error.
-	e.colMu.Lock()
-	err = e.ensureCustomColumns(fieldMap)
-	e.colMu.Unlock()
-	if err != nil {
-		ch <- Progress{Project: src.Name, Error: err, Done: true}
-		return
-	}
-
 	base := sourceJQL(src)
 	var jql string
 	var resumedFrom string
@@ -861,26 +848,6 @@ func applyLookback(hwm, window string) string {
 		return hwm
 	}
 	return t.Add(-d).UTC().Format(time.RFC3339)
-}
-
-// ensureCustomColumns creates columns in the issues table for custom fields that don't have one yet.
-// It also updates the in-memory fieldMap so Denormalize sees is_column=true immediately on the
-// same sync run (otherwise the first sync after column creation would skip the field).
-func (e *Engine) ensureCustomColumns(fieldMap map[string]*db.FieldMapping) error {
-	for _, f := range fieldMap {
-		if !f.IsCustom || f.IsColumn {
-			continue
-		}
-		colType := sqliteType(f.Type)
-		if err := e.db.EnsureColumn(f.Name, colType); err != nil {
-			return fmt.Errorf("adding column %s: %w", f.Name, err)
-		}
-		if err := e.db.MarkFieldAsColumn(f.JiraID); err != nil {
-			return err
-		}
-		f.IsColumn = true // update in-memory map so Denormalize uses it this run
-	}
-	return nil
 }
 
 func (e *Engine) expandFields(fieldMap map[string]*db.FieldMapping) []string {

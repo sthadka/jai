@@ -1,6 +1,7 @@
 package sync
 
 import (
+	"encoding/json"
 	"fmt"
 	"testing"
 
@@ -190,6 +191,60 @@ func TestDenormalize_ObjectFieldFallback(t *testing.T) {
 				t.Errorf("expected %q, got %v", tt.want, extra["test_field"])
 			}
 		})
+	}
+}
+
+// TestDenormalize_SparseCustomJSON verifies the hybrid split: promoted custom
+// fields (is_column) go to typed columns, non-promoted ones to the sparse
+// custom_fields JSON keyed by Jira field id, and empty/null values are omitted.
+func TestDenormalize_SparseCustomJSON(t *testing.T) {
+	raw := []byte(`{
+		"key": "TEST-CF",
+		"fields": {
+			"summary": "sparse json",
+			"project": {"key": "TEST"},
+			"customfield_111": {"value": "Promoted"},
+			"customfield_222": "json-value",
+			"customfield_333": 7.5,
+			"customfield_444": null
+		}
+	}`)
+	fieldMap := map[string]*db.FieldMapping{
+		"customfield_111": {JiraID: "customfield_111", Name: "promoted", Type: "option", IsCustom: true, IsColumn: true},
+		"customfield_222": {JiraID: "customfield_222", Name: "json_text", Type: "text", IsCustom: true, IsColumn: false},
+		"customfield_333": {JiraID: "customfield_333", Name: "json_num", Type: "number", IsCustom: true, IsColumn: false},
+		"customfield_444": {JiraID: "customfield_444", Name: "empty_one", Type: "text", IsCustom: true, IsColumn: false},
+	}
+
+	_, extra, err := Denormalize(raw, fieldMap)
+	if err != nil {
+		t.Fatalf("Denormalize: %v", err)
+	}
+
+	// Promoted field -> typed column.
+	if extra["promoted"] != "Promoted" {
+		t.Errorf("promoted column = %v, want Promoted", extra["promoted"])
+	}
+	// Non-promoted fields -> sparse custom_fields JSON keyed by jira_id.
+	cf, ok := extra["custom_fields"].(string)
+	if !ok || cf == "" {
+		t.Fatalf("custom_fields not a non-empty string: %v", extra["custom_fields"])
+	}
+	var got map[string]interface{}
+	if err := json.Unmarshal([]byte(cf), &got); err != nil {
+		t.Fatalf("custom_fields invalid JSON: %v", err)
+	}
+	if got["customfield_222"] != "json-value" {
+		t.Errorf("json_text = %v, want json-value", got["customfield_222"])
+	}
+	if got["customfield_333"] != 7.5 {
+		t.Errorf("json_num = %v, want 7.5", got["customfield_333"])
+	}
+	if _, exists := got["customfield_444"]; exists {
+		t.Error("empty/null field must be omitted from custom_fields (sparse)")
+	}
+	if _, exists := got["customfield_111"]; exists {
+		t.Error("promoted field must not be duplicated in custom_fields JSON")
 	}
 }
 

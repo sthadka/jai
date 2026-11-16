@@ -130,7 +130,8 @@ func Denormalize(raw []byte, fieldMap map[string]*db.FieldMapping) (*db.Issue, m
 		issue.SubtaskKeys = marshalJSONArray(keys)
 	}
 
-	// Extract custom fields as dynamic columns.
+	// Split custom fields: promoted ones (is_column) go to typed columns; the long
+	// tail goes to the sparse custom_fields JSON object keyed by Jira field id.
 	var rawFields map[string]json.RawMessage
 	if err := json.Unmarshal(apiIssue.Fields, &rawFields); err != nil {
 		return issue, nil, nil
@@ -145,8 +146,9 @@ func Denormalize(raw []byte, fieldMap map[string]*db.FieldMapping) (*db.Issue, m
 	}
 
 	extra := make(map[string]interface{})
+	custom := make(map[string]interface{})
 	for jiraID, mapping := range fieldMap {
-		if !mapping.IsCustom || !mapping.IsColumn {
+		if !mapping.IsCustom {
 			continue
 		}
 		rawVal, ok := rawFields[jiraID]
@@ -154,9 +156,26 @@ func Denormalize(raw []byte, fieldMap map[string]*db.FieldMapping) (*db.Issue, m
 			continue
 		}
 		val := extractFieldValue(rawVal, mapping.Type)
-		if val != nil {
-			extra[mapping.Name] = val
+		if val == nil {
+			continue
 		}
+		if mapping.IsColumn {
+			extra[mapping.Name] = val
+		} else {
+			custom[jiraID] = val
+		}
+	}
+	// custom_fields is sparse: only fields with a value are written, and the
+	// column is NULL when the issue has no non-promoted custom values, so a
+	// re-sync clears stale data. Absence of a key means NULL for that field.
+	if len(custom) > 0 {
+		b, err := json.Marshal(custom)
+		if err != nil {
+			return nil, nil, err
+		}
+		extra["custom_fields"] = string(b)
+	} else {
+		extra["custom_fields"] = nil
 	}
 
 	return issue, extra, nil
