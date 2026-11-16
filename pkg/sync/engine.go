@@ -922,15 +922,3 @@ func jiraSchemaItemType(schema *jira.FieldSchema) string {
 	}
 	return schema.Items
 }
-
-// sqliteType maps our type name to an SQLite column type.
-func sqliteType(t string) string {
-	switch t {
-	case "number":
-		return "REAL"
-	case "date", "datetime":
-		return "DATETIME"
-	default:
-		return "TEXT"
-	}
-}
