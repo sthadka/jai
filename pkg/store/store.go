@@ -51,6 +51,7 @@ type Store interface {
 	MarkFieldAsColumn(jiraID string) error
 	MarkSynced(id int64) error
 	Migrate() error
+	PromoteField(jiraID, name, colType string) error
 	PruneProjects(projects []string) (int64, error)
 	RebuildFTS() error
 	RecordRetryError(id int64, errMsg string) error

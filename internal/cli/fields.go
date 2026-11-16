@@ -331,11 +331,70 @@ var fieldsCmd = &cobra.Command{
 	},
 }
 
+// fieldsPromoteCmd promotes a JSON-stored custom field to a typed column so it can
+// be sorted/filtered as efficiently as a core field, with identical query results.
+var fieldsPromoteCmd = &cobra.Command{
+	Use:   "promote <field>",
+	Short: "Promote a JSON-stored custom field to a typed, queryable column",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		app := cliFrom(cmd)
+		target := strings.ToLower(args[0])
+		mappings, err := app.engine.Store.AllFieldMappings()
+		if err != nil {
+			return err
+		}
+		var m *db.FieldMapping
+		for _, fm := range mappings {
+			if strings.ToLower(fm.Name) == target ||
+				strings.ToLower(fm.JiraID) == target ||
+				strings.ToLower(fm.JiraName) == target {
+				m = fm
+				break
+			}
+		}
+		if m == nil {
+			return fmt.Errorf("unknown field %q", args[0])
+		}
+		if m.IsColumn {
+			if app.jsonOut {
+				fmt.Println(string(output.OK(map[string]interface{}{"field": m.Name, "already_column": true})))
+				return nil
+			}
+			fmt.Printf("%s is already a column\n", m.Name)
+			return nil
+		}
+		if err := app.engine.Store.PromoteField(m.JiraID, m.Name, sqliteColumnType(m.Type)); err != nil {
+			return err
+		}
+		if app.jsonOut {
+			fmt.Println(string(output.OK(map[string]interface{}{"field": m.Name, "promoted": true})))
+			return nil
+		}
+		fmt.Printf("Promoted %s (%s) to a typed column\n", m.Name, m.JiraID)
+		return nil
+	},
+}
+
+// sqliteColumnType maps a field_map type to the SQLite column type for a promoted
+// column (mirrors the sync package's type mapping for custom fields).
+func sqliteColumnType(t string) string {
+	switch strings.ToLower(t) {
+	case "number":
+		return "REAL"
+	case "date", "datetime":
+		return "DATETIME"
+	default:
+		return "TEXT"
+	}
+}
+
 func init() {
 	fieldsCmd.Flags().StringVar(&fieldsFilter, "filter", "", "filter by name pattern")
 	fieldsCmd.Flags().BoolVar(&fieldsStats, "stats", false, "show population counts per field")
 	fieldsCmd.Flags().StringVar(&fieldsProject, "project", "", "scope --stats to a specific project")
 	fieldsCmd.Flags().StringVar(&fieldsSearch, "search", "", "LIKE match on field name or jira_name")
 	fieldsCmd.Flags().StringVar(&fieldsSuggest, "suggest", "", "given issue key, show custom fields with non-null values")
+	fieldsCmd.AddCommand(fieldsPromoteCmd)
 	rootCmd.AddCommand(fieldsCmd)
 }
