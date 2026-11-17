@@ -332,5 +332,6 @@ func Execute() error {
 	app := &CLI{}
 	bindRoot(rootCmd, app)
 	applyCommandGroups(rootCmd)
+	rootCmd.SetHelpFunc(colorizedHelpFunc)
 	return rootCmd.Execute()
 }
