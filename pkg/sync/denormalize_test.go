@@ -248,6 +248,75 @@ func TestDenormalize_SparseCustomJSON(t *testing.T) {
 	}
 }
 
+// TestDenormalize_SystemFields verifies the additional Jira system fields are
+// denormalized into their dedicated typed columns.
+func TestDenormalize_SystemFields(t *testing.T) {
+	raw := []byte(`{
+		"key": "SYS-1",
+		"fields": {
+			"summary": "system fields",
+			"project": {"key": "SYS"},
+			"creator": {"displayName": "Ada Lovelace"},
+			"environment": "Prod cluster",
+			"security": {"name": "Red Hat Employee"},
+			"votes": {"votes": 5},
+			"watches": {"watchCount": 3},
+			"workratio": 42.0,
+			"statuscategorychangedate": "2026-01-02T03:04:05.000+0000",
+			"versions": [{"name": "1.0"}, {"name": "1.1"}]
+		}
+	}`)
+	_, extra, err := Denormalize(raw, map[string]*db.FieldMapping{})
+	if err != nil {
+		t.Fatalf("Denormalize: %v", err)
+	}
+	want := map[string]interface{}{
+		"creator":          "Ada Lovelace",
+		"environment":      "Prod cluster",
+		"security_level":   "Red Hat Employee",
+		"votes":            int64(5),
+		"watchers":         int64(3),
+		"work_ratio":       42.0,
+		"affects_versions": `["1.0","1.1"]`,
+	}
+	for k, v := range want {
+		if extra[k] != v {
+			t.Errorf("%s = %v (%T), want %v", k, extra[k], extra[k], v)
+		}
+	}
+	if d, _ := extra["status_category_changed"].(string); d == "" {
+		t.Errorf("status_category_changed not set: %v", extra["status_category_changed"])
+	}
+}
+
+// TestDenormalize_UncodedFieldSafetyNet verifies an uncoded system field (no
+// dedicated column, not promoted) falls through to the sparse custom_fields JSON
+// instead of being dropped.
+func TestDenormalize_UncodedFieldSafetyNet(t *testing.T) {
+	raw := []byte(`{
+		"key": "SN-1",
+		"fields": {"summary": "x", "project": {"key": "SN"}, "dataclassification": "Public"}
+	}`)
+	fm := map[string]*db.FieldMapping{
+		"dataclassification": {JiraID: "dataclassification", Name: "classification_level", Type: "text", IsCustom: false, IsColumn: false},
+	}
+	_, extra, err := Denormalize(raw, fm)
+	if err != nil {
+		t.Fatalf("Denormalize: %v", err)
+	}
+	cf, ok := extra["custom_fields"].(string)
+	if !ok || cf == "" {
+		t.Fatalf("expected uncoded field in custom_fields JSON, got %v", extra["custom_fields"])
+	}
+	var got map[string]interface{}
+	if err := json.Unmarshal([]byte(cf), &got); err != nil {
+		t.Fatalf("custom_fields JSON: %v", err)
+	}
+	if got["dataclassification"] != "Public" {
+		t.Errorf("uncoded system field not routed to JSON safety net: %v", got)
+	}
+}
+
 func TestExtractComments(t *testing.T) {
 	raw := []byte(`{
 		"key": "TEST-1",
