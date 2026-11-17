@@ -325,6 +325,10 @@ func (e *Engine) Sync(ctx context.Context, full, resume bool, sourceFilter strin
 	ch := make(chan Progress, 64)
 	go func() {
 		defer close(ch)
+		if err := e.ensurePromotedFields(); err != nil {
+			ch <- Progress{Error: fmt.Errorf("promoting configured fields: %w", err), Done: true}
+			return
+		}
 		// Sources are independent (separate cursors, separate JQL); run them
 		// concurrently, bounded by the configured worker count. The client's
 		// shared rate limiter still caps total request rate, and DB writes
@@ -343,6 +347,56 @@ func (e *Engine) Sync(ctx context.Context, full, resume bool, sourceFilter strin
 		wg.Wait()
 	}()
 	return ch, nil
+}
+
+// ensurePromotedFields promotes the custom fields named in sync.promote_fields and
+// metrics.tracked_fields from the custom_fields JSON into typed columns, so they
+// are queried/sorted efficiently. Promotion is idempotent and backfills the column
+// from existing JSON; unknown, system (already columned), or already-promoted
+// fields are skipped. Runs once per sync before any source denormalizes, so the
+// in-run field map sees is_column and writes the column directly.
+func (e *Engine) ensurePromotedFields() error {
+	names := append([]string(nil), e.cfg.Sync.PromoteFields...)
+	if e.cfg.Metrics != nil {
+		names = append(names, e.cfg.Metrics.TrackedFields...)
+	}
+	if len(names) == 0 {
+		return nil
+	}
+	mappings, err := e.db.AllFieldMappings()
+	if err != nil {
+		return err
+	}
+	byName := make(map[string]*db.FieldMapping, len(mappings)*2)
+	for _, m := range mappings {
+		byName[strings.ToLower(m.Name)] = m
+		if m.JiraName != "" {
+			byName[strings.ToLower(m.JiraName)] = m
+		}
+	}
+	for _, n := range names {
+		m, ok := byName[strings.ToLower(strings.TrimSpace(n))]
+		if !ok || !m.IsCustom || m.IsColumn {
+			continue
+		}
+		if err := e.db.PromoteField(m.JiraID, m.Name, sqliteColumnType(m.Type)); err != nil {
+			return fmt.Errorf("promoting field %s: %w", m.Name, err)
+		}
+	}
+	return nil
+}
+
+// sqliteColumnType maps a field_map type to the SQLite column type for a promoted
+// custom-field column.
+func sqliteColumnType(t string) string {
+	switch strings.ToLower(t) {
+	case "number":
+		return "REAL"
+	case "date", "datetime":
+		return "DATETIME"
+	default:
+		return "TEXT"
+	}
 }
 
 func (e *Engine) syncSource(ctx context.Context, src config.SyncSource, full, resume bool, jiraTZ *time.Location, ch chan<- Progress) {

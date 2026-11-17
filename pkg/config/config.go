@@ -123,6 +123,13 @@ type SyncConfig struct {
 	// FullSyncWarningAge is the max age before the full-sync reminder fires,
 	// e.g. "24h" (default 24h).
 	FullSyncWarningAge string `yaml:"full_sync_warning_age"`
+
+	// PromoteFields lists custom field names (canonical name or Jira display name)
+	// to promote from the custom_fields JSON into their own typed column for
+	// query/sort performance. Fields referenced by metrics.tracked_fields are
+	// promoted automatically as well. Promotion is idempotent and backfills the
+	// column from existing JSON values.
+	PromoteFields []string `yaml:"promote_fields"`
 }
 
 // DBConfig holds database settings.
