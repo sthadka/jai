@@ -913,6 +913,8 @@ func (e *Engine) expandFields(fieldMap map[string]*db.FieldMapping) []string {
 		"issuelinks", "resolution", "duedate",
 		"timeoriginalestimate", "timespent", "timeestimate",
 		"subtasks", "attachment",
+		"creator", "environment", "security", "votes", "watches",
+		"workratio", "versions", "statuscategorychangedate",
 	}
 	// Add custom fields.
 	for jiraID, f := range fieldMap {
