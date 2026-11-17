@@ -606,3 +606,117 @@ func TestReconcileFields_RefetchFailurePreservesStoredRank(t *testing.T) {
 		t.Errorf("stored rank = %q, want %q (prior snapshot preserved on failure)", gotRank, "1|old:")
 	}
 }
+
+// ReconcileBoard resolves a board's filter JQL and reconciles only that subset,
+// stamping freshness under "board:<id>" — never under a sync source.
+func TestReconcileBoard_RefreshesScopeAndStampsBoardKey(t *testing.T) {
+	const newRank = "1|fresh:"
+	var scanJQL string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/rest/agile/1.0/board/7/configuration":
+			json.NewEncoder(w).Encode(jira.BoardConfiguration{Filter: struct {
+				ID string `json:"id"`
+			}{ID: "100"}})
+		case r.URL.Path == "/rest/api/3/filter/100":
+			json.NewEncoder(w).Encode(jira.Filter{JQL: `project = "TEST"`})
+		case strings.HasPrefix(r.URL.Path, "/rest/api/3/search/jql"):
+			var body struct {
+				JQL    string `json:"jql"`
+				Fields []string
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			if !strings.Contains(body.JQL, "key in") {
+				scanJQL = body.JQL // the scan query (vs the full re-fetch)
+			}
+			f, _ := json.Marshal(map[string]interface{}{"summary": "x", "customfield_10019": newRank})
+			json.NewEncoder(w).Encode(jira.SearchResponse{Issues: []*jira.Issue{{ID: "TEST-1", Key: "TEST-1", Fields: f}}})
+		case strings.HasPrefix(r.URL.Path, "/rest/api/3/changelog/bulkfetch"):
+			json.NewEncoder(w).Encode(jira.BulkChangelogResponse{})
+		default:
+			t.Errorf("unexpected request to %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	database, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer database.Close()
+	seedRankIssue(t, database, "TEST-1", "1|old:")
+
+	cfg := &config.Config{SyncSources: []config.SyncSource{{Name: "TEST", Projects: []string{"TEST"}}}}
+	e := New(database, jira.New(srv.URL, "t@t.com", "tok", 100), cfg)
+
+	ch, err := e.ReconcileBoard(context.Background(), 7, "0", []string{"rank"})
+	if err != nil {
+		t.Fatalf("ReconcileBoard: %v", err)
+	}
+	var refetched int
+	for p := range ch {
+		if p.Done {
+			if p.Err != nil {
+				t.Fatalf("reconcile error: %v", p.Err)
+			}
+			refetched += p.Refetched
+		}
+	}
+	if refetched != 1 {
+		t.Errorf("refetched = %d, want 1", refetched)
+	}
+	if !strings.Contains(scanJQL, `project = "TEST"`) {
+		t.Errorf("scan JQL = %q, want it to use the board filter JQL", scanJQL)
+	}
+
+	var gotRank string
+	if err := database.QueryRow(`SELECT rank FROM issues WHERE key = 'TEST-1'`).Scan(&gotRank); err != nil {
+		t.Fatalf("querying rank: %v", err)
+	}
+	if gotRank != newRank {
+		t.Errorf("stored rank = %q, want %q", gotRank, newRank)
+	}
+
+	// Freshness is stamped under the board key, not any source.
+	if ts, _ := database.GetLastReconcile(BoardReconcileKey(7)); ts == "" {
+		t.Error("expected last_reconcile stamped under board:7")
+	}
+	if ts, _ := database.GetLastReconcile("TEST"); ts != "" {
+		t.Errorf("source TEST must NOT be marked reconciled by a board pass, got %q", ts)
+	}
+}
+
+// A scope reconciled within its interval is skipped without any Jira request.
+func TestReconcileScoped_CadenceSkipsByKey(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("no Jira request expected: scope reconciled within interval, got %s", r.URL.Path)
+	}))
+	defer srv.Close()
+
+	database, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer database.Close()
+	registerRankColumn(t, database)
+	if err := database.UpdateReconcileMeta(BoardReconcileKey(7)); err != nil {
+		t.Fatalf("UpdateReconcileMeta: %v", err)
+	}
+
+	cfg := &config.Config{}
+	e := New(database, jira.New(srv.URL, "t@t.com", "tok", 100), cfg)
+
+	ch, err := e.ReconcileScoped(context.Background(), BoardReconcileKey(7), `project = "TEST"`, "24h", []string{"rank"})
+	if err != nil {
+		t.Fatalf("ReconcileScoped: %v", err)
+	}
+	var skipped int
+	for p := range ch {
+		if p.Done && p.CadenceSkipped {
+			skipped++
+		}
+	}
+	if skipped != 1 {
+		t.Errorf("expected 1 cadence-skipped Done event, got %d", skipped)
+	}
+}

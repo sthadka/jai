@@ -601,6 +601,21 @@ type SprintIssuesResponse struct {
 	Issues []*Issue `json:"issues"`
 }
 
+// BoardConfiguration is the subset of GET /rest/agile/1.0/board/{id}/configuration
+// we need: every board is backed by a saved filter whose JQL defines which
+// issues appear on it.
+type BoardConfiguration struct {
+	Filter struct {
+		ID string `json:"id"`
+	} `json:"filter"`
+}
+
+// Filter is the subset of GET /rest/api/3/filter/{id} we need: the JQL that
+// defines the filter's issue set.
+type Filter struct {
+	JQL string `json:"jql"`
+}
+
 // DevInfoResponse is the response from GET /rest/dev-status/latest/issue/detail.
 type DevInfoResponse struct {
 	Detail []DevInfoDetail `json:"detail"`

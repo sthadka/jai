@@ -34,6 +34,38 @@ Empirical note: `rank` is the guaranteed structural case, but the same
 integration-written `MDM Account Reference`, occasional issue-link edits). Those
 are covered by configuring `reconcile_fields` and/or a periodic full sync.
 
+### Atomic apply (snapshot consistency)
+
+The reconcile apply phase is transactional (`store.UpsertIssuesTx`): both the
+full-refetch path and the direct-apply path stage every correction first, then
+commit all affected issue rows in a single transaction. An interrupted or failed
+refresh therefore rolls back — the previous (last-known-good) ordering is
+preserved instead of a half-updated mix of old and new ranks. The freshness
+stamp (`last_reconcile`) is only written on full success, so a failed pass is
+retried on the next run rather than waiting out the interval.
+
+### On-demand board-scoped refresh
+
+Scanning an entire project (tens/hundreds of thousands of issues) just to refresh
+ordering is wasteful when only one board is being viewed. Because `rank` is a
+single instance-wide LexoRank, refreshing *only* a board's issue subset yields a
+correct ordering for that board without touching the rest — the subset's global
+rank values fully determine its order.
+
+- `jai rank --board <id>` resolves the board's filter JQL (board configuration →
+  filter → JQL) and reconciles just that subset; `--jql <query>` reconciles an
+  arbitrary scope. `--force` bypasses the freshness gate.
+- Engine entry points: `sync.ReconcileBoard(ctx, boardID, interval, fields)` and
+  the lower-level `sync.ReconcileScoped(ctx, freshnessKey, jql, interval, fields)`
+  — the on-demand path a board view calls when its local snapshot may be stale.
+- Per-scope freshness is tracked under a distinct key (`board:<id>`), so repeated
+  opens are rate-limited by `reconcile_interval` **without** ever marking a full
+  sync source reconciled (the source still needs its own pass to cover off-board
+  issues).
+- The shared `reconcile_scope` (default `statusCategory != Done`) is still ANDed
+  on, bounding cost further. Caveat: a board whose filter is itself project-wide
+  gains nothing — fall back to the normal source reconcile there.
+
 The original investigation follows unchanged.
 
 ---

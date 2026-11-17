@@ -421,6 +421,30 @@ func (c *Client) GetBoards(ctx context.Context, projectKey string) ([]Board, err
 	return resp.Values, nil
 }
 
+// GetBoardFilterJQL returns the JQL of the saved filter backing a board, i.e.
+// the query that defines which issues appear on it. It resolves the board's
+// filter id via the board configuration endpoint, then fetches that filter's
+// JQL. This is the scope used to refresh ranks for just one board without
+// scanning the whole project — the global LexoRank values of the board's issue
+// subset fully determine their on-board ordering.
+func (c *Client) GetBoardFilterJQL(ctx context.Context, boardID int) (string, error) {
+	var cfg BoardConfiguration
+	if err := c.get(ctx, fmt.Sprintf("/rest/agile/1.0/board/%d/configuration", boardID), &cfg); err != nil {
+		return "", fmt.Errorf("fetching board %d configuration: %w", boardID, err)
+	}
+	if cfg.Filter.ID == "" {
+		return "", fmt.Errorf("board %d has no backing filter", boardID)
+	}
+	var f Filter
+	if err := c.get(ctx, fmt.Sprintf("/rest/api/3/filter/%s", cfg.Filter.ID), &f); err != nil {
+		return "", fmt.Errorf("fetching filter %s for board %d: %w", cfg.Filter.ID, boardID, err)
+	}
+	if strings.TrimSpace(f.JQL) == "" {
+		return "", fmt.Errorf("board %d filter %s has empty JQL", boardID, cfg.Filter.ID)
+	}
+	return f.JQL, nil
+}
+
 // GetSprints fetches all sprints for a board from the Agile API.
 func (c *Client) GetSprints(ctx context.Context, boardID int) ([]Sprint, error) {
 	path := fmt.Sprintf("/rest/agile/1.0/board/%d/sprint?state=active,closed,future", boardID)
