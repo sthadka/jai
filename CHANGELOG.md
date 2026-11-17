@@ -1,5 +1,25 @@
 # Changelog
 
+## [6.1.0](https://github.com/sthadka/jai/compare/v6.0.0...v6.1.0) (2026-11-17)
+
+
+### Features
+
+* **cli:** add `jai prime` agent-context command (jai-2a7) ([229cc0c](https://github.com/sthadka/jai/commit/229cc0cca6a8bdf320a43fc3e6a9fd9446b02295))
+* **cli:** colorize help section/group headers ([3c6391b](https://github.com/sthadka/jai/commit/3c6391b00a42700246750e293f30ffb7c8a14bd8))
+* **cli:** group commands in help and reword prime short text ([8f1c354](https://github.com/sthadka/jai/commit/8f1c3546179acaf71e8a31c22bf249d5d7c3d0c2))
+
+
+### Bug Fixes
+
+* **cli:** add rank command to Sync & Data help group ([df72007](https://github.com/sthadka/jai/commit/df720077761567fabd4680b013d82fd3c319d42f))
+* **cli:** use if/else for prime auth check (staticcheck QF1002) ([6828b48](https://github.com/sthadka/jai/commit/6828b48f6188fb2faf5e2ab5c51c9b42dd1690f1))
+
+
+### Documentation
+
+* **agents:** add release-versioning guidance for release-please ([9250534](https://github.com/sthadka/jai/commit/92505348a1b41a4f42fbe3ab82d2d11c3e207cc9))
+
 ## [6.0.0](https://github.com/sthadka/jai/compare/v5.0.0...v6.0.0) (2026-11-17)
 
 
