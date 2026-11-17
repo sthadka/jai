@@ -66,6 +66,7 @@ var noAutoSync = map[string]bool{
 	"changelog":  true,
 	"prune":      true, // sync prune sub-command: never sync before deleting
 	"metrics":    true, // reads/rebuilds local facts; never auto-sync first
+	"prime":      true, // reports freshness; must not block on a sync
 }
 
 // noDBRequired lists `db` sub-commands that only need config loaded, not an
