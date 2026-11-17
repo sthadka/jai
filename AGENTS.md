@@ -36,6 +36,19 @@ cp -rf source dest          # NOT: cp -r source dest
 - `apt-get` - use `-y` flag
 - `brew` - use `HOMEBREW_NO_AUTO_UPDATE=1` env var
 
+## Release Versioning (release-please)
+
+Releases are automated by **release-please** (`.github/workflows/release-please.yml`, manifest mode). Version is derived from Conventional Commit types since the last release.
+
+**NEVER hand-edit `.release-please-manifest.json`.** It records the *last already-released* version; release-please maintains it. Editing it double-counts the bump (e.g. a manual `5.2.0`→`6.0.0` + a `feat!` yields `7.0.0`).
+
+**Version bumps come from commit messages:**
+- `fix:` → patch · `feat:` → minor · `feat!:`/`fix!:` or a `BREAKING CHANGE:` footer → major.
+
+**Go major bump (vN → vN+1), e.g. v5 → v6:** in ONE breaking commit (`feat!:`), edit `go.mod` module path to `/vN+1` and all internal import paths. Leave the manifest untouched — release-please computes the new major from the last release. (The `go` release type does NOT rewrite the module path; that part is manual.)
+
+**To release:** merge the open `chore(main): release X.Y.Z` PR; release-please tags `vX.Y.Z` and bumps the manifest. To override a version, edit the committed `CHANGELOG.md` + manifest + PR title on that branch consistently (the committed files, not the PR body, drive the tag).
+
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:ccf33ec3 -->
 ## Beads Issue Tracker
 
