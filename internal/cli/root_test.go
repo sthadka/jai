@@ -54,3 +54,43 @@ func TestRootPersistentPreRunAssemblesEngine(t *testing.T) {
 		t.Errorf("expected query result in output, got: %q", out)
 	}
 }
+
+// TestCommandGroupsCoverEveryCommand guards the grouped `jai --help` layout: a
+// new top-level command added without placing it in a group would otherwise fall
+// into "Additional Commands" unnoticed. It also catches a command listed in two
+// groups, a duplicate group id, and a stale name in commandGroups.
+func TestCommandGroupsCoverEveryCommand(t *testing.T) {
+	grouped := map[string]bool{}
+	groupIDs := map[string]bool{}
+	for _, g := range commandGroups {
+		if groupIDs[g.ID] {
+			t.Errorf("duplicate group id %q", g.ID)
+		}
+		groupIDs[g.ID] = true
+		for _, name := range g.Cmds {
+			if grouped[name] {
+				t.Errorf("command %q assigned to more than one group", name)
+			}
+			grouped[name] = true
+		}
+	}
+
+	// cobra-managed commands intentionally stay in "Additional Commands".
+	ungrouped := map[string]bool{"help": true, "completion": true}
+	real := map[string]bool{}
+	for _, c := range rootCmd.Commands() {
+		name := c.Name()
+		real[name] = true
+		if ungrouped[name] {
+			continue
+		}
+		if !grouped[name] {
+			t.Errorf("command %q is not in any help group — add it to commandGroups in root.go", name)
+		}
+	}
+	for name := range grouped {
+		if !real[name] {
+			t.Errorf("commandGroups references %q, which is not a registered command", name)
+		}
+	}
+}

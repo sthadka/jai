@@ -22,7 +22,7 @@ import (
 // derived from the live config + DB, so there are no hardcoded project names.
 var primeCmd = &cobra.Command{
 	Use:   "prime",
-	Short: "Emit full agent context (status, synced scope, query surface, MCP tools, examples)",
+	Short: "Output AI-optimized workflow context",
 	Long: `prime prints one self-contained markdown document an AI agent can read after a
 new session or compaction to learn what jai mirrors, how fresh it is, how to
 query it, and which fields/views/metrics/MCP tools are available.
