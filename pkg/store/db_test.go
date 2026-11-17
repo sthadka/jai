@@ -61,6 +61,52 @@ func TestUpsertIssue(t *testing.T) {
 	}
 }
 
+func TestUpsertIssuesTx_CommitsAllRows(t *testing.T) {
+	db := openTestDB(t)
+
+	items := []*IssueUpsert{
+		{Issue: &Issue{ID: "1", Key: "TEST-1", Project: "TEST", Summary: "one", RawJSON: `{"key":"TEST-1"}`}},
+		{Issue: &Issue{ID: "2", Key: "TEST-2", Project: "TEST", Summary: "two", RawJSON: `{"key":"TEST-2"}`}},
+	}
+	if err := db.UpsertIssuesTx(items); err != nil {
+		t.Fatalf("UpsertIssuesTx: %v", err)
+	}
+	for _, key := range []string{"TEST-1", "TEST-2"} {
+		got, err := db.GetIssue(key)
+		if err != nil {
+			t.Fatalf("GetIssue(%s): %v", key, err)
+		}
+		if got == nil {
+			t.Errorf("GetIssue(%s) = nil, want the committed row", key)
+		}
+	}
+}
+
+// A failed row must roll back every row in the batch: the reconcile pass relies
+// on this so an interrupted rank refresh never leaves a half-updated ordering.
+func TestUpsertIssuesTx_RollsBackOnError(t *testing.T) {
+	db := openTestDB(t)
+
+	// The second item targets a column that does not exist, so its INSERT fails
+	// mid-transaction and the whole batch — including the valid first row — must
+	// be rolled back.
+	items := []*IssueUpsert{
+		{Issue: &Issue{ID: "1", Key: "TEST-1", Project: "TEST", Summary: "one", RawJSON: `{"key":"TEST-1"}`}},
+		{Issue: &Issue{ID: "2", Key: "TEST-2", Project: "TEST", Summary: "two", RawJSON: `{"key":"TEST-2"}`},
+			Extra: map[string]interface{}{"no_such_column": "x"}},
+	}
+	if err := db.UpsertIssuesTx(items); err == nil {
+		t.Fatal("UpsertIssuesTx: expected error for unknown column, got nil")
+	}
+	got, err := db.GetIssue("TEST-1")
+	if err != nil {
+		t.Fatalf("GetIssue: %v", err)
+	}
+	if got != nil {
+		t.Errorf("TEST-1 present after rollback = %v, want nil (whole batch rolled back)", got)
+	}
+}
+
 func TestGetIssueUpdated(t *testing.T) {
 	db := openTestDB(t)
 

@@ -69,6 +69,7 @@ type Store interface {
 	UpsertDevLinks(issueKey string, links []*DevLink) error
 	UpsertFieldMapping(f *FieldMapping) error
 	UpsertIssue(issue *Issue, extra map[string]interface{}) error
+	UpsertIssuesTx(items []*IssueUpsert) error
 	UpsertIssueLinks(issueKey string, links []IssueLink) error
 	UpsertProject(key, name string) error
 	UpsertSprint(id, boardID int, name, state, startDate, endDate, completeDate, goal string) error
