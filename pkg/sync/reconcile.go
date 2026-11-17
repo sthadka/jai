@@ -217,24 +217,26 @@ func (e *Engine) reconcileSource(ctx context.Context, src config.SyncSource, res
 }
 
 // refetchAndUpsert re-fetches the given issues in full and upserts them,
-// refreshing every column plus changelog, links, and comments. Returns the
-// number of issues successfully upserted, and the first error encountered while
-// re-fetching (if any) so the caller can surface partial reconciliation instead
-// of silently leaving known-drifted issues uncorrected.
+// refreshing every column plus changelog, links, and comments. It runs in two
+// phases so the ordering snapshot is atomic: first fetch every drifted issue
+// (network only, no writes), then upsert all issue rows in a single
+// transaction. A mid-fetch failure or a failed transaction therefore leaves the
+// prior (last-known-good) ranks intact instead of a half-updated order. Returns
+// the number of issues upserted and the first error encountered.
 func (e *Engine) refetchAndUpsert(ctx context.Context, keys []string, fieldMap map[string]*db.FieldMapping) (int, error) {
 	fields := e.expandFields(fieldMap)
-	refetched := 0
 	var firstErr error
 	const batchSize = 100
+
+	// Phase 1: fetch all drifted issues before writing anything.
+	var apiIssues []*jira.Issue
 	for i := 0; i < len(keys); i += batchSize {
 		end := i + batchSize
 		if end > len(keys) {
 			end = len(keys)
 		}
 		batch := keys[i:end]
-
 		jql := fmt.Sprintf("key in (%s)", strings.Join(quoteKeys(batch), ", "))
-		var upserted []string
 		for page, err := range e.client.SearchAll(ctx, jql, fields) {
 			if err != nil {
 				if firstErr == nil {
@@ -242,18 +244,62 @@ func (e *Engine) refetchAndUpsert(ctx context.Context, keys []string, fieldMap m
 				}
 				break
 			}
-			for _, apiIssue := range page {
-				if e.upsertAPIIssue(apiIssue, fieldMap) {
-					upserted = append(upserted, apiIssue.Key)
-					refetched++
-				}
-			}
-		}
-		if len(upserted) > 0 {
-			e.syncChangelogsForKeys(ctx, upserted)
+			apiIssues = append(apiIssues, page...)
 		}
 	}
-	return refetched, firstErr
+	if len(apiIssues) == 0 {
+		return 0, firstErr
+	}
+
+	// Phase 2: denormalize (pure) then upsert every issue row in one transaction.
+	items := make([]*db.IssueUpsert, 0, len(apiIssues))
+	raws := make([][]byte, 0, len(apiIssues))
+	kept := make([]*jira.Issue, 0, len(apiIssues))
+	for _, apiIssue := range apiIssues {
+		rawBytes, err := json.Marshal(apiIssue)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		issue, extra, err := Denormalize(rawBytes, fieldMap)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		items = append(items, &db.IssueUpsert{Issue: issue, Extra: extra})
+		raws = append(raws, rawBytes)
+		kept = append(kept, apiIssue)
+	}
+	if len(items) == 0 {
+		return 0, firstErr
+	}
+	if err := e.db.UpsertIssuesTx(items); err != nil {
+		if firstErr == nil {
+			firstErr = err
+		}
+		return 0, firstErr // rolled back: prior snapshot preserved
+	}
+
+	// Phase 3: non-ordering side effects (comments, links, attachments) and
+	// changelog. These are idempotent and outside the snapshot invariant, so
+	// they run best-effort after the atomic issue-row commit.
+	upserted := make([]string, 0, len(kept))
+	for i, apiIssue := range kept {
+		e.applyIssueSideEffects(apiIssue.Key, raws[i])
+		upserted = append(upserted, apiIssue.Key)
+	}
+	for i := 0; i < len(upserted); i += batchSize {
+		end := i + batchSize
+		if end > len(upserted) {
+			end = len(upserted)
+		}
+		e.syncChangelogsForKeys(ctx, upserted[i:end])
+	}
+	return len(items), firstErr
 }
 
 // applyReconcileValues writes the fresh reconcile-field values captured during
@@ -264,10 +310,14 @@ func (e *Engine) refetchAndUpsert(ctx context.Context, keys []string, fieldMap m
 // pass; since the scan already carries the new values, patch them into the
 // stored raw_json and re-denormalize so the affected columns and raw_json
 // refresh. Changelog, links, and comments are intentionally left untouched: a
-// silent reconcile-field change does not affect them. Returns the number of
-// issues updated and the first error encountered.
+// silent reconcile-field change does not affect them.
+//
+// All rows are patched in memory first, then upserted in a single transaction,
+// so an interrupted or failed apply never exposes a half-updated ordering — on
+// error the transaction rolls back and the prior snapshot stays intact. Returns
+// the number of issues updated and the first error encountered.
 func (e *Engine) applyReconcileValues(keys []string, vals map[string]map[string]json.RawMessage, fieldMap map[string]*db.FieldMapping) (int, error) {
-	applied := 0
+	var items []*db.IssueUpsert
 	var firstErr error
 	const batchSize = 500
 	for i := 0; i < len(keys); i += batchSize {
@@ -302,16 +352,19 @@ func (e *Engine) applyReconcileValues(keys []string, vals map[string]map[string]
 				}
 				continue
 			}
-			if err := e.db.UpsertIssue(issue, extra); err != nil {
-				if firstErr == nil {
-					firstErr = err
-				}
-				continue
-			}
-			applied++
+			items = append(items, &db.IssueUpsert{Issue: issue, Extra: extra})
 		}
 	}
-	return applied, firstErr
+	if len(items) == 0 {
+		return 0, firstErr
+	}
+	if err := e.db.UpsertIssuesTx(items); err != nil {
+		if firstErr == nil {
+			firstErr = err
+		}
+		return 0, firstErr // rolled back: prior snapshot preserved
+	}
+	return len(items), firstErr
 }
 
 // patchRawFields returns rawJSON with each fields[id] replaced by the given raw
@@ -351,37 +404,26 @@ func patchRawFields(rawJSON string, updates map[string]json.RawMessage) (string,
 	return string(out), nil
 }
 
-// upsertAPIIssue denormalizes and upserts a single API issue along with its
-// comments, links, and attachments. Returns true on a successful issue upsert.
-func (e *Engine) upsertAPIIssue(apiIssue *jira.Issue, fieldMap map[string]*db.FieldMapping) bool {
-	rawBytes, err := json.Marshal(apiIssue)
-	if err != nil {
-		return false
-	}
-	issue, extra, err := Denormalize(rawBytes, fieldMap)
-	if err != nil {
-		return false
-	}
-	if err := e.db.UpsertIssue(issue, extra); err != nil {
-		return false
-	}
-
-	if comments, err := ExtractComments(apiIssue.Key, rawBytes); err == nil {
+// applyIssueSideEffects writes the non-ordering, idempotent extras extracted
+// from a re-fetched issue's raw JSON — comments, links, and attachments. These
+// are outside the rank-snapshot invariant, so they run best-effort after the
+// atomic issue-row commit; individual failures are ignored.
+func (e *Engine) applyIssueSideEffects(key string, rawBytes []byte) {
+	if comments, err := ExtractComments(key, rawBytes); err == nil {
 		for _, c := range comments {
 			_ = e.db.UpsertComment(c)
 		}
 		if len(comments) > 0 {
-			_ = e.db.UpdateIssueCommentsText(apiIssue.Key)
+			_ = e.db.UpdateIssueCommentsText(key)
 		}
 	}
 
-	links := ExtractIssueLinks(apiIssue.Key, rawBytes)
-	_ = e.db.UpsertIssueLinks(apiIssue.Key, links)
+	links := ExtractIssueLinks(key, rawBytes)
+	_ = e.db.UpsertIssueLinks(key, links)
 
-	if attachments, err := ExtractAttachments(apiIssue.Key, rawBytes); err == nil && attachments != nil {
-		_ = e.db.UpsertAttachments(apiIssue.Key, attachments)
+	if attachments, err := ExtractAttachments(key, rawBytes); err == nil && attachments != nil {
+		_ = e.db.UpsertAttachments(key, attachments)
 	}
-	return true
 }
 
 // parseIssueFields extracts the "fields" object from a stored issue raw_json

@@ -553,3 +553,56 @@ func TestReconcileFields_CadenceSkipsRecent(t *testing.T) {
 		t.Errorf("expected 0 issues scanned when skipped, got %d", scanned)
 	}
 }
+
+// A failed re-fetch must leave the previously stored rank intact: the pass
+// fetches every drifted issue before writing, so a mid-fetch failure never
+// overwrites the last-known-good ordering with partial data.
+func TestReconcileFields_RefetchFailurePreservesStoredRank(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasPrefix(r.URL.Path, "/rest/api/3/search/jql") {
+			t.Errorf("unexpected request to %s", r.URL.Path)
+			return
+		}
+		var body map[string]interface{}
+		json.NewDecoder(r.Body).Decode(&body)
+		// The scan (project-scoped) reports a drifted rank; the re-fetch fails.
+		if jql, _ := body["jql"].(string); strings.Contains(jql, "project in") {
+			f, _ := json.Marshal(map[string]interface{}{"summary": "x", "customfield_10019": "1|fresh:"})
+			json.NewEncoder(w).Encode(jira.SearchResponse{Issues: []*jira.Issue{{ID: "TEST-1", Key: "TEST-1", Fields: f}}})
+			return
+		}
+		http.Error(w, `{"errorMessages":["boom"]}`, http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	database, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer database.Close()
+	seedRankIssue(t, database, "TEST-1", "1|old:")
+
+	cfg := &config.Config{SyncSources: []config.SyncSource{{Name: "TEST", Projects: []string{"TEST"}}}}
+	e := New(database, jira.New(srv.URL, "t@t.com", "tok", 100), cfg)
+
+	ch, err := e.ReconcileFields(context.Background(), "", []string{"rank"})
+	if err != nil {
+		t.Fatalf("ReconcileFields: %v", err)
+	}
+	var doneErr error
+	for p := range ch {
+		if p.Done {
+			doneErr = p.Err
+		}
+	}
+	if doneErr == nil {
+		t.Error("expected reconcile to surface the re-fetch error")
+	}
+	var gotRank string
+	if err := database.QueryRow(`SELECT rank FROM issues WHERE key = 'TEST-1'`).Scan(&gotRank); err != nil {
+		t.Fatalf("querying rank: %v", err)
+	}
+	if gotRank != "1|old:" {
+		t.Errorf("stored rank = %q, want %q (prior snapshot preserved on failure)", gotRank, "1|old:")
+	}
+}

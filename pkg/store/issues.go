@@ -56,8 +56,16 @@ type IssueLink struct {
 	LinkedProject string
 }
 
-// UpsertIssue inserts a new issue row or updates an existing one. Extra contains
-// additional dynamic columns.
+// IssueUpsert pairs an issue row with its dynamic extra columns for a batched,
+// transactional upsert via UpsertIssuesTx.
+type IssueUpsert struct {
+	Issue *Issue
+	Extra map[string]interface{}
+}
+
+// buildUpsertIssue returns the INSERT ... ON CONFLICT statement and bound args
+// that upsert one issue row. It is shared by UpsertIssue (single autocommit)
+// and UpsertIssuesTx (many rows in one transaction) so both paths stay in sync.
 //
 // It upserts on the stable numeric id (ON CONFLICT(id)) rather than the mutable
 // key: when an issue moves project or a project is renamed its key changes, so
@@ -67,7 +75,7 @@ type IssueLink struct {
 // A second ON CONFLICT(key) arm keeps id-less rows (no Jira id yet) idempotent.
 // INSERT ... ON CONFLICT (not INSERT OR REPLACE) preserves columns maintained
 // outside this function — notably changelog_synced_at — that REPLACE would wipe.
-func (db *DB) UpsertIssue(issue *Issue, extra map[string]interface{}) error {
+func buildUpsertIssue(issue *Issue, extra map[string]interface{}) (string, []interface{}) {
 	cols := []string{
 		"id", "key", "project", "type", "summary", "description",
 		"status", "status_category", "priority",
@@ -124,9 +132,41 @@ func (db *DB) UpsertIssue(issue *Issue, extra map[string]interface{}) error {
 		strings.Join(idUpdates, ", "),
 		strings.Join(keyUpdates, ", "),
 	)
+	return query, vals
+}
 
+// UpsertIssue inserts a new issue row or updates an existing one. Extra contains
+// additional dynamic columns.
+func (db *DB) UpsertIssue(issue *Issue, extra map[string]interface{}) error {
+	query, vals := buildUpsertIssue(issue, extra)
 	_, err := db.Exec(query, vals...)
 	return err
+}
+
+// UpsertIssuesTx upserts every issue in a single transaction: either all rows
+// land or none do. The rank/field reconcile pass uses it so an interrupted or
+// failed refresh never exposes a half-updated ordering — on any error the
+// transaction rolls back and the prior (last-known-good) snapshot stays intact.
+// An empty slice is a no-op.
+func (db *DB) UpsertIssuesTx(items []*IssueUpsert) error {
+	if len(items) == 0 {
+		return nil
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin issue upsert tx: %w", err)
+	}
+	for _, it := range items {
+		query, vals := buildUpsertIssue(it.Issue, it.Extra)
+		if _, err := tx.Exec(query, vals...); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("upserting issue %s in tx: %w", it.Issue.Key, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit issue upsert tx: %w", err)
+	}
+	return nil
 }
 
 // GetIssueUpdated returns the stored "updated" timestamp for an issue, or "" if not found.
