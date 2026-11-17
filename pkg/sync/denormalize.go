@@ -211,7 +211,7 @@ func Denormalize(raw []byte, fieldMap map[string]*db.FieldMapping) (*db.Issue, m
 			continue
 		}
 		val := extractFieldValue(rawVal, mapping.Type)
-		if val == nil {
+		if val == nil || val == "" {
 			continue
 		}
 		if mapping.IsColumn {
@@ -317,6 +317,9 @@ func extractFieldValue(raw json.RawMessage, fieldType string) interface{} {
 		// Try array of strings.
 		var strs []string
 		if err := json.Unmarshal(raw, &strs); err == nil {
+			if len(strs) == 0 {
+				return nil
+			}
 			return marshalJSONArray(strs)
 		}
 	}
