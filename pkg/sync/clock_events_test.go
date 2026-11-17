@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sthadka/jai/v5/pkg/clock"
+	"github.com/sthadka/jai/v6/pkg/clock"
 )
 
 // WithClock must make the engine's notion of "now" deterministic.

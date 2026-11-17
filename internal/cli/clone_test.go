@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"testing"
 
-	db "github.com/sthadka/jai/v5/pkg/store"
+	db "github.com/sthadka/jai/v6/pkg/store"
 )
 
 func TestExtractCloneFields(t *testing.T) {

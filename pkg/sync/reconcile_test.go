@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sthadka/jai/v5/pkg/config"
-	"github.com/sthadka/jai/v5/pkg/jira"
-	db "github.com/sthadka/jai/v5/pkg/store"
+	"github.com/sthadka/jai/v6/pkg/config"
+	"github.com/sthadka/jai/v6/pkg/jira"
+	db "github.com/sthadka/jai/v6/pkg/store"
 )
 
 func TestNormalizeRawAndEqual(t *testing.T) {

@@ -5,7 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/sthadka/jai/v5/pkg/core"
+	"github.com/sthadka/jai/v6/pkg/core"
 )
 
 // g is a test-only CLI handle. Production code no longer has a global; tests

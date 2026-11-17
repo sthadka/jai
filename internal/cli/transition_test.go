@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sthadka/jai/v5/pkg/jira"
+	"github.com/sthadka/jai/v6/pkg/jira"
 )
 
 func TestResolveTransition(t *testing.T) {

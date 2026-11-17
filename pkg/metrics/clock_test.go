@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sthadka/jai/v5/pkg/clock"
+	"github.com/sthadka/jai/v6/pkg/clock"
 )
 
 // A query that omits as_of must resolve it from the injected clock, so metric

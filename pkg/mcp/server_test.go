@@ -7,11 +7,11 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/sthadka/jai/v5/pkg/config"
-	"github.com/sthadka/jai/v5/pkg/jira"
-	"github.com/sthadka/jai/v5/pkg/query"
-	db "github.com/sthadka/jai/v5/pkg/store"
-	synce "github.com/sthadka/jai/v5/pkg/sync"
+	"github.com/sthadka/jai/v6/pkg/config"
+	"github.com/sthadka/jai/v6/pkg/jira"
+	"github.com/sthadka/jai/v6/pkg/query"
+	db "github.com/sthadka/jai/v6/pkg/store"
+	synce "github.com/sthadka/jai/v6/pkg/sync"
 )
 
 // testServer creates a minimal Server instance for testing using a temp DB.

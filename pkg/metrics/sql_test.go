@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sthadka/jai/v5/pkg/config"
-	"github.com/sthadka/jai/v5/pkg/query"
+	"github.com/sthadka/jai/v6/pkg/config"
+	"github.com/sthadka/jai/v6/pkg/query"
 )
 
 // TestGenerateFragments_QuoteSafety verifies tenant values containing single

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sthadka/jai/v5/pkg/metrics/dashboard/specs"
+	"github.com/sthadka/jai/v6/pkg/metrics/dashboard/specs"
 )
 
 // panelTestServer returns a Server wired with only a known CSRF token — the
