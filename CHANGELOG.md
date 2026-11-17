@@ -1,6 +1,6 @@
 # Changelog
 
-## [7.0.0](https://github.com/sthadka/jai/compare/v6.0.0...v7.0.0) (2026-11-17)
+## [6.0.0](https://github.com/sthadka/jai/compare/v5.0.0...v6.0.0) (2026-11-17)
 
 
 ### ⚠ BREAKING CHANGES
