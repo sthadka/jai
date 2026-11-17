@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/sthadka/jai/v5/pkg/config"
+	"github.com/sthadka/jai/v6/pkg/config"
 )
 
 var (

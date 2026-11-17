@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	db "github.com/sthadka/jai/v5/pkg/store"
+	db "github.com/sthadka/jai/v6/pkg/store"
 )
 
 // activeGenSub is the scalar subquery selecting the active generation id. Every reader

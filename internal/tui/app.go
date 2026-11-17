@@ -11,11 +11,11 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/sthadka/jai/v5/pkg/config"
-	"github.com/sthadka/jai/v5/pkg/jira"
-	"github.com/sthadka/jai/v5/pkg/query"
-	db "github.com/sthadka/jai/v5/pkg/store"
-	synce "github.com/sthadka/jai/v5/pkg/sync"
+	"github.com/sthadka/jai/v6/pkg/config"
+	"github.com/sthadka/jai/v6/pkg/jira"
+	"github.com/sthadka/jai/v6/pkg/query"
+	db "github.com/sthadka/jai/v6/pkg/store"
+	synce "github.com/sthadka/jai/v6/pkg/sync"
 )
 
 // Mode represents the current UI mode.

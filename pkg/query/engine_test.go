@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sthadka/jai/v5/pkg/config"
-	db "github.com/sthadka/jai/v5/pkg/store"
+	"github.com/sthadka/jai/v6/pkg/config"
+	db "github.com/sthadka/jai/v6/pkg/store"
 )
 
 func openTestDB(t *testing.T) *db.DB {

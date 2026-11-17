@@ -1,4 +1,4 @@
-module github.com/sthadka/jai/v5
+module github.com/sthadka/jai/v6
 
 go 1.27.4
 

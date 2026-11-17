@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sthadka/jai/v5/pkg/config"
-	db "github.com/sthadka/jai/v5/pkg/store"
+	"github.com/sthadka/jai/v6/pkg/config"
+	db "github.com/sthadka/jai/v6/pkg/store"
 )
 
 // IssueCoverageRow is the per-issue snapshot the coverage diagnostics operate on. It is

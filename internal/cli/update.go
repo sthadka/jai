@@ -7,11 +7,11 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/sthadka/jai/v5/pkg/fieldwrap"
-	"github.com/sthadka/jai/v5/pkg/jira"
-	"github.com/sthadka/jai/v5/pkg/output"
-	db "github.com/sthadka/jai/v5/pkg/store"
-	synce "github.com/sthadka/jai/v5/pkg/sync"
+	"github.com/sthadka/jai/v6/pkg/fieldwrap"
+	"github.com/sthadka/jai/v6/pkg/jira"
+	"github.com/sthadka/jai/v6/pkg/output"
+	db "github.com/sthadka/jai/v6/pkg/store"
+	synce "github.com/sthadka/jai/v6/pkg/sync"
 )
 
 var (
