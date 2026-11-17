@@ -292,9 +292,45 @@ func (app *CLI) syncAge() int {
 	return int(time.Since(oldestSync).Seconds())
 }
 
+// commandGroups organizes top-level commands into titled help sections, the way
+// `bd --help` groups its commands. Commands not listed here fall into cobra's
+// default "Additional Commands" section (e.g. help, completion).
+var commandGroups = []struct {
+	ID    string
+	Title string
+	Cmds  []string
+}{
+	{"query", "Querying & Reading:", []string{"query", "get", "search", "view", "changelog", "deps", "open"}},
+	{"write", "Writing to Jira:", []string{"create", "update", "set", "comment", "transition", "clone", "link", "watch", "unwatch", "push"}},
+	{"data", "Sync & Data:", []string{"sync", "status", "db"}},
+	{"insight", "Schema & Metrics:", []string{"fields", "schema", "metrics"}},
+	{"interface", "Interfaces & Agents:", []string{"tui", "serve", "prime"}},
+	{"setup", "Setup & Configuration:", []string{"init", "snippet"}},
+}
+
+// applyCommandGroups registers the help groups on root and assigns each listed
+// subcommand to its group. It runs once before execution, after every
+// subcommand's init() has registered it on rootCmd, so it can look commands up
+// by name rather than threading a GroupID through each command definition.
+func applyCommandGroups(root *cobra.Command) {
+	byName := make(map[string]string)
+	for _, g := range commandGroups {
+		root.AddGroup(&cobra.Group{ID: g.ID, Title: g.Title})
+		for _, name := range g.Cmds {
+			byName[name] = g.ID
+		}
+	}
+	for _, c := range root.Commands() {
+		if id, ok := byName[c.Name()]; ok {
+			c.GroupID = id
+		}
+	}
+}
+
 // Execute assembles the CLI and runs the root command.
 func Execute() error {
 	app := &CLI{}
 	bindRoot(rootCmd, app)
+	applyCommandGroups(rootCmd)
 	return rootCmd.Execute()
 }
