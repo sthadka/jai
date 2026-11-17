@@ -435,6 +435,28 @@ var migrations = []migration{
 			return addColumnIfNotExists(tx, "issues", "custom_fields", "TEXT")
 		},
 	},
+	{
+		version:     20,
+		description: "add typed columns for additional Jira system fields",
+		up: func(tx *sql.Tx) error {
+			cols := []struct{ name, typ string }{
+				{"creator", "TEXT"},
+				{"environment", "TEXT"},
+				{"security_level", "TEXT"},
+				{"votes", "INTEGER"},
+				{"watchers", "INTEGER"},
+				{"work_ratio", "REAL"},
+				{"status_category_changed", "DATETIME"},
+				{"affects_versions", "TEXT"},
+			}
+			for _, c := range cols {
+				if err := addColumnIfNotExists(tx, "issues", c.name, c.typ); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	},
 }
 
 // issuesKeyRenameTrigger cascades a key change (issue moved project, or project

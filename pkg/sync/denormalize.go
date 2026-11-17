@@ -40,6 +40,24 @@ func normalizeDate(s string) string {
 	return s // unrecognised format — store as-is
 }
 
+// systemFieldColumns are the Jira system field ids denormalized into dedicated
+// issues columns, or handled via side tables (comments/issue_links/attachments/
+// worklog). The custom_fields loop skips them; every other field with a value
+// falls through to a promoted column or the sparse custom_fields JSON.
+var systemFieldColumns = map[string]bool{
+	"summary": true, "description": true, "status": true, "priority": true,
+	"assignee": true, "reporter": true, "created": true, "updated": true,
+	"resolutiondate": true, "labels": true, "components": true, "fixVersions": true,
+	"parent": true, "issuetype": true, "project": true, "resolution": true,
+	"duedate": true, "timeoriginalestimate": true, "timespent": true, "timeestimate": true,
+	"subtasks": true,
+	// dedicated columns added for broader system-field coverage:
+	"creator": true, "environment": true, "security": true, "votes": true,
+	"watches": true, "workratio": true, "statuscategorychangedate": true, "versions": true,
+	// handled via side tables, not issues columns:
+	"comment": true, "issuelinks": true, "attachment": true, "worklog": true,
+}
+
 // Denormalize extracts column values from a raw Jira issue JSON blob using the field map.
 // Returns: (fixed IssueFields, extra dynamic columns map).
 func Denormalize(raw []byte, fieldMap map[string]*db.FieldMapping) (*db.Issue, map[string]interface{}, error) {
@@ -146,9 +164,46 @@ func Denormalize(raw []byte, fieldMap map[string]*db.FieldMapping) (*db.Issue, m
 	}
 
 	extra := make(map[string]interface{})
+
+	// Additional Jira system fields denormalized into dedicated typed columns.
+	if fields.Creator != nil && fields.Creator.DisplayName != "" {
+		extra["creator"] = fields.Creator.DisplayName
+	}
+	if len(fields.Environment) > 0 && string(fields.Environment) != "null" {
+		if env := jira.ADFToPlaintext(fields.Environment); env != "" {
+			extra["environment"] = env
+		}
+	}
+	if fields.Security != nil && fields.Security.Name != "" {
+		extra["security_level"] = fields.Security.Name
+	}
+	if fields.Votes != nil {
+		extra["votes"] = fields.Votes.Votes
+	}
+	if fields.Watches != nil {
+		extra["watchers"] = fields.Watches.WatchCount
+	}
+	if fields.WorkRatio != nil && *fields.WorkRatio >= 0 {
+		extra["work_ratio"] = *fields.WorkRatio
+	}
+	if d := normalizeDate(fields.StatusCategoryChangeDate); d != "" {
+		extra["status_category_changed"] = d
+	}
+	if len(fields.AffectsVersions) > 0 {
+		names := make([]string, len(fields.AffectsVersions))
+		for i, v := range fields.AffectsVersions {
+			names[i] = v.Name
+		}
+		extra["affects_versions"] = marshalJSONArray(names)
+	}
+
+	// Everything else: promoted / column-backed fields go to their column; the long
+	// tail (custom fields and any uncoded system field) goes to the sparse
+	// custom_fields JSON so no data is dropped. systemFieldColumns are the system
+	// fields already denormalized above or handled via side tables.
 	custom := make(map[string]interface{})
 	for jiraID, mapping := range fieldMap {
-		if !mapping.IsCustom {
+		if systemFieldColumns[jiraID] {
 			continue
 		}
 		rawVal, ok := rawFields[jiraID]

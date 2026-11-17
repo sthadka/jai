@@ -122,6 +122,25 @@ type IssueFields struct {
 			Key string `json:"key"`
 		} `json:"outwardIssue"`
 	} `json:"issuelinks"`
+	Creator *struct {
+		DisplayName  string `json:"displayName"`
+		EmailAddress string `json:"emailAddress"`
+	} `json:"creator"`
+	Environment json.RawMessage `json:"environment"` // ADF or string
+	Security    *struct {
+		Name string `json:"name"`
+	} `json:"security"`
+	Votes *struct {
+		Votes int64 `json:"votes"`
+	} `json:"votes"`
+	Watches *struct {
+		WatchCount int64 `json:"watchCount"`
+	} `json:"watches"`
+	WorkRatio                *float64 `json:"workratio"`
+	StatusCategoryChangeDate string   `json:"statuscategorychangedate"`
+	AffectsVersions          []struct {
+		Name string `json:"name"`
+	} `json:"versions"`
 }
 
 // Comment is a Jira comment from the API.
