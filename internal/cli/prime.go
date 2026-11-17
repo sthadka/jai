@@ -117,17 +117,14 @@ func gatherPrime(ctx context.Context, app *CLI) *primeContext {
 		DBPath:  cfg.DB.Path,
 	}
 
-	switch {
-	case app.engine.Client == nil:
+	if app.engine.Client == nil {
 		p.AuthErr = "not checked (no Jira client)"
-	default:
-		if me, err := app.engine.Client.MySelf(ctx); err != nil {
-			p.AuthErr = err.Error()
-		} else {
-			p.AuthOK = true
-			p.AuthUser = me.DisplayName
-			p.AuthEmail = me.EmailAddress
-		}
+	} else if me, err := app.engine.Client.MySelf(ctx); err != nil {
+		p.AuthErr = err.Error()
+	} else {
+		p.AuthOK = true
+		p.AuthUser = me.DisplayName
+		p.AuthEmail = me.EmailAddress
 	}
 
 	if info, err := os.Stat(cfg.DB.Path); err == nil {
