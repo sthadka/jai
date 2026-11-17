@@ -63,24 +63,9 @@ func (e *Engine) ReconcileFields(ctx context.Context, sourceFilter string, field
 		return nil, err
 	}
 
-	fieldMap, err := e.db.FieldMapByJiraID()
+	resolved, fieldMap, err := e.resolveReconcileFields(fields)
 	if err != nil {
-		return nil, fmt.Errorf("loading field map: %w", err)
-	}
-	// Resolve requested column names to Jira field IDs. Unknown fields are
-	// warned about and skipped rather than failing the whole pass.
-	colToJiraID := map[string]string{}
-	for _, f := range fieldMap {
-		colToJiraID[f.Name] = f.JiraID
-	}
-	var resolved []reconcileField
-	for _, col := range fields {
-		jiraID, ok := colToJiraID[col]
-		if !ok {
-			e.warnf("  ⚠ reconcile: unknown field %q (not in field_map), skipping\n", col)
-			continue
-		}
-		resolved = append(resolved, reconcileField{col: col, jiraID: jiraID})
+		return nil, err
 	}
 
 	ch := make(chan ReconcileProgress, 8)
@@ -96,12 +81,120 @@ func (e *Engine) ReconcileFields(ctx context.Context, sourceFilter string, field
 	return ch, nil
 }
 
+// ReconcileScoped runs a rank/field reconcile over an arbitrary JQL subset
+// (e.g. the issues on a single board, via its filter JQL) rather than a
+// configured sync source. It is the cheap, on-demand path for refreshing just
+// the ordering a user is currently viewing instead of scanning the whole
+// project: rank is a global LexoRank, so refreshing a subset yields a correct
+// ordering for that subset without touching — or rescanning — the rest.
+//
+// freshnessKey namespaces this scope's last_reconcile stamp (e.g. "board:123")
+// so repeated opens are rate-limited by interval WITHOUT ever marking a full
+// source reconciled — the source still needs its own pass to cover off-scope
+// issues. interval is the minimum time between passes for the key ("" or "0"
+// runs every call). An empty fields list is a no-op.
+func (e *Engine) ReconcileScoped(ctx context.Context, freshnessKey, jql, interval string, fields []string) (<-chan ReconcileProgress, error) {
+	if len(fields) == 0 {
+		ch := make(chan ReconcileProgress)
+		close(ch)
+		return ch, nil
+	}
+	if strings.TrimSpace(freshnessKey) == "" {
+		return nil, fmt.Errorf("reconcile: freshnessKey is required")
+	}
+	if strings.TrimSpace(jql) == "" {
+		return nil, fmt.Errorf("reconcile: jql is required")
+	}
+
+	resolved, fieldMap, err := e.resolveReconcileFields(fields)
+	if err != nil {
+		return nil, err
+	}
+
+	ch := make(chan ReconcileProgress, 8)
+	go func() {
+		defer close(ch)
+		if len(resolved) == 0 {
+			return
+		}
+		e.reconcileScan(ctx, reconcileScope{key: freshnessKey, baseJQL: jql, interval: interval}, resolved, fieldMap, ch)
+	}()
+	return ch, nil
+}
+
+// BoardReconcileKey is the per-board freshness key used by ReconcileBoard. It is
+// deliberately distinct from any sync source name so a board-scoped refresh
+// never marks a full source reconciled.
+func BoardReconcileKey(boardID int) string {
+	return fmt.Sprintf("board:%d", boardID)
+}
+
+// ReconcileBoard refreshes ranks/fields for just the issues on one board. It
+// resolves the board's filter JQL (GET board configuration → filter → JQL) and
+// reconciles that subset on demand, tracked under BoardReconcileKey so repeated
+// opens are rate-limited by interval without rescanning the whole project. This
+// is the entry a board view calls when its local rank snapshot may be stale.
+func (e *Engine) ReconcileBoard(ctx context.Context, boardID int, interval string, fields []string) (<-chan ReconcileProgress, error) {
+	jql, err := e.client.GetBoardFilterJQL(ctx, boardID)
+	if err != nil {
+		return nil, fmt.Errorf("resolving board %d filter: %w", boardID, err)
+	}
+	return e.ReconcileScoped(ctx, BoardReconcileKey(boardID), jql, interval, fields)
+}
+
+// resolveReconcileFields loads the Jira field map and resolves requested column
+// names to Jira field IDs. Unknown fields are warned about and skipped rather
+// than failing the whole pass. Shared by ReconcileFields and ReconcileScoped.
+func (e *Engine) resolveReconcileFields(fields []string) ([]reconcileField, map[string]*db.FieldMapping, error) {
+	fieldMap, err := e.db.FieldMapByJiraID()
+	if err != nil {
+		return nil, nil, fmt.Errorf("loading field map: %w", err)
+	}
+	colToJiraID := map[string]string{}
+	for _, f := range fieldMap {
+		colToJiraID[f.Name] = f.JiraID
+	}
+	var resolved []reconcileField
+	for _, col := range fields {
+		jiraID, ok := colToJiraID[col]
+		if !ok {
+			e.warnf("  ⚠ reconcile: unknown field %q (not in field_map), skipping\n", col)
+			continue
+		}
+		resolved = append(resolved, reconcileField{col: col, jiraID: jiraID})
+	}
+	return resolved, fieldMap, nil
+}
+
 type reconcileField struct {
 	col    string
 	jiraID string
 }
 
+// reconcileScope describes one reconcile-pass target: the freshness key under
+// which its last_reconcile is tracked, the base JQL to scan (before the shared
+// ReconcileScope clause is ANDed on), and the minimum interval between passes
+// for that key ("" / "0" = always run). A configured sync source and an
+// on-demand board scope differ only by these three values.
+type reconcileScope struct {
+	key      string
+	baseJQL  string
+	interval string
+}
+
+// reconcileSource reconciles one configured sync source, tracked under its own
+// name and gated by the global ReconcileInterval.
 func (e *Engine) reconcileSource(ctx context.Context, src config.SyncSource, resolved []reconcileField, fieldMap map[string]*db.FieldMapping, ch chan<- ReconcileProgress) {
+	e.reconcileScan(ctx, reconcileScope{
+		key:      src.Name,
+		baseJQL:  sourceJQL(src),
+		interval: e.cfg.Sync.ReconcileInterval,
+	}, resolved, fieldMap, ch)
+}
+
+// reconcileScan runs the two-phase reconcile (cheap key+fields scan, then
+// correct only drifted issues) over sc.baseJQL, tracking freshness under sc.key.
+func (e *Engine) reconcileScan(ctx context.Context, sc reconcileScope, resolved []reconcileField, fieldMap map[string]*db.FieldMapping, ch chan<- ReconcileProgress) {
 	cols := make([]string, len(resolved))
 	scanFields := []string{"key"}
 	for i, rf := range resolved {
@@ -110,21 +203,21 @@ func (e *Engine) reconcileSource(ctx context.Context, src config.SyncSource, res
 	}
 
 	// Cadence gate: the pass enumerates every in-scope issue (same request count
-	// as a full scan), so skip a source reconciled within ReconcileInterval.
+	// as a full scan), so skip a scope reconciled within its interval.
 	// "0"/empty/unparseable means run every time.
-	if d, err := time.ParseDuration(e.cfg.Sync.ReconcileInterval); err == nil && d > 0 {
-		last, err := e.db.GetLastReconcile(src.Name)
+	if d, err := time.ParseDuration(sc.interval); err == nil && d > 0 {
+		last, err := e.db.GetLastReconcile(sc.key)
 		if err != nil {
-			ch <- ReconcileProgress{Source: src.Name, Fields: cols, Err: err, Done: true}
+			ch <- ReconcileProgress{Source: sc.key, Fields: cols, Err: err, Done: true}
 			return
 		}
 		if t, perr := time.Parse(time.RFC3339, last); perr == nil && time.Since(t) < d {
-			ch <- ReconcileProgress{Source: src.Name, Fields: cols, CadenceSkipped: true, Done: true}
+			ch <- ReconcileProgress{Source: sc.key, Fields: cols, CadenceSkipped: true, Done: true}
 			return
 		}
 	}
 
-	jql := sourceJQL(src) // no "updated >=" filter — that gate is exactly what misses rank changes
+	jql := sc.baseJQL // no "updated >=" filter — that gate is exactly what misses rank changes
 	// Scope the scan to issues that can actually drift silently (default: not
 	// Done). Rank reorders never touch closed issues, so excluding them cuts the
 	// scan without missing corrections.
@@ -140,7 +233,7 @@ func (e *Engine) reconcileSource(ctx context.Context, src config.SyncSource, res
 
 	for page, err := range e.client.SearchAll(ctx, jql, scanFields) {
 		if err != nil {
-			ch <- ReconcileProgress{Source: src.Name, Fields: cols, Scanned: scanned, Err: err, Done: true}
+			ch <- ReconcileProgress{Source: sc.key, Fields: cols, Scanned: scanned, Err: err, Done: true}
 			return
 		}
 
@@ -158,7 +251,7 @@ func (e *Engine) reconcileSource(ctx context.Context, src config.SyncSource, res
 
 		stored, err := e.db.GetIssuesRawJSON(keys)
 		if err != nil {
-			ch <- ReconcileProgress{Source: src.Name, Fields: cols, Scanned: scanned, Err: err, Done: true}
+			ch <- ReconcileProgress{Source: sc.key, Fields: cols, Scanned: scanned, Err: err, Done: true}
 			return
 		}
 
@@ -182,14 +275,14 @@ func (e *Engine) reconcileSource(ctx context.Context, src config.SyncSource, res
 			changedVals[key] = vals
 		}
 
-		ch <- ReconcileProgress{Source: src.Name, Fields: cols, Scanned: scanned, Changed: len(changedKeys)}
+		ch <- ReconcileProgress{Source: sc.key, Fields: cols, Scanned: scanned, Changed: len(changedKeys)}
 	}
 
 	if len(changedKeys) == 0 {
 		// Scan completed cleanly — record the pass so the cadence gate can skip
-		// this source until ReconcileInterval elapses.
-		_ = e.db.UpdateReconcileMeta(src.Name)
-		ch <- ReconcileProgress{Source: src.Name, Fields: cols, Scanned: scanned, Done: true}
+		// this scope until its interval elapses.
+		_ = e.db.UpdateReconcileMeta(sc.key)
+		ch <- ReconcileProgress{Source: sc.key, Fields: cols, Scanned: scanned, Done: true}
 		return
 	}
 
@@ -209,11 +302,11 @@ func (e *Engine) reconcileSource(ctx context.Context, src config.SyncSource, res
 	}
 	if err == nil {
 		// Only stamp the pass as complete when every drifted issue was
-		// corrected; a partial failure leaves the cadence open so the next sync
-		// retries instead of waiting out ReconcileInterval.
-		_ = e.db.UpdateReconcileMeta(src.Name)
+		// corrected; a partial failure leaves the cadence open so the next pass
+		// retries instead of waiting out the interval.
+		_ = e.db.UpdateReconcileMeta(sc.key)
 	}
-	ch <- ReconcileProgress{Source: src.Name, Fields: cols, Scanned: scanned, Changed: len(changedKeys), Refetched: applied, Err: err, Done: true}
+	ch <- ReconcileProgress{Source: sc.key, Fields: cols, Scanned: scanned, Changed: len(changedKeys), Refetched: applied, Err: err, Done: true}
 }
 
 // refetchAndUpsert re-fetches the given issues in full and upserts them,

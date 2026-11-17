@@ -15,6 +15,7 @@ type JiraClient interface {
 	CreateRemoteLink(ctx context.Context, issueKey, url, title string) error
 	ExecuteTransition(ctx context.Context, issueKey, transitionID string) error
 	Fields(ctx context.Context) ([]*Field, error)
+	GetBoardFilterJQL(ctx context.Context, boardID int) (string, error)
 	GetBoards(ctx context.Context, projectKey string) ([]Board, error)
 	GetDevInfo(ctx context.Context, issueID string) (*DevInfoResponse, error)
 	GetIssue(ctx context.Context, key string) (*Issue, error)

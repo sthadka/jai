@@ -373,3 +373,40 @@ func TestSearchAll_Retry429(t *testing.T) {
 		t.Errorf("expected 1 issue after retry, got %d", len(issues))
 	}
 }
+
+func TestGetBoardFilterJQL(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/rest/agile/1.0/board/7/configuration":
+			json.NewEncoder(w).Encode(BoardConfiguration{Filter: struct {
+				ID string `json:"id"`
+			}{ID: "100"}})
+		case "/rest/api/3/filter/100":
+			json.NewEncoder(w).Encode(Filter{JQL: "project = TEST ORDER BY Rank ASC"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	got, err := newTestClient(srv).GetBoardFilterJQL(context.Background(), 7)
+	if err != nil {
+		t.Fatalf("GetBoardFilterJQL: %v", err)
+	}
+	if got != "project = TEST ORDER BY Rank ASC" {
+		t.Errorf("jql = %q, want the filter's JQL", got)
+	}
+}
+
+func TestGetBoardFilterJQL_NoFilter(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Board configuration with an empty filter id must surface an error
+		// rather than reconciling against an empty/garbage scope.
+		json.NewEncoder(w).Encode(BoardConfiguration{})
+	}))
+	defer srv.Close()
+
+	if _, err := newTestClient(srv).GetBoardFilterJQL(context.Background(), 7); err == nil {
+		t.Fatal("expected error for board with no backing filter, got nil")
+	}
+}
