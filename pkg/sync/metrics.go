@@ -62,9 +62,20 @@ func (m *metricWriter) refreshTouched(keys []string) error {
 	if m == nil || len(keys) == 0 {
 		return nil
 	}
+	// Incremental binds one SQL variable per key; beyond SQLite's limit (32766)
+	// the parameterized query fails. A touch set that large is effectively a full
+	// sync, so rebuild all facts instead — correct and avoids the variable cap.
+	if len(keys) > maxIncrementalKeys {
+		_, err := m.builder.BuildAll(m.clk.Now().UTC(), nil)
+		return err
+	}
 	_, err := m.builder.Incremental(m.clk.Now().UTC(), keys)
 	if errors.Is(err, metrics.ErrFullRebuildRequired) {
 		_, err = m.builder.BuildAll(m.clk.Now().UTC(), nil)
 	}
 	return err
 }
+
+// maxIncrementalKeys caps the key-parameterized incremental refresh below SQLite's
+// bound-variable limit (32766); above it, refreshTouched does a full rebuild.
+const maxIncrementalKeys = 20000
