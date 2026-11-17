@@ -302,7 +302,7 @@ var commandGroups = []struct {
 }{
 	{"query", "Querying & Reading:", []string{"query", "get", "search", "view", "changelog", "deps", "open"}},
 	{"write", "Writing to Jira:", []string{"create", "update", "set", "comment", "transition", "clone", "link", "watch", "unwatch", "push"}},
-	{"data", "Sync & Data:", []string{"sync", "status", "db"}},
+	{"data", "Sync & Data:", []string{"sync", "rank", "status", "db"}},
 	{"insight", "Schema & Metrics:", []string{"fields", "schema", "metrics"}},
 	{"interface", "Interfaces & Agents:", []string{"tui", "serve", "prime"}},
 	{"setup", "Setup & Configuration:", []string{"init", "snippet"}},
