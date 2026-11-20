@@ -1,5 +1,12 @@
 # Changelog
 
+## [6.1.1](https://github.com/sthadka/jai/compare/v6.1.0...v6.1.1) (2026-11-20)
+
+
+### Bug Fixes
+
+* **sync:** stop re-backfilling promoted fields every sync ([6ede66a](https://github.com/sthadka/jai/commit/6ede66ad472c821489b6205e3bb72fe844a450c9))
+
 ## [6.1.0](https://github.com/sthadka/jai/compare/v6.0.0...v6.1.0) (2026-11-17)
 
 
