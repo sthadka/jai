@@ -20,7 +20,11 @@ type FieldMapping struct {
 	Searchable   bool
 }
 
-// UpsertFieldMapping inserts or replaces a field mapping.
+// UpsertFieldMapping inserts or replaces a field mapping. is_column is
+// intentionally NOT updated on conflict: promotion state is owned solely by
+// PromoteField/MarkFieldAsColumn. DiscoverFields re-upserts every field with
+// IsColumn:false on each sync, so clobbering it here would un-mark promoted
+// columns and force ensurePromotedFields to re-backfill them every run.
 func (db *DB) UpsertFieldMapping(f *FieldMapping) error {
 	_, err := db.Exec(`
 		INSERT INTO field_map (jira_id, jira_name, name, type, item_type, is_custom, is_column, user_override, searchable)
@@ -30,8 +34,7 @@ func (db *DB) UpsertFieldMapping(f *FieldMapping) error {
 			name = CASE WHEN field_map.user_override THEN field_map.name ELSE excluded.name END,
 			type = excluded.type,
 			item_type = excluded.item_type,
-			is_custom = excluded.is_custom,
-			is_column = excluded.is_column`,
+			is_custom = excluded.is_custom`,
 		f.JiraID, f.JiraName, f.Name, f.Type, f.ItemType, f.IsCustom, f.IsColumn, f.UserOverride, f.Searchable,
 	)
 	return err
