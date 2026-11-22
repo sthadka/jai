@@ -88,8 +88,12 @@ func buildUpsertIssue(issue *Issue, extra map[string]interface{}) (string, []int
 		"original_estimate", "time_spent", "remaining_estimate",
 		"subtask_keys", "sprint_id", "sprint_name",
 	}
+	var idVal any = issue.ID
+	if issue.ID == "" {
+		idVal = nil
+	}
 	vals := []interface{}{
-		issue.ID, issue.Key, issue.Project, issue.Type, issue.Summary, issue.Description,
+		idVal, issue.Key, issue.Project, issue.Type, issue.Summary, issue.Description,
 		issue.Status, issue.StatusCategory, issue.Priority,
 		issue.Assignee, issue.AssigneeEmail, issue.Reporter,
 		issue.Created, issue.Updated, issue.Resolved,
@@ -125,7 +129,7 @@ func buildUpsertIssue(issue *Issue, extra map[string]interface{}) (string, []int
 
 	query := fmt.Sprintf(
 		"INSERT INTO issues (%s) VALUES (%s) "+
-			"ON CONFLICT(id) WHERE id <> '' DO UPDATE SET %s "+
+			"ON CONFLICT(id) DO UPDATE SET %s "+
 			"ON CONFLICT(key) DO UPDATE SET %s",
 		strings.Join(cols, ", "),
 		strings.Join(placeholders, ", "),

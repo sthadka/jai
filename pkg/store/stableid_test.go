@@ -1,6 +1,9 @@
 package store
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // TestUpsertIssueMovePreservesIdentity verifies that re-syncing an issue under a
 // new key (a cross-project move) updates the existing id-keyed row in place,
@@ -125,8 +128,9 @@ func TestUpsertIssueProjectRename(t *testing.T) {
 	}
 }
 
-// TestUpsertIssueIDLessRowsStayDistinct guards the partial unique index: issues
-// without a Jira id (e.g. local-only fixtures) must not collapse into one row.
+// TestUpsertIssueIDLessRowsStayDistinct guards the unconditional unique index:
+// issues without a Jira id store NULL (never '') so multiple id-less rows stay
+// distinct, remain idempotent on key re-upsert, and accept an id once assigned.
 func TestUpsertIssueIDLessRowsStayDistinct(t *testing.T) {
 	db := openTestDB(t)
 	for _, k := range []string{"A-1", "A-2"} {
@@ -134,10 +138,80 @@ func TestUpsertIssueIDLessRowsStayDistinct(t *testing.T) {
 			t.Fatalf("upsert %s: %v", k, err)
 		}
 	}
-	var n int
-	db.QueryRow(`SELECT count(*) FROM issues`).Scan(&n)
-	if n != 2 {
-		t.Fatalf("id-less rows collapsed: got %d, want 2", n)
+	var n, nullCount int
+	db.QueryRow(`SELECT count(*), count(*) FILTER (WHERE id IS NULL) FROM issues`).Scan(&n, &nullCount)
+	if n != 2 || nullCount != 2 {
+		t.Fatalf("id-less rows: total=%d null=%d, want 2/2", n, nullCount)
+	}
+
+	// Re-upserting an id-less row updates by key without creating a duplicate.
+	if err := db.UpsertIssue(&Issue{Key: "A-1", Project: "A", Summary: "updated", RawJSON: "{}"}, nil); err != nil {
+		t.Fatalf("re-upsert A-1: %v", err)
+	}
+	var summary string
+	db.QueryRow(`SELECT count(*), (SELECT summary FROM issues WHERE key = 'A-1') FROM issues`).Scan(&n, &summary)
+	if n != 2 || summary != "updated" {
+		t.Fatalf("re-upsert A-1: total=%d summary=%q, want 2/updated", n, summary)
+	}
+
+	// Backfilling a Jira id onto an id-less row succeeds via ON CONFLICT(key).
+	if err := db.UpsertIssue(&Issue{ID: "501", Key: "A-1", Project: "A", Summary: "with-id", RawJSON: "{}"}, nil); err != nil {
+		t.Fatalf("backfill id on A-1: %v", err)
+	}
+	var id string
+	if err := db.QueryRow(`SELECT id FROM issues WHERE key = 'A-1'`).Scan(&id); err != nil || id != "501" {
+		t.Fatalf("backfilled id = %q (err=%v), want 501", id, err)
+	}
+}
+
+// TestIssuesIDIndexUnconditional verifies that idx_issues_id is non-partial and
+// used by SQLite's query planner for plain WHERE id = ? / IN / JOIN predicates
+// without requiring `AND id <> ''`.
+func TestIssuesIDIndexUnconditional(t *testing.T) {
+	db := openTestDB(t)
+	if err := db.UpsertIssue(&Issue{ID: "42", Key: "ENG-42", Project: "ENG", Summary: "s", RawJSON: "{}"}, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	queries := []string{
+		`SELECT key FROM issues WHERE id = '42'`,
+		`SELECT id, updated FROM issues WHERE id IN ('42', '43')`,
+		`SELECT i.key FROM issue_key_alias a JOIN issues i ON i.id = a.id WHERE a.old_key = 'OLD-1'`,
+	}
+	for _, q := range queries {
+		plan := explainQueryPlan(t, db, q)
+		if !strings.Contains(plan, "USING INDEX idx_issues_id") && !strings.Contains(plan, "USING COVERING INDEX idx_issues_id") {
+			t.Errorf("query %q did not use idx_issues_id; plan:\n%s", q, plan)
+		}
+	}
+}
+
+// TestMigration22NormalizesEmptyIDs simulates upgrading a pre-v22 database that
+// has legacy empty-string ids and a partial idx_issues_id index.
+func TestMigration22NormalizesEmptyIDs(t *testing.T) {
+	db := openTestDB(t)
+
+	// Recreate pre-v22 state: partial index, two rows with id='', and schema_version=21.
+	mustExec(t, db, `DROP INDEX idx_issues_id`)
+	mustExec(t, db, `CREATE UNIQUE INDEX idx_issues_id ON issues(id) WHERE id <> ''`)
+	mustExec(t, db, `INSERT INTO issues (id, key, project, summary) VALUES ('', 'L-1', 'L', 'a'), ('', 'L-2', 'L', 'b'), ('99', 'L-3', 'L', 'c')`)
+	mustExec(t, db, `DELETE FROM schema_version WHERE version >= 22`)
+
+	if err := db.Migrate(); err != nil {
+		t.Fatalf("Migrate from v21: %v", err)
+	}
+
+	var emptyCount, nullCount int
+	if err := db.QueryRow(`SELECT count(*) FILTER (WHERE id = ''), count(*) FILTER (WHERE id IS NULL) FROM issues`).Scan(&emptyCount, &nullCount); err != nil {
+		t.Fatal(err)
+	}
+	if emptyCount != 0 || nullCount != 2 {
+		t.Fatalf("after migration 22: empty=%d null=%d, want 0/2", emptyCount, nullCount)
+	}
+
+	plan := explainQueryPlan(t, db, `SELECT key FROM issues WHERE id = '99'`)
+	if !strings.Contains(plan, "idx_issues_id") {
+		t.Fatalf("expected unconditional idx_issues_id after migration 22, got plan:\n%s", plan)
 	}
 }
 
@@ -200,4 +274,26 @@ func mustExec(t *testing.T, db *DB, q string, args ...any) {
 	if _, err := db.Exec(q, args...); err != nil {
 		t.Fatalf("exec %q: %v", q, err)
 	}
+}
+
+func explainQueryPlan(t *testing.T, db *DB, query string, args ...any) string {
+	t.Helper()
+	rows, err := db.Query("EXPLAIN QUERY PLAN "+query, args...)
+	if err != nil {
+		t.Fatalf("EXPLAIN QUERY PLAN %q: %v", query, err)
+	}
+	defer rows.Close()
+	var out string
+	for rows.Next() {
+		var id, parent, notused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &notused, &detail); err != nil {
+			t.Fatalf("scan query plan: %v", err)
+		}
+		out += detail + "\n"
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("query plan rows: %v", err)
+	}
+	return out
 }
