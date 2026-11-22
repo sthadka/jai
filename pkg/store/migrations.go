@@ -485,6 +485,28 @@ var migrations = []migration{
 			return err
 		},
 	},
+	{
+		version:     23,
+		description: "add case-insensitive and composite indexes for JQL hot paths",
+		up: func(tx *sql.Tx) error {
+			// pkg/jql emits LOWER(col) equality/IN predicates and default
+			// ORDER BY updated DESC. Expression + composite indexes keep these
+			// hot paths off full table scans and temp B-tree sorts at scale.
+			indexes := []string{
+				`CREATE INDEX IF NOT EXISTS idx_issues_project_lower_updated ON issues(LOWER(project), updated DESC)`,
+				`CREATE INDEX IF NOT EXISTS idx_issues_assignee_lower_updated ON issues(LOWER(assignee), updated DESC)`,
+				`CREATE INDEX IF NOT EXISTS idx_issues_reporter_lower ON issues(LOWER(reporter))`,
+				`CREATE INDEX IF NOT EXISTS idx_issues_status_lower ON issues(LOWER(status))`,
+				`CREATE INDEX IF NOT EXISTS idx_issues_status_cat_lower ON issues(LOWER(status_category))`,
+			}
+			for _, idx := range indexes {
+				if _, err := tx.Exec(idx); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	},
 }
 
 // issuesKeyRenameTrigger cascades a key change (issue moved project, or project
