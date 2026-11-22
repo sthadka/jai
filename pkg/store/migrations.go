@@ -467,6 +467,24 @@ var migrations = []migration{
 			return addColumnIfNotExists(tx, "issues", "changelog_full_synced_at", "DATETIME")
 		},
 	},
+	{
+		version:     22,
+		description: "make idx_issues_id unconditional by storing absent ids as NULL",
+		up: func(tx *sql.Tx) error {
+			// Normalize legacy empty-string ids to NULL so SQLite allows multiple
+			// id-less rows under an unconditional UNIQUE(id) index (NULLs are
+			// distinct in UNIQUE indexes) while queries filtering/joining on
+			// issues.id can use idx_issues_id without repeating `AND id <> ''`.
+			if _, err := tx.Exec(`UPDATE issues SET id = NULL WHERE id = ''`); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(`DROP INDEX IF EXISTS idx_issues_id`); err != nil {
+				return err
+			}
+			_, err := tx.Exec(`CREATE UNIQUE INDEX idx_issues_id ON issues(id)`)
+			return err
+		},
+	},
 }
 
 // issuesKeyRenameTrigger cascades a key change (issue moved project, or project
