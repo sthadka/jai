@@ -3,6 +3,7 @@ package store
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 )
 
@@ -277,4 +278,128 @@ func openTestDB(t *testing.T) *DB {
 	}
 	t.Cleanup(func() { db.Close() })
 	return db
+}
+
+func TestReadDB_EnforcesReadOnlyAndPragmas(t *testing.T) {
+	db := openTestDB(t)
+	rdb := db.ReadDB()
+	if rdb == nil {
+		t.Fatal("ReadDB returned nil")
+	}
+	if rdb == db.DB {
+		t.Fatal("ReadDB should be a distinct *sql.DB pool for file-backed DBs")
+	}
+
+	var queryOnly int
+	if err := rdb.QueryRow(`PRAGMA query_only`).Scan(&queryOnly); err != nil {
+		t.Fatalf("PRAGMA query_only: %v", err)
+	}
+	if queryOnly != 1 {
+		t.Errorf("PRAGMA query_only = %d, want 1", queryOnly)
+	}
+
+	var busyTimeout int
+	if err := rdb.QueryRow(`PRAGMA busy_timeout`).Scan(&busyTimeout); err != nil {
+		t.Fatalf("PRAGMA busy_timeout: %v", err)
+	}
+	if busyTimeout != 30000 {
+		t.Errorf("PRAGMA busy_timeout = %d, want 30000", busyTimeout)
+	}
+
+	if _, err := rdb.Exec(`INSERT INTO issues (key, project, summary) VALUES ('RO-1', 'RO', 'nope')`); err == nil {
+		t.Fatal("expected write on ReadDB to fail, but it succeeded")
+	}
+}
+
+func TestReadDB_ConcurrentReadsDuringActiveWriteTx(t *testing.T) {
+	db := openTestDB(t)
+
+	if err := db.UpsertIssue(&Issue{
+		ID: "1", Key: "ENG-1", Project: "ENG", Summary: "committed", RawJSON: "{}",
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	// Hold the single writer connection open in an active write transaction.
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	if _, err := tx.Exec(
+		`INSERT INTO issues (id, key, project, summary, raw_json) VALUES ('2', 'ENG-2', 'ENG', 'uncommitted', '{}')`,
+	); err != nil {
+		tx.Rollback()
+		t.Fatalf("tx insert: %v", err)
+	}
+
+	// Concurrent readers on ReadDB and GetIssue must succeed without blocking
+	// on the active write tx and see only the committed snapshot.
+	const workers = 8
+	var wg sync.WaitGroup
+	errs := make(chan error, workers*2)
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			var count int
+			if err := db.ReadDB().QueryRow(`SELECT count(*) FROM issues`).Scan(&count); err != nil {
+				errs <- err
+				return
+			}
+			if count != 1 {
+				t.Errorf("reader saw count=%d while write tx uncommitted, want 1", count)
+			}
+			iss, err := db.GetIssue("ENG-1")
+			if err != nil {
+				errs <- err
+				return
+			}
+			if iss == nil || iss["summary"] != "committed" {
+				t.Errorf("GetIssue during active write tx = %v, want summary=committed", iss)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatalf("concurrent read failed: %v", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+
+	// Once committed, ReadDB immediately sees the new row in WAL.
+	var count int
+	if err := db.ReadDB().QueryRow(`SELECT count(*) FROM issues`).Scan(&count); err != nil {
+		t.Fatalf("post-commit read: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("post-commit ReadDB count = %d, want 2", count)
+	}
+}
+
+func TestReadDB_CloseAndURISpecialPath(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "my dir #1 %20")
+	path := filepath.Join(dir, "jai #test.db")
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open(%q): %v", path, err)
+	}
+	if err := db.UpsertIssue(&Issue{ID: "7", Key: "P-7", Project: "P", Summary: "ok", RawJSON: "{}"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	var key string
+	if err := db.ReadDB().QueryRow(`SELECT key FROM issues WHERE id = '7'`).Scan(&key); err != nil || key != "P-7" {
+		t.Fatalf("ReadDB query on special path = (%q, %v), want P-7", key, err)
+	}
+
+	rdb := db.ReadDB()
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if err := rdb.Ping(); err == nil {
+		t.Fatal("expected ReadDB to be closed after db.Close()")
+	}
 }
