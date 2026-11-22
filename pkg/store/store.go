@@ -20,6 +20,7 @@ type Store interface {
 	Begin() (*sql.Tx, error)
 	Prepare(query string) (*sql.Stmt, error)
 	Close() error
+	ReadDB() *sql.DB
 
 	// Typed jai persistence methods.
 	AllFieldMappings() ([]*FieldMapping, error)

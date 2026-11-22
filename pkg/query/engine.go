@@ -50,7 +50,7 @@ func (e *Engine) Execute(sql string, args ...interface{}) (*Results, error) {
 		return nil, err
 	}
 
-	rows, err := e.db.Query(resolved, args...)
+	rows, err := e.db.ReadDB().Query(resolved, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query error: %w", err)
 	}

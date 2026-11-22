@@ -176,7 +176,7 @@ func (db *DB) UpsertIssuesTx(items []*IssueUpsert) error {
 // GetIssueUpdated returns the stored "updated" timestamp for an issue, or "" if not found.
 func (db *DB) GetIssueUpdated(key string) (string, error) {
 	var updated sql.NullString
-	err := db.QueryRow("SELECT updated FROM issues WHERE key = ?", key).Scan(&updated)
+	err := db.ReadDB().QueryRow("SELECT updated FROM issues WHERE key = ?", key).Scan(&updated)
 	if err == sql.ErrNoRows {
 		return "", nil
 	}
@@ -203,7 +203,7 @@ func (db *DB) GetIssueHydrationState(key string) (*IssueHydrationState, error) {
 	query := func(k string) (*IssueHydrationState, error) {
 		var st IssueHydrationState
 		var updated, synced, details, cl, clFull sql.NullString
-		err := db.QueryRow(
+		err := db.ReadDB().QueryRow(
 			`SELECT updated, synced_at, details_synced_at, changelog_synced_at, changelog_full_synced_at
 			 FROM issues WHERE key = ?`, k,
 		).Scan(&updated, &synced, &details, &cl, &clFull)
@@ -264,7 +264,7 @@ func (db *DB) getIssuesUpdatedByColumn(col string, vals []string) (map[string]st
 			args[j] = v
 		}
 		q := fmt.Sprintf("SELECT %s, updated FROM issues WHERE %s IN (%s)", col, col, strings.Join(placeholders, ", "))
-		rows, err := db.Query(q, args...)
+		rows, err := db.ReadDB().Query(q, args...)
 		if err != nil {
 			return nil, err
 		}
@@ -341,7 +341,7 @@ func (db *DB) GetIssuesRawJSON(keys []string) (map[string]string, error) {
 			args[j] = k
 		}
 		q := "SELECT key, raw_json FROM issues WHERE key IN (" + strings.Join(placeholders, ", ") + ")"
-		rows, err := db.Query(q, args...)
+		rows, err := db.ReadDB().Query(q, args...)
 		if err != nil {
 			return nil, err
 		}
@@ -449,7 +449,7 @@ func (db *DB) fieldNamesByJiraID(ids []string) (map[string]string, error) {
 		ph[i] = "?"
 		args[i] = id
 	}
-	rows, err := db.Query(`SELECT jira_id, name FROM field_map WHERE jira_id IN (`+strings.Join(ph, ",")+`)`, args...)
+	rows, err := db.ReadDB().Query(`SELECT jira_id, name FROM field_map WHERE jira_id IN (`+strings.Join(ph, ",")+`)`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -470,7 +470,7 @@ func (db *DB) fieldNamesByJiraID(ids []string) (map[string]string, error) {
 // has no alias.
 func (db *DB) resolveKey(key string) string {
 	var current string
-	err := db.QueryRow(
+	err := db.ReadDB().QueryRow(
 		`SELECT i.key FROM issue_key_alias a JOIN issues i ON i.id = a.id WHERE a.old_key = ?`,
 		key,
 	).Scan(&current)
@@ -481,7 +481,7 @@ func (db *DB) resolveKey(key string) string {
 }
 
 func (db *DB) getIssueByKey(key string) (map[string]interface{}, error) {
-	rows, err := db.Query("SELECT * FROM issues WHERE key = ?", key)
+	rows, err := db.ReadDB().Query("SELECT * FROM issues WHERE key = ?", key)
 	if err != nil {
 		return nil, err
 	}
