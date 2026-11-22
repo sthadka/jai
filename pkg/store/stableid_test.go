@@ -129,8 +129,8 @@ func TestUpsertIssueProjectRename(t *testing.T) {
 }
 
 // TestUpsertIssueIDLessRowsStayDistinct guards the unconditional unique index:
-// issues without a Jira id store NULL (never '') so multiple id-less rows stay
-// distinct, remain idempotent on key re-upsert, and accept an id once assigned.
+// issues without a Jira id store NULL (never empty strings) so multiple id-less
+// rows stay distinct, remain idempotent on key re-upsert, and accept an id once assigned.
 func TestUpsertIssueIDLessRowsStayDistinct(t *testing.T) {
 	db := openTestDB(t)
 	for _, k := range []string{"A-1", "A-2"} {
@@ -166,7 +166,7 @@ func TestUpsertIssueIDLessRowsStayDistinct(t *testing.T) {
 
 // TestIssuesIDIndexUnconditional verifies that idx_issues_id is non-partial and
 // used by SQLite's query planner for plain WHERE id = ? / IN / JOIN predicates
-// without requiring `AND id <> ''`.
+// without requiring an extra non-empty id filter.
 func TestIssuesIDIndexUnconditional(t *testing.T) {
 	db := openTestDB(t)
 	if err := db.UpsertIssue(&Issue{ID: "42", Key: "ENG-42", Project: "ENG", Summary: "s", RawJSON: "{}"}, nil); err != nil {
