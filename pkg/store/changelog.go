@@ -152,45 +152,93 @@ func (db *DB) MarkChangelogSynced(keys []string) error {
 	}
 	return nil
 }
+// MarkChangelogFullSynced stamps both changelog_full_synced_at and
+// changelog_synced_at for the given issue keys (full history is a strict
+// superset of tracked-field history).
+func (db *DB) MarkChangelogFullSynced(keys []string) error {
+	if len(keys) == 0 {
+		return nil
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
 
-// ResetChangelogSyncTimestamps clears changelog_synced_at on all issues,
-// allowing a full re-sync of changelog data.
+	const chunkSize = 500
+	for i := 0; i < len(keys); i += chunkSize {
+		end := i + chunkSize
+		if end > len(keys) {
+			end = len(keys)
+		}
+		chunk := keys[i:end]
+
+		placeholders := make([]string, len(chunk))
+		args := make([]any, len(chunk)+2)
+		args[0] = now
+		args[1] = now
+		for j, k := range chunk {
+			placeholders[j] = "?"
+			args[j+2] = k
+		}
+
+		_, err := db.Exec(
+			fmt.Sprintf(`UPDATE issues SET changelog_full_synced_at = ?, changelog_synced_at = ? WHERE key IN (%s)`,
+				strings.Join(placeholders, ", ")),
+			args...,
+		)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ResetChangelogSyncTimestamps clears changelog_synced_at and
+// changelog_full_synced_at on all issues, allowing a full re-sync of changelog data.
 func (db *DB) ResetChangelogSyncTimestamps() (int64, error) {
-	result, err := db.Exec(`UPDATE issues SET changelog_synced_at = NULL WHERE changelog_synced_at IS NOT NULL`)
+	result, err := db.Exec(`UPDATE issues SET changelog_synced_at = NULL, changelog_full_synced_at = NULL WHERE changelog_synced_at IS NOT NULL OR changelog_full_synced_at IS NOT NULL`)
 	if err != nil {
 		return 0, err
 	}
 	return result.RowsAffected()
 }
 
-// GetIssueIDToKeyMapForKeys returns id→key mappings for the given keys.
-// Use for small batches (≤100 keys). For large sets, use GetIssueIDToKeyMap().
+// GetIssueIDToKeyMapForKeys returns id→key mappings for the given keys, chunked
+// to stay safely under SQLite's bind-variable limit.
 func (db *DB) GetIssueIDToKeyMapForKeys(keys []string) (map[string]string, error) {
 	if len(keys) == 0 {
 		return nil, nil
 	}
-	placeholders := make([]string, len(keys))
-	args := make([]any, len(keys))
-	for i, k := range keys {
-		placeholders[i] = "?"
-		args[i] = k
-	}
-	query := fmt.Sprintf(
-		`SELECT id, key FROM issues WHERE key IN (%s) AND id IS NOT NULL AND id != ''`,
-		strings.Join(placeholders, ", "),
-	)
-	sqlRows, err := db.Query(query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer sqlRows.Close()
-
-	m := make(map[string]string)
-	for sqlRows.Next() {
-		var id, key string
-		if sqlRows.Scan(&id, &key) == nil {
-			m[id] = key
+	m := make(map[string]string, len(keys))
+	const chunkSize = 500
+	for i := 0; i < len(keys); i += chunkSize {
+		end := i + chunkSize
+		if end > len(keys) {
+			end = len(keys)
 		}
+		chunk := keys[i:end]
+		placeholders := make([]string, len(chunk))
+		args := make([]any, len(chunk))
+		for j, k := range chunk {
+			placeholders[j] = "?"
+			args[j] = k
+		}
+		query := fmt.Sprintf(
+			`SELECT id, key FROM issues WHERE key IN (%s) AND id IS NOT NULL AND id != ''`,
+			strings.Join(placeholders, ", "),
+		)
+		sqlRows, err := db.Query(query, args...)
+		if err != nil {
+			return nil, err
+		}
+		for sqlRows.Next() {
+			var id, key string
+			if sqlRows.Scan(&id, &key) == nil {
+				m[id] = key
+			}
+		}
+		if err := sqlRows.Err(); err != nil {
+			sqlRows.Close()
+			return nil, err
+		}
+		sqlRows.Close()
 	}
 	return m, nil
 }

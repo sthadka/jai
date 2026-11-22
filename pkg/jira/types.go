@@ -189,6 +189,9 @@ type ChangelogItem struct {
 // BulkChangelogRequest is the request body for POST /rest/api/3/changelog/bulkfetch.
 type BulkChangelogRequest struct {
 	IssueIdsOrKeys []string `json:"issueIdsOrKeys"`
+	FieldIDs       []string `json:"fieldIds,omitempty"`
+	MaxResults     int      `json:"maxResults,omitempty"`
+	NextPageToken  string   `json:"nextPageToken,omitempty"`
 }
 
 // BulkChangelogResponse is the response from POST /rest/api/3/changelog/bulkfetch.
@@ -246,10 +249,16 @@ type FieldSchema struct {
 	Custom string `json:"custom"`
 }
 
-// ProjectInfo is a Jira project returned by /rest/api/3/project/{key}.
+// ProjectInfo is a Jira project returned by /rest/api/3/project/{key},
+// /rest/api/3/project/recent, and /rest/api/3/project/search.
 type ProjectInfo struct {
-	Key  string `json:"key"`
-	Name string `json:"name"`
+	ID             string            `json:"id,omitempty"`
+	Key            string            `json:"key"`
+	Name           string            `json:"name"`
+	ProjectTypeKey string            `json:"projectTypeKey,omitempty"`
+	Style          string            `json:"style,omitempty"`
+	AvatarURLs     map[string]string `json:"avatarUrls,omitempty"`
+	Archived       bool              `json:"archived,omitempty"`
 }
 
 // MySelf is the /rest/api/3/myself response.
@@ -567,7 +576,11 @@ func adfApplyMarks(text string, marks []adfMark) string {
 
 // BoardResponse is the response from GET /rest/agile/1.0/board.
 type BoardResponse struct {
-	Values []Board `json:"values"`
+	Values     []Board `json:"values"`
+	StartAt    int     `json:"startAt,omitempty"`
+	MaxResults int     `json:"maxResults,omitempty"`
+	Total      int     `json:"total,omitempty"`
+	IsLast     bool    `json:"isLast,omitempty"`
 }
 
 // Board represents a Jira Agile board.

@@ -30,9 +30,16 @@ func (mockJira) MySelf(ctx context.Context) (*jira.MySelf, error) {
 	return &jira.MySelf{DisplayName: "Embedder", TimeZone: "UTC"}, nil
 }
 func (mockJira) Fields(ctx context.Context) ([]*jira.Field, error)           { return nil, nil }
-func (mockJira) SearchCount(ctx context.Context, jqlStr string) (int, error) { return 0, nil }
+func (mockJira) SearchCount(ctx context.Context, jqlStr string) (int, error)            { return 0, nil }
+func (mockJira) SearchApproximateCount(ctx context.Context, jqlStr string) (int, error) { return 0, nil }
 func (mockJira) SearchAll(ctx context.Context, jqlStr string, fields []string) func(yield func([]*jira.Issue, error) bool) {
 	return func(yield func([]*jira.Issue, error) bool) {} // yield no issues
+}
+func (mockJira) SearchAllWithOptions(ctx context.Context, jqlStr string, fields []string, opts jira.SearchOptions) func(yield func([]*jira.Issue, error) bool) {
+	return func(yield func([]*jira.Issue, error) bool) {} // yield no issues
+}
+func (mockJira) BulkFetchIssues(ctx context.Context, idsOrKeys []string, opts jira.BulkFetchIssuesOptions) (*jira.BulkFetchIssuesResult, error) {
+	return &jira.BulkFetchIssuesResult{}, nil
 }
 
 func TestEmbedEngineEndToEnd(t *testing.T) {

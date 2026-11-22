@@ -130,6 +130,23 @@ type SyncConfig struct {
 	// promoted automatically as well. Promotion is idempotent and backfills the
 	// column from existing JSON values.
 	PromoteFields []string `yaml:"promote_fields"`
+
+	// FieldProjection selects which Jira fields are requested during issue sync:
+	// "" or "full" (default) fetches all discovered custom fields and attachments;
+	// "slim" requests explicit core system fields + promoted/configured custom
+	// fields + comment (excluding worklog, attachment, and unconfigured custom
+	// fields, which can be hydrated lazily on demand).
+	FieldProjection string `yaml:"field_projection"`
+
+	// ChangelogFields optionally restricts bulk changelog sync to at most 10
+	// Jira field IDs (e.g. ["status", "assignee", "priority"]). Empty (default)
+	// fetches complete unfiltered changelog history.
+	ChangelogFields []string `yaml:"changelog_fields"`
+
+	// VerifyAuthTTL optionally caches successful VerifyAuth checks for the
+	// specified Go duration (e.g. "15m") in BackgroundWorker / VerifyAuthIfStale.
+	// Empty uses BackgroundWorker's default (15m).
+	VerifyAuthTTL string `yaml:"verify_auth_ttl"`
 }
 
 // DBConfig holds database settings.

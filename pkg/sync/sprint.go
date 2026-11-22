@@ -3,6 +3,7 @@ package sync
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/sthadka/jai/v6/pkg/config"
 )
@@ -48,13 +49,17 @@ func (e *Engine) syncProjectSprints(ctx context.Context, projectKey string) erro
 			continue
 		}
 
+		// Only Scrum boards support Agile sprints (Kanban boards return HTTP 400).
+		if board.Type != "" && !strings.EqualFold(board.Type, "scrum") {
+			continue
+		}
+
 		// Fetch sprints for this board.
 		sprints, err := e.client.GetSprints(ctx, board.ID)
 		if err != nil {
 			e.warnf("warning: fetching sprints for board %d: %v\n", board.ID, err)
 			continue
 		}
-
 		for _, sprint := range sprints {
 			// Upsert sprint metadata.
 			if err := e.db.UpsertSprint(sprint.ID, board.ID, sprint.Name, sprint.State, sprint.StartDate, sprint.EndDate, sprint.CompleteDate, sprint.Goal); err != nil {

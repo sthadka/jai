@@ -1,12 +1,13 @@
 package jira
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"math"
-	"math/rand"
+	"math/rand/v2"
 	"net/http"
 	"net/url"
 	"strings"
@@ -78,12 +79,13 @@ type Client struct {
 	baseURL    string
 	httpClient *http.Client
 	limiter    RateLimiter
+	rlObserver RateLimitObserver
 }
 
 // New creates a Jira client authenticated with HTTP Basic auth (email + API
 // token), the default for Jira Cloud. For a different auth mechanism (e.g.
 // OAuth 2.0), use NewWithClient with a custom *http.Client.
-func New(baseURL, email, token string, ratePerSec float64) *Client {
+func New(baseURL, email, token string, ratePerSec float64, opts ...ClientOption) *Client {
 	httpClient := &http.Client{
 		Timeout: 30 * time.Second,
 		Transport: &BasicAuthTransport{
@@ -91,14 +93,15 @@ func New(baseURL, email, token string, ratePerSec float64) *Client {
 			APIToken: token,
 		},
 	}
-	return NewWithClient(baseURL, httpClient, ratePerSec)
+	return NewWithClient(baseURL, httpClient, ratePerSec, opts...)
 }
 
 // NewWithClient creates a Jira client using a caller-supplied *http.Client,
 // which is the seam for alternative authentication: set the client's Transport
 // to any http.RoundTripper (BasicAuthTransport, an OAuth token source, etc.).
 // A nil httpClient defaults to an unauthenticated 30s-timeout client.
-func NewWithClient(baseURL string, httpClient *http.Client, ratePerSec float64) *Client {
+// Optional ClientOptions configure shared rate limiters and header observers.
+func NewWithClient(baseURL string, httpClient *http.Client, ratePerSec float64, opts ...ClientOption) *Client {
 	if ratePerSec <= 0 {
 		ratePerSec = 10
 	}
@@ -112,20 +115,30 @@ func NewWithClient(baseURL string, httpClient *http.Client, ratePerSec float64) 
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 30 * time.Second}
 	}
-	return &Client{
+	c := &Client{
 		baseURL:    strings.TrimRight(baseURL, "/"),
 		httpClient: httpClient,
 		limiter:    rate.NewLimiter(rate.Limit(ratePerSec), burst),
 	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(c)
+		}
+	}
+	return c
 }
 
 // doRequest performs an authenticated request with rate limiting and retry.
-func (c *Client) doRequest(ctx context.Context, method, path string, body io.Reader) (*http.Response, error) {
-	url := c.baseURL + path
+// body is passed as a reusable byte slice so retries (429, 5xx, transport errors)
+// always transmit the full payload instead of an already-drained io.Reader.
+func (c *Client) doRequest(ctx context.Context, method, path string, body []byte) (*http.Response, error) {
+	reqURL := c.baseURL + path
+	const maxRetries = 3
 
 	var lastErr error
-	for attempt := 0; attempt <= 3; attempt++ {
-		if attempt > 0 {
+	skipBackoff := false
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if attempt > 0 && !skipBackoff {
 			// Exponential backoff with jitter: 1s, 2s, 4s ± 20%.
 			base := time.Duration(math.Pow(2, float64(attempt-1))) * time.Second
 			jitter := time.Duration(rand.Float64()*0.4*float64(base) - 0.2*float64(base))
@@ -135,13 +148,18 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body io.Rea
 			case <-time.After(base + jitter):
 			}
 		}
+		skipBackoff = false
 
 		// Wait for rate limiter.
 		if err := c.limiter.Wait(ctx); err != nil {
 			return nil, err
 		}
 
-		req, err := http.NewRequestWithContext(ctx, method, url, body)
+		var bodyReader io.Reader
+		if len(body) > 0 {
+			bodyReader = bytes.NewReader(body)
+		}
+		req, err := http.NewRequestWithContext(ctx, method, reqURL, bodyReader)
 		if err != nil {
 			return nil, err
 		}
@@ -154,22 +172,31 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body io.Rea
 			continue
 		}
 
-		// Retry on 429 (respect Retry-After) and 5xx.
+		info := c.observeRateLimit(resp, method, path)
+
+		// Retry on 429 (respect Retry-After without stacking exponential backoff) and 5xx.
 		if resp.StatusCode == http.StatusTooManyRequests {
 			resp.Body.Close()
-			retryAfter := resp.Header.Get("Retry-After")
+			lastErr = fmt.Errorf("rate limited (429)")
+			if attempt == maxRetries {
+				break
+			}
 			wait := 2 * time.Second
-			if retryAfter != "" {
-				if secs, err := parseRetryAfter(retryAfter); err == nil {
-					wait = secs
+			if ra := strings.TrimSpace(resp.Header.Get("Retry-After")); ra != "" {
+				if d, perr := parseRetryAfter(ra); perr == nil {
+					wait = d
+				}
+			} else if info.ResetAfter > 0 {
+				wait = info.ResetAfter
+			}
+			if wait > 0 {
+				select {
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				case <-time.After(wait):
 				}
 			}
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(wait):
-			}
-			lastErr = fmt.Errorf("rate limited (429)")
+			skipBackoff = true
 			continue
 		}
 
@@ -185,13 +212,19 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body io.Rea
 	return nil, fmt.Errorf("max retries exceeded: %w", lastErr)
 }
 
-func parseRetryAfter(s string) (time.Duration, error) {
-	var secs float64
-	_, err := fmt.Sscanf(s, "%f", &secs)
-	if err != nil {
-		return 0, err
+func (c *Client) observeRateLimit(resp *http.Response, method, path string) RateLimitInfo {
+	if c.rlObserver == nil && resp.StatusCode != http.StatusTooManyRequests {
+		return RateLimitInfo{Remaining: -1, Quota: -1}
 	}
-	return time.Duration(secs * float64(time.Second)), nil
+	info := ParseRateLimitHeaders(resp.Header)
+	info.StatusCode = resp.StatusCode
+	info.Method = method
+	info.Path = path
+	info.Timestamp = time.Now().UTC()
+	if c.rlObserver != nil {
+		c.rlObserver(info)
+	}
+	return info
 }
 
 // get performs a GET request and decodes the JSON response.
@@ -219,7 +252,7 @@ func (c *Client) postDecode(ctx context.Context, path string, in, out interface{
 	if err != nil {
 		return err
 	}
-	resp, err := c.doRequest(ctx, http.MethodPost, path, strings.NewReader(string(b)))
+	resp, err := c.doRequest(ctx, http.MethodPost, path, b)
 	if err != nil {
 		return err
 	}
@@ -297,41 +330,94 @@ func (c *Client) GetIssueChangelog(ctx context.Context, key string) (*ChangelogR
 	return &resp, nil
 }
 
-// BulkFetchChangelogs fetches changelogs for the given issues and flattens the
-// nested API response into per-history entries. The bulk endpoint groups change
-// histories under each issue and paginates with an opaque nextPageToken; this
-// handles pagination internally, accumulating all entries across pages.
+const (
+	// BulkChangelogMaxIssues is Jira Cloud's maximum issueIdsOrKeys per
+	// POST /rest/api/3/changelog/bulkfetch request.
+	BulkChangelogMaxIssues = 1000
+
+	// BulkChangelogMaxResults is Jira Cloud's maximum histories per page for
+	// POST /rest/api/3/changelog/bulkfetch (API default when omitted is 1,000).
+	BulkChangelogMaxResults = 10000
+
+	// BulkChangelogMaxFieldIDs is Jira Cloud's maximum fieldIds filter count.
+	BulkChangelogMaxFieldIDs = 10
+)
+
+// BulkChangelogOptions configures POST /rest/api/3/changelog/bulkfetch.
+type BulkChangelogOptions struct {
+	// FieldIDs optionally restricts returned changelog items to at most 10 Jira
+	// field IDs (e.g. "status", "assignee", "priority", "customfield_10020").
+	// Empty returns complete unfiltered history.
+	FieldIDs []string
+
+	// MaxResults sets the page size (0 defaults to BulkChangelogMaxResults = 10000;
+	// values above 10000 are clamped to 10000).
+	MaxResults int
+}
+
+// BulkFetchChangelogs fetches complete unfiltered changelogs for the given
+// issues via POST /rest/api/3/changelog/bulkfetch using maxResults=10000 and
+// batches up to 1,000 issues.
 func (c *Client) BulkFetchChangelogs(ctx context.Context, keys []string) ([]BulkChangelogEntry, error) {
+	return c.BulkFetchChangelogsWithOptions(ctx, keys, BulkChangelogOptions{})
+}
+
+// BulkFetchChangelogsWithOptions fetches changelogs for the given issue IDs or
+// keys via POST /rest/api/3/changelog/bulkfetch, supporting optional fieldIds
+// filtering (<=10 fields), maxResults up to 10,000, and automatic chunking for
+// slices exceeding 1,000 issues.
+func (c *Client) BulkFetchChangelogsWithOptions(ctx context.Context, keys []string, opts BulkChangelogOptions) ([]BulkChangelogEntry, error) {
+	if len(keys) == 0 {
+		return nil, nil
+	}
+	if len(opts.FieldIDs) > BulkChangelogMaxFieldIDs {
+		return nil, fmt.Errorf("bulkfetch changelogs: at most %d fieldIds allowed, got %d", BulkChangelogMaxFieldIDs, len(opts.FieldIDs))
+	}
+
+	maxResults := opts.MaxResults
+	if maxResults <= 0 || maxResults > BulkChangelogMaxResults {
+		maxResults = BulkChangelogMaxResults
+	}
+
 	var all []BulkChangelogEntry
-	nextPageToken := ""
-
-	for {
-		req := map[string]any{"issueIdsOrKeys": keys}
-		if nextPageToken != "" {
-			req["nextPageToken"] = nextPageToken
+	for i := 0; i < len(keys); i += BulkChangelogMaxIssues {
+		end := i + BulkChangelogMaxIssues
+		if end > len(keys) {
+			end = len(keys)
 		}
+		batch := keys[i:end]
+		nextPageToken := ""
 
-		var resp BulkChangelogResponse
-		if err := c.postDecode(ctx, "/rest/api/3/changelog/bulkfetch", req, &resp); err != nil {
-			return nil, err
-		}
-
-		for _, icl := range resp.IssueChangeLogs {
-			for _, h := range icl.ChangeHistories {
-				all = append(all, BulkChangelogEntry{
-					ID:      h.ID,
-					IssueID: icl.IssueID,
-					Author:  h.Author,
-					Created: epochMillisToRFC3339(h.Created),
-					Items:   h.Items,
-				})
+		for {
+			req := BulkChangelogRequest{
+				IssueIdsOrKeys: batch,
+				FieldIDs:       opts.FieldIDs,
+				MaxResults:     maxResults,
+				NextPageToken:  nextPageToken,
 			}
-		}
 
-		if resp.NextPageToken == "" {
-			break
+			var resp BulkChangelogResponse
+			if err := c.postDecode(ctx, "/rest/api/3/changelog/bulkfetch", req, &resp); err != nil {
+				return nil, err
+			}
+
+			for _, icl := range resp.IssueChangeLogs {
+				for _, h := range icl.ChangeHistories {
+					all = append(all, BulkChangelogEntry{
+						ID:      h.ID,
+						IssueID: icl.IssueID,
+						Author:  h.Author,
+						Created: epochMillisToRFC3339(h.Created),
+						Items:   h.Items,
+					})
+				}
+			}
+
+			if resp.NextPageToken == "" {
+				break
+			}
+			nextPageToken = resp.NextPageToken
 		}
-		nextPageToken = resp.NextPageToken
 	}
 
 	return all, nil
@@ -355,21 +441,98 @@ func (c *Client) Fields(ctx context.Context) ([]*Field, error) {
 	return fields, nil
 }
 
+const (
+	// SearchDefaultMaxResults is the page size for broad/full-field JQL queries.
+	SearchDefaultMaxResults = 100
+
+	// SearchNarrowMaxResults is Jira Cloud's maximum page size for
+	// POST /rest/api/3/search/jql when requesting narrow scalar-only fields
+	// (e.g. ["id"], ["key"], ["updated"], or ["key", rankField]).
+	SearchNarrowMaxResults = 5000
+
+	// SearchMaxReconcileIssues is Jira Cloud's maximum reconcileIssues count.
+	SearchMaxReconcileIssues = 50
+)
+
+// SearchOptions configures POST /rest/api/3/search/jql.
+type SearchOptions struct {
+	// MaxResults sets the requested page size. Zero auto-sizes to 5,000 for
+	// narrow scalar-only field projections and 100 otherwise. Values above 5,000
+	// are clamped to 5,000.
+	MaxResults int
+
+	// ReconcileIssues specifies up to 50 numeric issue IDs that Jira Cloud should
+	// strongly reconcile against the search index before returning results.
+	ReconcileIssues []int64
+
+	// Expand is an optional Jira expand expression.
+	Expand string
+}
+
+// isNarrowSearchFields reports whether fields is a small explicit scalar-only
+// projection safe to request with maxResults=5000 on POST /rest/api/3/search/jql.
+func isNarrowSearchFields(fields []string) bool {
+	if len(fields) == 0 || len(fields) > 5 {
+		return false
+	}
+	for _, f := range fields {
+		f = strings.TrimSpace(f)
+		if f == "" || strings.HasPrefix(f, "-") {
+			return false
+		}
+		switch strings.ToLower(f) {
+		case "*all", "*navigable", "comment", "attachment", "worklog", "description", "renderedfields", "changelog":
+			return false
+		}
+	}
+	return true
+}
+
 // SearchAll returns a paginated iterator over issues matching the JQL query.
 // It yields each page of issues. The caller iterates with a for range loop.
-// Uses POST /rest/api/3/search/jql with cursor-based pagination.
+// Uses POST /rest/api/3/search/jql with cursor-based pagination and automatic
+// page-size selection (5,000 for narrow scalar-only fields, 100 otherwise).
 func (c *Client) SearchAll(ctx context.Context, jql string, fields []string) func(yield func([]*Issue, error) bool) {
+	return c.SearchAllWithOptions(ctx, jql, fields, SearchOptions{})
+}
+
+// SearchAllWithOptions returns a paginated iterator over issues matching jql
+// via POST /rest/api/3/search/jql with explicit control over maxResults,
+// reconcileIssues, and expand.
+func (c *Client) SearchAllWithOptions(ctx context.Context, jql string, fields []string, opts SearchOptions) func(yield func([]*Issue, error) bool) {
 	return func(yield func([]*Issue, error) bool) {
+		if len(opts.ReconcileIssues) > SearchMaxReconcileIssues {
+			yield(nil, fmt.Errorf("search/jql: at most %d reconcileIssues allowed, got %d", SearchMaxReconcileIssues, len(opts.ReconcileIssues)))
+			return
+		}
+
+		maxResults := opts.MaxResults
+		if maxResults <= 0 {
+			if isNarrowSearchFields(fields) {
+				maxResults = SearchNarrowMaxResults
+			} else {
+				maxResults = SearchDefaultMaxResults
+			}
+		} else if maxResults > SearchNarrowMaxResults {
+			maxResults = SearchNarrowMaxResults
+		}
+
 		var nextPageToken string
 
 		for {
 			reqBody := map[string]interface{}{
 				"jql":        jql,
-				"maxResults": 100,
+				"maxResults": maxResults,
 				"fields":     fields,
 			}
 			if nextPageToken != "" {
 				reqBody["nextPageToken"] = nextPageToken
+			}
+			if len(opts.ReconcileIssues) > 0 {
+				reqBody["reconcileIssues"] = opts.ReconcileIssues
+			}
+			if opts.Expand != "" {
+				reqBody["expand"] = opts.Expand
 			}
 
 			var resp SearchResponse
@@ -399,26 +562,49 @@ func (c *Client) SearchAll(ctx context.Context, jql string, fields []string) fun
 	}
 }
 
-// SearchCount returns the total number of issues matching a JQL query.
-func (c *Client) SearchCount(ctx context.Context, jql string) (int, error) {
-	total := 0
-	for page, err := range c.SearchAll(ctx, jql, []string{"key"}) {
-		if err != nil {
-			return 0, err
-		}
-		total += len(page)
+// SearchApproximateCount returns the approximate number of issues matching jql
+// in a single API call via POST /rest/api/3/search/approximate-count.
+func (c *Client) SearchApproximateCount(ctx context.Context, jql string) (int, error) {
+	var resp struct {
+		Count int `json:"count"`
 	}
-	return total, nil
+	if err := c.postDecode(ctx, "/rest/api/3/search/approximate-count", map[string]string{"jql": jql}, &resp); err != nil {
+		return 0, err
+	}
+	return resp.Count, nil
 }
 
-// GetBoards fetches all boards for a project from the Agile API.
+// SearchCount returns the number of issues matching a JQL query using
+// POST /rest/api/3/search/approximate-count (a single call instead of paging
+// every issue key).
+func (c *Client) SearchCount(ctx context.Context, jql string) (int, error) {
+	return c.SearchApproximateCount(ctx, jql)
+}
+
+// GetBoards fetches all boards (Scrum, Kanban, Simple) for a project from the
+// Agile API, paginating across all pages.
 func (c *Client) GetBoards(ctx context.Context, projectKey string) ([]Board, error) {
-	path := fmt.Sprintf("/rest/agile/1.0/board?projectKeyOrId=%s&type=scrum", projectKey)
-	var resp BoardResponse
-	if err := c.get(ctx, path, &resp); err != nil {
-		return nil, err
+	var all []Board
+	startAt := 0
+	for {
+		resp, err := c.SearchBoards(ctx, BoardSearchOptions{
+			ProjectKeyOrID: projectKey,
+			StartAt:        startAt,
+			MaxResults:     50,
+		})
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, resp.Values...)
+		if resp.IsLast || len(resp.Values) == 0 || (resp.Total > 0 && startAt+len(resp.Values) >= resp.Total) {
+			break
+		}
+		if len(resp.Values) < 50 && resp.Total == 0 {
+			break
+		}
+		startAt += len(resp.Values)
 	}
-	return resp.Values, nil
+	return all, nil
 }
 
 // GetBoardFilterJQL returns the JQL of the saved filter backing a board, i.e.

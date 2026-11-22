@@ -34,15 +34,16 @@ type Progress struct {
 
 // Engine orchestrates Jira sync operations.
 type Engine struct {
-	db       db.Store
-	client   jira.JiraClient
-	cfg      *config.Config
-	clk      clock.Clock
-	jiraTZMu sync.RWMutex
-	jiraTZ   *time.Location
-	mw       *metricWriter
-	warnf    Warnf
-	onChange ChangeHook
+	db         db.Store
+	client     jira.JiraClient
+	cfg        *config.Config
+	clk        clock.Clock
+	jiraTZMu   sync.RWMutex
+	jiraTZ     *time.Location
+	verifiedAt time.Time
+	mw         *metricWriter
+	warnf      Warnf
+	onChange   ChangeHook
 }
 
 // New creates a new sync Engine with the default system clock.
@@ -120,8 +121,47 @@ func (e *Engine) VerifyAuth(ctx context.Context) error {
 
 	e.jiraTZMu.Lock()
 	e.jiraTZ = loc
+	e.verifiedAt = e.now()
 	e.jiraTZMu.Unlock()
 	return nil
+}
+
+// SetTimezone initializes the Jira user timezone directly without calling
+// /rest/api/3/myself (e.g. when the caller already verified credentials and
+// knows the authenticated user's timezone). A nil location defaults to UTC.
+func (e *Engine) SetTimezone(loc *time.Location) {
+	if loc == nil {
+		loc = time.UTC
+	}
+	e.jiraTZMu.Lock()
+	e.jiraTZ = loc
+	e.verifiedAt = e.now()
+	e.jiraTZMu.Unlock()
+}
+
+// InvalidateAuth clears the cached VerifyAuth timestamp so the next
+// VerifyAuthIfStale call re-authenticates against /rest/api/3/myself.
+func (e *Engine) InvalidateAuth() {
+	e.jiraTZMu.Lock()
+	e.verifiedAt = time.Time{}
+	e.jiraTZMu.Unlock()
+}
+
+// VerifyAuthIfStale runs VerifyAuth only if the engine has not been verified
+// within ttl (or has never been verified). A zero or negative ttl always
+// verifies. Use this between frequent delta/background ticks to avoid redundant
+// /rest/api/3/myself round-trips while keeping fresh VerifyAuth for full syncs
+// and deletion scans.
+func (e *Engine) VerifyAuthIfStale(ctx context.Context, ttl time.Duration) error {
+	if ttl > 0 {
+		e.jiraTZMu.RLock()
+		fresh := e.jiraTZ != nil && !e.verifiedAt.IsZero() && e.now().Sub(e.verifiedAt) < ttl
+		e.jiraTZMu.RUnlock()
+		if fresh {
+			return nil
+		}
+	}
+	return e.VerifyAuth(ctx)
 }
 
 func (e *Engine) jiraTimezone() *time.Location {
@@ -130,8 +170,10 @@ func (e *Engine) jiraTimezone() *time.Location {
 	return e.jiraTZ
 }
 
-// SyncProjects fetches the display name for every distinct project key in the issues
-// table and stores it in the projects table. Non-fatal: failures are logged to stderr.
+// SyncProjects fetches display names for every distinct project key in the
+// issues table and stores them in the projects table. Batches up to 50 keys
+// per GET /rest/api/3/project/search call (falling back to GetProject if the
+// search endpoint fails). Non-fatal: failures are logged via warnf.
 func (e *Engine) SyncProjects(ctx context.Context) {
 	rows, err := e.db.Query(`SELECT DISTINCT project FROM issues WHERE project != ''`)
 	if err != nil {
@@ -145,15 +187,40 @@ func (e *Engine) SyncProjects(ctx context.Context) {
 		}
 	}
 	rows.Close()
+	if len(keys) == 0 {
+		return
+	}
 
-	for _, k := range keys {
-		p, err := e.client.GetProject(ctx, k)
+	const batchSize = 50
+	for i := 0; i < len(keys); i += batchSize {
+		end := i + batchSize
+		if end > len(keys) {
+			end = len(keys)
+		}
+		batch := keys[i:end]
+
+		resp, err := e.client.SearchProjects(ctx, jira.ProjectSearchOptions{
+			Keys:       batch,
+			MaxResults: batchSize,
+		})
 		if err != nil {
-			e.warnf("warning: fetching project %s: %v\n", k, err)
+			// Fallback to per-project GET if /project/search is unavailable.
+			for _, k := range batch {
+				p, perr := e.client.GetProject(ctx, k)
+				if perr != nil {
+					e.warnf("warning: fetching project %s: %v\n", k, perr)
+					continue
+				}
+				if uerr := e.db.UpsertProject(p.Key, p.Name); uerr != nil {
+					e.warnf("warning: storing project %s: %v\n", k, uerr)
+				}
+			}
 			continue
 		}
-		if err := e.db.UpsertProject(p.Key, p.Name); err != nil {
-			e.warnf("warning: storing project %s: %v\n", k, err)
+		for _, p := range resp.Values {
+			if uerr := e.db.UpsertProject(p.Key, p.Name); uerr != nil {
+				e.warnf("warning: storing project %s: %v\n", p.Key, uerr)
+			}
 		}
 	}
 }
@@ -439,20 +506,39 @@ func (e *Engine) syncSource(ctx context.Context, src config.SyncSource, full, re
 			hwm = meta.LastSyncTime.String
 		}
 		if hwm != "" {
-			// Re-scan a lookback window below the high-water mark. Jira's
-			// "updated >=" search is eventually consistent: an issue updated at
-			// T can be absent from results until after the mark has advanced
-			// past T, orphaning it. Overlapping the window catches it; unchanged
-			// issues are skipped below, so the re-scan is cheap.
-			floor := applyLookback(hwm, e.cfg.Sync.LookbackWindow)
-			jqlTime := cursorToJQL(floor, jiraTZ)
-			// Newest-first: an interrupted incremental sync refreshes the most
-			// recently changed issues before it runs out of time, rather than
-			// grinding through the oldest backlog first.
-			jql = fmt.Sprintf(`(%s) AND updated >= "%s" ORDER BY updated DESC`, base, jqlTime)
-		} else {
-			jql = base + ` ORDER BY updated DESC`
+			// Incremental sync with an existing high-water mark: run the two-stage
+			// cheap delta (Stage 1: fields=["updated"] maxResults=5000 → batch
+			// SQLite diff → Stage 2: BulkFetchIssues for changed IDs only).
+			lookback := parseLookbackDuration(e.cfg.Sync.LookbackWindow)
+			fields := e.expandFields(fieldMap)
+			res, derr := e.DeltaSync(ctx, DeltaOptions{
+				ScopeName: src.Name,
+				JQL:       base,
+				Lookback:  lookback,
+				Since:     hwm,
+				Fields:    fields,
+			})
+			if res != nil && res.JQL != "" {
+				ch <- Progress{Project: src.Name, JQL: res.JQL}
+			}
+			if derr != nil {
+				probed := 0
+				if res != nil {
+					probed = res.Probed
+				}
+				ch <- Progress{Project: src.Name, Total: probed, Error: derr, Done: true}
+				return
+			}
+			ch <- Progress{
+				Project: src.Name,
+				New:     res.New,
+				Updated: res.Updated,
+				Total:   res.Probed,
+				Done:    true,
+			}
+			return
 		}
+		jql = base + ` ORDER BY updated DESC`
 	}
 
 	fields := e.expandFields(fieldMap)
@@ -485,6 +571,17 @@ func (e *Engine) syncSource(ctx context.Context, src config.SyncSource, full, re
 			return
 		}
 
+		var storedByKey map[string]string
+		if !full {
+			pageKeys := make([]string, 0, len(page))
+			for _, apiIssue := range page {
+				if apiIssue.Key != "" {
+					pageKeys = append(pageKeys, apiIssue.Key)
+				}
+			}
+			storedByKey, _ = e.db.GetIssuesUpdatedByKey(pageKeys)
+		}
+
 		for _, apiIssue := range page {
 			total++
 			rawBytes, err := json.Marshal(apiIssue)
@@ -502,30 +599,30 @@ func (e *Engine) syncSource(ctx context.Context, src config.SyncSource, full, re
 				lastUpdated = issue.Updated
 			}
 
-			existingUpdated, _ := e.db.GetIssueUpdated(apiIssue.Key)
-			if existingUpdated == "" {
-				newCount++
-			} else if existingUpdated == issue.Updated {
-				// Incremental sync: unchanged since last sync — skip the upsert.
-				// A full sync must NOT skip here: Jira does not bump "updated"
-				// for some changes (rank/LexoRank rebalances most notably), so
-				// skipping unchanged-"updated" issues would leave that drift
-				// uncorrected forever — and the incremental reconcile pass bails
-				// above its cap on a whole-project rebalance, recommending
-				// exactly this full sync. Re-upserting every issue is what makes
-				// "jai sync --full" actually reconcile all fields.
-				if !full {
+			if !full {
+				existingUpdated := storedByKey[apiIssue.Key]
+				if existingUpdated == "" {
+					newCount++
+				} else if existingUpdated == issue.Updated {
 					continue
+				} else {
+					updatedCount++
 				}
 			} else {
-				updatedCount++
+				// A full sync must NOT skip unchanged-"updated" issues: Jira does not
+				// bump "updated" for silent changes like LexoRank rebalances.
+				existingUpdated, _ := e.db.GetIssueUpdated(apiIssue.Key)
+				if existingUpdated == "" {
+					newCount++
+				} else if existingUpdated != issue.Updated {
+					updatedCount++
+				}
 			}
 
 			if err := e.db.UpsertIssue(issue, extra); err != nil {
 				continue
 			}
 			touchedKeys = append(touchedKeys, apiIssue.Key)
-
 			comments, err := ExtractComments(apiIssue.Key, rawBytes)
 			if err == nil {
 				for _, c := range comments {
@@ -623,12 +720,41 @@ type ChangelogProgress struct {
 	Done    bool
 }
 
-// SyncChangelogs fetches changelogs for issues that need them.
-// Uses the bulk changelog API (up to 100 issues per request) with automatic
-// fallback to per-issue fetching if the bulk endpoint is unavailable.
-// If force is true, resets all changelog_synced_at timestamps first to trigger a full re-sync.
+// ChangelogSyncOptions configures Engine.SyncChangelogsWithOptions.
+type ChangelogSyncOptions struct {
+	// FieldIDs optionally restricts bulk changelog fetch to at most 10 Jira
+	// field IDs. Empty fetches complete unfiltered changelog history and stamps
+	// both changelog_synced_at and changelog_full_synced_at.
+	FieldIDs []string
+
+	// Force resets all changelog_synced_at / changelog_full_synced_at timestamps
+	// before fetching.
+	Force bool
+}
+
+// SyncChangelogs fetches changelogs for issues that need them using
+// cfg.Sync.ChangelogFields (empty = unfiltered by default).
+// Uses the bulk changelog API (up to 1,000 issues per request, maxResults=10000)
+// with automatic fallback to per-issue fetching if the bulk endpoint is unavailable.
+// If force is true, resets all changelog sync timestamps first to trigger a full re-sync.
 func (e *Engine) SyncChangelogs(ctx context.Context, sourceFilter string, force bool) (<-chan ChangelogProgress, error) {
-	if force {
+	var fieldIDs []string
+	if e.cfg != nil {
+		fieldIDs = e.cfg.Sync.ChangelogFields
+	}
+	return e.SyncChangelogsWithOptions(ctx, sourceFilter, ChangelogSyncOptions{
+		FieldIDs: fieldIDs,
+		Force:    force,
+	})
+}
+
+// SyncChangelogsWithOptions fetches changelogs for issues needing sync with
+// explicit control over fieldIds filtering and force reset.
+func (e *Engine) SyncChangelogsWithOptions(ctx context.Context, sourceFilter string, opts ChangelogSyncOptions) (<-chan ChangelogProgress, error) {
+	if len(opts.FieldIDs) > jira.BulkChangelogMaxFieldIDs {
+		return nil, fmt.Errorf("sync changelogs: at most %d fieldIds allowed, got %d", jira.BulkChangelogMaxFieldIDs, len(opts.FieldIDs))
+	}
+	if opts.Force {
 		if _, err := e.db.ResetChangelogSyncTimestamps(); err != nil {
 			return nil, fmt.Errorf("resetting changelog timestamps: %w", err)
 		}
@@ -649,6 +775,9 @@ func (e *Engine) SyncChangelogs(ctx context.Context, sourceFilter string, force 
 	if err != nil {
 		return nil, fmt.Errorf("getting changelog candidates: %w", err)
 	}
+
+	bulkOpts := jira.BulkChangelogOptions{FieldIDs: opts.FieldIDs}
+	isFullHistory := len(opts.FieldIDs) == 0
 
 	ch := make(chan ChangelogProgress, 64)
 	go func() {
@@ -684,13 +813,11 @@ func (e *Engine) SyncChangelogs(ctx context.Context, sourceFilter string, force 
 			}
 		}
 
-		// Bulk fetch in batches of 100, parallelized across workers. The client's
-		// shared rate limiter still bounds total API throughput; concurrency only
-		// hides per-request latency up to that ceiling. DB writes serialize on the
-		// single connection, so the counters are the only shared state needing a
-		// lock.
+		// Bulk fetch in batches of up to 1,000 issues (maxResults=10,000),
+		// parallelized across workers. The client's shared rate limiter still
+		// bounds total API throughput.
 		bulkFailed := false
-		const batchSize = 100
+		const batchSize = jira.BulkChangelogMaxIssues
 		if len(bulkKeys) > 0 {
 			var batches [][]string
 			for i := 0; i < len(bulkKeys); i += batchSize {
@@ -703,8 +830,6 @@ func (e *Engine) SyncChangelogs(ctx context.Context, sourceFilter string, force 
 
 			var mu sync.Mutex
 			emit := func() { ch <- ChangelogProgress{Total: total, Synced: synced, Skipped: skipped} }
-			// store persists an already-fetched batch. DB writes serialize on the
-			// single connection; mu guards only the shared counters.
 			store := func(batch []string, entries []jira.BulkChangelogEntry) {
 				dbEntries := ExtractBulkChangelog(entries, idToKey)
 				if err := e.db.InsertChangelogBatch(dbEntries); err != nil {
@@ -714,14 +839,18 @@ func (e *Engine) SyncChangelogs(ctx context.Context, sourceFilter string, force 
 					mu.Unlock()
 					return
 				}
-				_ = e.db.MarkChangelogSynced(batch)
+				if isFullHistory {
+					_ = e.db.MarkChangelogFullSynced(batch)
+				} else {
+					_ = e.db.MarkChangelogSynced(batch)
+				}
 				mu.Lock()
 				synced += len(batch)
 				emit()
 				mu.Unlock()
 			}
 			process := func(batch []string) {
-				entries, err := e.client.BulkFetchChangelogs(ctx, batch)
+				entries, err := e.client.BulkFetchChangelogsWithOptions(ctx, batch, bulkOpts)
 				if err != nil {
 					mu.Lock()
 					skipped += len(batch)
@@ -734,15 +863,13 @@ func (e *Engine) SyncChangelogs(ctx context.Context, sourceFilter string, force 
 
 			// Fetch the first batch synchronously: a failure here means the bulk
 			// endpoint is unavailable, so fall back to per-issue for everything
-			// rather than firing every batch at a doomed call. On success its
-			// result is stored directly — no redundant re-fetch.
-			entries, err := e.client.BulkFetchChangelogs(ctx, batches[0])
+			// rather than firing every batch at a doomed call.
+			entries, err := e.client.BulkFetchChangelogsWithOptions(ctx, batches[0], bulkOpts)
 			if err != nil {
 				bulkFailed = true
 				fallbackKeys = append(fallbackKeys, bulkKeys...)
 			} else {
 				store(batches[0], entries)
-
 				// Fan the remaining batches across a bounded worker pool.
 				jobs := make(chan []string)
 				var wg sync.WaitGroup
@@ -797,7 +924,7 @@ func (e *Engine) SyncChangelogs(ctx context.Context, sourceFilter string, force 
 			for _, entry := range dbEntries {
 				_ = e.db.InsertChangelog(entry)
 			}
-			_ = e.db.MarkChangelogSynced([]string{key})
+			_ = e.db.MarkChangelogFullSynced([]string{key})
 			synced++
 
 			if synced%10 == 0 {
@@ -814,29 +941,49 @@ func (e *Engine) SyncChangelogs(ctx context.Context, sourceFilter string, force 
 // syncChangelogsForKeys fetches and stores changelogs for the given issue keys.
 // Called inline during issue sync for newly upserted issues. Errors are non-fatal.
 func (e *Engine) syncChangelogsForKeys(ctx context.Context, keys []string) {
+	var fieldIDs []string
+	if e.cfg != nil {
+		fieldIDs = e.cfg.Sync.ChangelogFields
+	}
+	e.syncChangelogsForKeysWithOptions(ctx, keys, fieldIDs)
+}
+
+// syncChangelogsForKeysWithOptions fetches and stores changelogs for the given
+// issue keys using bulk batches of up to 1,000 issues and optional fieldIds.
+// Errors are non-fatal and fall back to per-issue fetch.
+func (e *Engine) syncChangelogsForKeysWithOptions(ctx context.Context, keys []string, fieldIDs []string) {
 	if len(keys) == 0 {
 		return
 	}
 
-	// Build id→key map for these keys. We can get the IDs from the DB since
-	// we just upserted them with IDs.
 	idToKey, err := e.db.GetIssueIDToKeyMapForKeys(keys)
 	if err != nil || len(idToKey) == 0 {
 		e.syncChangelogsPerIssue(ctx, keys)
 		return
 	}
 
-	// Bulk fetch (keys are ≤100, fits in one API call).
-	entries, err := e.client.BulkFetchChangelogs(ctx, keys)
-	if err != nil {
-		// Fallback to per-issue on bulk failure.
-		e.syncChangelogsPerIssue(ctx, keys)
-		return
-	}
+	bulkOpts := jira.BulkChangelogOptions{FieldIDs: fieldIDs}
+	isFullHistory := len(fieldIDs) == 0
 
-	dbEntries := ExtractBulkChangelog(entries, idToKey)
-	_ = e.db.InsertChangelogBatch(dbEntries)
-	_ = e.db.MarkChangelogSynced(keys)
+	for i := 0; i < len(keys); i += jira.BulkChangelogMaxIssues {
+		end := i + jira.BulkChangelogMaxIssues
+		if end > len(keys) {
+			end = len(keys)
+		}
+		batch := keys[i:end]
+		entries, err := e.client.BulkFetchChangelogsWithOptions(ctx, batch, bulkOpts)
+		if err != nil {
+			e.syncChangelogsPerIssue(ctx, batch)
+			continue
+		}
+		dbEntries := ExtractBulkChangelog(entries, idToKey)
+		_ = e.db.InsertChangelogBatch(dbEntries)
+		if isFullHistory {
+			_ = e.db.MarkChangelogFullSynced(batch)
+		} else {
+			_ = e.db.MarkChangelogSynced(batch)
+		}
+	}
 }
 
 // syncChangelogsPerIssue fetches changelogs one issue at a time, used as a
@@ -849,13 +996,13 @@ func (e *Engine) syncChangelogsPerIssue(ctx context.Context, keys []string) {
 			continue
 		}
 		entries := ExtractChangelog(key, resp)
-		for _, entry := range entries {
-			_ = e.db.InsertChangelog(entry)
+		if err := e.db.InsertChangelogBatch(entries); err != nil {
+			continue
 		}
 		synced = append(synced, key)
 	}
 	if len(synced) > 0 {
-		_ = e.db.MarkChangelogSynced(synced)
+		_ = e.db.MarkChangelogFullSynced(synced)
 	}
 }
 
@@ -890,13 +1037,17 @@ const defaultLookbackWindow = time.Hour
 // unparseable falls back to defaultLookbackWindow rather than dropping the
 // overlap. Returns the shifted RFC3339 timestamp, or the input unchanged if it
 // cannot be parsed.
-func applyLookback(hwm, window string) string {
-	d := defaultLookbackWindow
+func parseLookbackDuration(window string) time.Duration {
 	if window != "" {
 		if parsed, err := time.ParseDuration(window); err == nil && parsed >= 0 {
-			d = parsed
+			return parsed
 		}
 	}
+	return defaultLookbackWindow
+}
+
+func applyLookback(hwm, window string) string {
+	d := parseLookbackDuration(window)
 	t, err := time.Parse(time.RFC3339, hwm)
 	if err != nil {
 		return hwm
@@ -905,24 +1056,10 @@ func applyLookback(hwm, window string) string {
 }
 
 func (e *Engine) expandFields(fieldMap map[string]*db.FieldMapping) []string {
-	// Always include standard fields + comment + attachment.
-	fields := []string{
-		"summary", "description", "status", "priority", "assignee", "reporter",
-		"created", "updated", "resolutiondate", "labels", "components", "fixVersions",
-		"parent", "issuetype", "project", "comment",
-		"issuelinks", "resolution", "duedate",
-		"timeoriginalestimate", "timespent", "timeestimate",
-		"subtasks", "attachment",
-		"creator", "environment", "security", "votes", "watches",
-		"workratio", "versions", "statuscategorychangedate",
+	if e.cfg != nil && strings.EqualFold(e.cfg.Sync.FieldProjection, "slim") {
+		return ExpandFieldsSlim(fieldMap, e.configuredCustomFieldIDs(fieldMap))
 	}
-	// Add custom fields.
-	for jiraID, f := range fieldMap {
-		if f.IsCustom {
-			fields = append(fields, jiraID)
-		}
-	}
-	return fields
+	return ExpandFieldsFull(fieldMap)
 }
 
 // inferColumnName determines the DB column name for a Jira field.

@@ -457,6 +457,16 @@ var migrations = []migration{
 			return nil
 		},
 	},
+	{
+		version:     21,
+		description: "add row-level issue detail and full changelog hydration markers",
+		up: func(tx *sql.Tx) error {
+			if err := addColumnIfNotExists(tx, "issues", "details_synced_at", "DATETIME"); err != nil {
+				return err
+			}
+			return addColumnIfNotExists(tx, "issues", "changelog_full_synced_at", "DATETIME")
+		},
+	},
 }
 
 // issuesKeyRenameTrigger cascades a key change (issue moved project, or project

@@ -8,6 +8,9 @@ sync:
   rate_limit: 10      # Jira API requests/sec; raise for a faster sync if your tenant tolerates it
   concurrency: 8      # parallel fetches (changelog batches + sources); raise alongside rate_limit
   history: false
+  # field_projection: full    # "full" (default) or "slim" (core + promoted custom fields + comment)
+  # changelog_fields: []      # optional <=10 Jira field IDs for filtered bulk changelog sync
+  # verify_auth_ttl: 15m      # TTL cache for background VerifyAuth checks
   fts_fields:
     - summary
     - description

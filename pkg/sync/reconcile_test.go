@@ -56,16 +56,21 @@ func TestReconcileFields_DetectsAndRefreshesRank(t *testing.T) {
 	// Search server returns TEST-1 with a NEW rank; the DB holds the OLD rank.
 	const newRank = "1|newrank:"
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		issueFields := map[string]interface{}{
+			"summary":           "An issue",
+			"project":           map[string]string{"key": "TEST"},
+			"updated":           "2026-06-01T00:00:00.000+0000",
+			"customfield_10019": newRank,
+		}
+		fieldsBytes, _ := json.Marshal(issueFields)
 		switch {
 		case strings.HasPrefix(r.URL.Path, "/rest/api/3/search/jql"):
-			issueFields := map[string]interface{}{
-				"summary":           "An issue",
-				"project":           map[string]string{"key": "TEST"},
-				"updated":           "2026-06-01T00:00:00.000+0000",
-				"customfield_10019": newRank,
-			}
-			fieldsBytes, _ := json.Marshal(issueFields)
 			resp := jira.SearchResponse{
+				Issues: []*jira.Issue{{ID: "10001", Key: "TEST-1", Fields: fieldsBytes}},
+			}
+			json.NewEncoder(w).Encode(resp)
+		case strings.HasPrefix(r.URL.Path, "/rest/api/3/issue/bulkfetch"):
+			resp := jira.BulkFetchIssuesResult{
 				Issues: []*jira.Issue{{ID: "10001", Key: "TEST-1", Fields: fieldsBytes}},
 			}
 			json.NewEncoder(w).Encode(resp)
@@ -327,22 +332,15 @@ func TestReconcileFields_CapExceededAppliesDirectly(t *testing.T) {
 
 func TestReconcileFields_RefetchFailureSurfacesError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasPrefix(r.URL.Path, "/rest/api/3/search/jql") {
-			t.Errorf("unexpected request to %s", r.URL.Path)
-			return
-		}
-		var body map[string]interface{}
-		json.NewDecoder(r.Body).Decode(&body)
-		// Only the scan (project-scoped) query succeeds; the refetch fails. Match
-		// on "project in" rather than "key in" so that a client retry which
-		// re-sends an empty body (5xx retries reuse the consumed reader) also
-		// fails instead of falling through to the scan branch.
-		if jql, _ := body["jql"].(string); strings.Contains(jql, "project in") {
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/rest/api/3/search/jql"):
 			f, _ := json.Marshal(map[string]interface{}{"summary": "x", "customfield_10019": "1|fresh:"})
 			json.NewEncoder(w).Encode(jira.SearchResponse{Issues: []*jira.Issue{{ID: "TEST-1", Key: "TEST-1", Fields: f}}})
-			return
+		case strings.HasPrefix(r.URL.Path, "/rest/api/3/issue/bulkfetch"):
+			http.Error(w, `{"errorMessages":["boom"]}`, http.StatusInternalServerError)
+		default:
+			t.Errorf("unexpected request to %s", r.URL.Path)
 		}
-		http.Error(w, `{"errorMessages":["boom"]}`, http.StatusInternalServerError)
 	}))
 	defer srv.Close()
 
@@ -559,19 +557,15 @@ func TestReconcileFields_CadenceSkipsRecent(t *testing.T) {
 // overwrites the last-known-good ordering with partial data.
 func TestReconcileFields_RefetchFailurePreservesStoredRank(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasPrefix(r.URL.Path, "/rest/api/3/search/jql") {
-			t.Errorf("unexpected request to %s", r.URL.Path)
-			return
-		}
-		var body map[string]interface{}
-		json.NewDecoder(r.Body).Decode(&body)
-		// The scan (project-scoped) reports a drifted rank; the re-fetch fails.
-		if jql, _ := body["jql"].(string); strings.Contains(jql, "project in") {
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/rest/api/3/search/jql"):
 			f, _ := json.Marshal(map[string]interface{}{"summary": "x", "customfield_10019": "1|fresh:"})
 			json.NewEncoder(w).Encode(jira.SearchResponse{Issues: []*jira.Issue{{ID: "TEST-1", Key: "TEST-1", Fields: f}}})
-			return
+		case strings.HasPrefix(r.URL.Path, "/rest/api/3/issue/bulkfetch"):
+			http.Error(w, `{"errorMessages":["boom"]}`, http.StatusInternalServerError)
+		default:
+			t.Errorf("unexpected request to %s", r.URL.Path)
 		}
-		http.Error(w, `{"errorMessages":["boom"]}`, http.StatusInternalServerError)
 	}))
 	defer srv.Close()
 
@@ -622,15 +616,15 @@ func TestReconcileBoard_RefreshesScopeAndStampsBoardKey(t *testing.T) {
 			json.NewEncoder(w).Encode(jira.Filter{JQL: `project = "TEST"`})
 		case strings.HasPrefix(r.URL.Path, "/rest/api/3/search/jql"):
 			var body struct {
-				JQL    string `json:"jql"`
-				Fields []string
+				JQL string `json:"jql"`
 			}
 			_ = json.NewDecoder(r.Body).Decode(&body)
-			if !strings.Contains(body.JQL, "key in") {
-				scanJQL = body.JQL // the scan query (vs the full re-fetch)
-			}
+			scanJQL = body.JQL
 			f, _ := json.Marshal(map[string]interface{}{"summary": "x", "customfield_10019": newRank})
 			json.NewEncoder(w).Encode(jira.SearchResponse{Issues: []*jira.Issue{{ID: "TEST-1", Key: "TEST-1", Fields: f}}})
+		case strings.HasPrefix(r.URL.Path, "/rest/api/3/issue/bulkfetch"):
+			f, _ := json.Marshal(map[string]interface{}{"summary": "x", "customfield_10019": newRank})
+			json.NewEncoder(w).Encode(jira.BulkFetchIssuesResult{Issues: []*jira.Issue{{ID: "TEST-1", Key: "TEST-1", Fields: f}}})
 		case strings.HasPrefix(r.URL.Path, "/rest/api/3/changelog/bulkfetch"):
 			json.NewEncoder(w).Encode(jira.BulkChangelogResponse{})
 		default:

@@ -34,10 +34,13 @@ type Store interface {
 	GetChangelogSyncCandidates(projectFilter []string) ([]string, error)
 	GetComments(issueKey string) ([]*Comment, error)
 	GetIssue(key string) (map[string]interface{}, error)
+	GetIssueHydrationState(key string) (*IssueHydrationState, error)
 	GetIssueIDToKeyMap() (map[string]string, error)
 	GetIssueIDToKeyMapForKeys(keys []string) (map[string]string, error)
 	GetIssueUpdated(key string) (string, error)
 	GetIssuesRawJSON(keys []string) (map[string]string, error)
+	GetIssuesUpdatedByID(ids []string) (map[string]string, error)
+	GetIssuesUpdatedByKey(keys []string) (map[string]string, error)
 	GetLastReconcile(source string) (string, error)
 	GetProjectName(key string) string
 	GetResumeCursor(source string) (string, error)
@@ -47,8 +50,10 @@ type Store interface {
 	InsertPendingChange(issueKey, operation, payload string) error
 	IssueCountByProject() (map[string]int, error)
 	ListPendingChanges() ([]*PendingChange, error)
+	MarkChangelogFullSynced(keys []string) error
 	MarkChangelogSynced(keys []string) error
 	MarkFieldAsColumn(jiraID string) error
+	MarkIssueDetailsSynced(keys []string) error
 	MarkSynced(id int64) error
 	Migrate() error
 	PromoteField(jiraID, name, colType string) error

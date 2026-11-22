@@ -2,19 +2,28 @@ package sync
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
+
+	"github.com/sthadka/jai/v6/pkg/jira"
+)
+
+const (
+	defaultBackgroundVerifyTTL       = 15 * time.Minute
+	defaultBackgroundFieldRefreshTTL = time.Hour
 )
 
 // BackgroundWorker runs Engine.Sync() on a ticker interval in the background.
 // Extracted from internal/tui/sync.go goroutine pattern.
 type BackgroundWorker struct {
-	engine   *Engine
-	interval time.Duration
-	mu       sync.Mutex
-	lastSync time.Time
-	syncing  bool
-	cancel   context.CancelFunc
+	engine             *Engine
+	interval           time.Duration
+	mu                 sync.Mutex
+	lastSync           time.Time
+	lastFieldDiscovery time.Time
+	syncing            bool
+	cancel             context.CancelFunc
 }
 
 // NewBackgroundWorker creates a new background sync worker.
@@ -69,28 +78,46 @@ func (w *BackgroundWorker) loop(ctx context.Context) {
 	}
 }
 
+func (w *BackgroundWorker) verifyTTL() time.Duration {
+	if w.engine != nil && w.engine.cfg != nil && w.engine.cfg.Sync.VerifyAuthTTL != "" {
+		if d, err := time.ParseDuration(w.engine.cfg.Sync.VerifyAuthTTL); err == nil && d >= 0 {
+			return d
+		}
+	}
+	return defaultBackgroundVerifyTTL
+}
+
 func (w *BackgroundWorker) runSync(ctx context.Context) {
 	w.mu.Lock()
 	w.syncing = true
+	lastDiscover := w.lastFieldDiscovery
 	w.mu.Unlock()
 
-	err := w.engine.VerifyAuth(ctx)
+	err := w.engine.VerifyAuthIfStale(ctx, w.verifyTTL())
 	var ch <-chan Progress
 	if err == nil {
-		// Refresh field definitions on every run. Without this, a jai instance
-		// started via `jai serve` whose one-shot startup discovery failed (or
-		// predated fields being added in Jira) would stay stuck with only the
-		// seeded system fields forever — expandFields never requests the custom
-		// fields and Denormalize never stores them. This is the promised
-		// "retry in background" that serve.go references.
-		if derr := w.engine.DiscoverFields(ctx, w.engine.cfg.Fields.Overrides); derr != nil {
-			w.engine.warnf("warning: background field discovery failed: %v\n", derr)
+		// Refresh field definitions on first run, after prior failure, or once
+		// per hour — avoiding redundant /rest/api/3/field downloads every tick.
+		if lastDiscover.IsZero() || time.Since(lastDiscover) >= defaultBackgroundFieldRefreshTTL {
+			if derr := w.engine.DiscoverFields(ctx, w.engine.cfg.Fields.Overrides); derr != nil {
+				w.engine.warnf("warning: background field discovery failed: %v\n", derr)
+			} else {
+				w.mu.Lock()
+				w.lastFieldDiscovery = time.Now()
+				w.mu.Unlock()
+			}
 		}
 		ch, err = w.engine.Sync(ctx, false, false, "")
 	}
 	if err == nil {
-		for range ch {
-		} // drain
+		for p := range ch {
+			if p.Error != nil {
+				var authErr *jira.AuthError
+				if errors.As(p.Error, &authErr) {
+					w.engine.InvalidateAuth()
+				}
+			}
+		}
 	}
 
 	w.mu.Lock()

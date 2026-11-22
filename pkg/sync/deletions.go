@@ -20,47 +20,65 @@ func DetectDeletions(ctx context.Context, database db.Store, client jira.JiraCli
 // them, and returns the deleted issue keys so the caller can purge their derived
 // facts (metric rollups) within the active generation. Runs during full sync.
 func DetectDeletedKeys(ctx context.Context, database db.Store, client jira.JiraClient, project string) ([]string, error) {
-	// Fetch all issue keys from Jira.
+	// Fetch all issue IDs/keys from Jira using maxResults=5000 (1 HTTP call per 5k issues).
 	jql := fmt.Sprintf(`project = "%s" ORDER BY key ASC`, project)
+	remoteIDs := make(map[string]bool)
 	remoteKeys := make(map[string]bool)
 
-	for page, err := range client.SearchAll(ctx, jql, []string{"key"}) {
+	for page, err := range client.SearchAllWithOptions(ctx, jql, []string{"key"}, jira.SearchOptions{MaxResults: jira.SearchNarrowMaxResults}) {
 		if err != nil {
 			return nil, fmt.Errorf("fetching remote keys: %w", err)
 		}
 		for _, issue := range page {
-			remoteKeys[issue.Key] = true
+			if issue.ID != "" {
+				remoteIDs[issue.ID] = true
+			}
+			if issue.Key != "" {
+				remoteKeys[issue.Key] = true
+			}
 		}
 	}
 
-	// Fetch all local keys for this project.
-	rows, err := database.Query(`SELECT key FROM issues WHERE project = ?`, project)
+	// Fetch all local issues (stable numeric id + key) for this project.
+	rows, err := database.Query(`SELECT COALESCE(id, ''), key FROM issues WHERE project = ?`, project)
 	if err != nil {
 		return nil, fmt.Errorf("fetching local keys: %w", err)
 	}
 	defer rows.Close()
 
-	var localKeys []string
+	type localRow struct {
+		id  string
+		key string
+	}
+	var localRows []localRow
 	for rows.Next() {
-		var key string
-		if err := rows.Scan(&key); err != nil {
+		var lr localRow
+		if err := rows.Scan(&lr.id, &lr.key); err != nil {
 			return nil, err
 		}
-		localKeys = append(localKeys, key)
+		localRows = append(localRows, lr)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 
-	// Find deleted keys (local but not remote) and remove them, returning the keys
-	// so the caller can purge their derived facts.
+	// Diff by stable Jira numeric ID when available (so moved/renamed issues
+	// survive without false deletion); fall back to key for id-less rows or
+	// servers that omit id.
+	hasRemoteIDs := len(remoteIDs) > 0
 	var deleted []string
-	for _, key := range localKeys {
-		if !remoteKeys[key] {
-			if _, err := database.Exec(`DELETE FROM issues WHERE key = ?`, key); err != nil {
-				return deleted, fmt.Errorf("deleting %s: %w", key, err)
+	for _, lr := range localRows {
+		present := false
+		if lr.id != "" && hasRemoteIDs {
+			present = remoteIDs[lr.id]
+		} else {
+			present = remoteKeys[lr.key]
+		}
+		if !present {
+			if _, err := database.Exec(`DELETE FROM issues WHERE key = ?`, lr.key); err != nil {
+				return deleted, fmt.Errorf("deleting %s: %w", lr.key, err)
 			}
-			deleted = append(deleted, key)
+			deleted = append(deleted, lr.key)
 		}
 	}
 

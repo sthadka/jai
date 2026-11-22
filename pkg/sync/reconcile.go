@@ -319,27 +319,16 @@ func (e *Engine) reconcileScan(ctx context.Context, sc reconcileScope, resolved 
 func (e *Engine) refetchAndUpsert(ctx context.Context, keys []string, fieldMap map[string]*db.FieldMapping) (int, error) {
 	fields := e.expandFields(fieldMap)
 	var firstErr error
-	const batchSize = 100
 
-	// Phase 1: fetch all drifted issues before writing anything.
-	var apiIssues []*jira.Issue
-	for i := 0; i < len(keys); i += batchSize {
-		end := i + batchSize
-		if end > len(keys) {
-			end = len(keys)
-		}
-		batch := keys[i:end]
-		jql := fmt.Sprintf("key in (%s)", strings.Join(quoteKeys(batch), ", "))
-		for page, err := range e.client.SearchAll(ctx, jql, fields) {
-			if err != nil {
-				if firstErr == nil {
-					firstErr = fmt.Errorf("re-fetching drifted issues: %w", err)
-				}
-				break
-			}
-			apiIssues = append(apiIssues, page...)
-		}
+	// Phase 1: fetch all drifted issues via POST /rest/api/3/issue/bulkfetch
+	// (bypasses JQL index lag and query-length limits; auto-chunks at 100/1000).
+	bulkResp, err := e.client.BulkFetchIssues(ctx, keys, jira.BulkFetchIssuesOptions{
+		Fields: fields,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("re-fetching drifted issues: %w", err)
 	}
+	apiIssues := bulkResp.Issues
 	if len(apiIssues) == 0 {
 		return 0, firstErr
 	}
@@ -385,13 +374,7 @@ func (e *Engine) refetchAndUpsert(ctx context.Context, keys []string, fieldMap m
 		e.applyIssueSideEffects(apiIssue.Key, raws[i])
 		upserted = append(upserted, apiIssue.Key)
 	}
-	for i := 0; i < len(upserted); i += batchSize {
-		end := i + batchSize
-		if end > len(upserted) {
-			end = len(upserted)
-		}
-		e.syncChangelogsForKeys(ctx, upserted[i:end])
-	}
+	e.syncChangelogsForKeys(ctx, upserted)
 	return len(items), firstErr
 }
 
@@ -571,10 +554,3 @@ func normalizeRaw(r json.RawMessage) []byte {
 	return canonical
 }
 
-func quoteKeys(keys []string) []string {
-	out := make([]string, len(keys))
-	for i, k := range keys {
-		out[i] = `"` + k + `"`
-	}
-	return out
-}

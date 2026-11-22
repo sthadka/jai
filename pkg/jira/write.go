@@ -1,7 +1,6 @@
 package jira
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -157,7 +156,7 @@ func (c *Client) put(ctx context.Context, path string, body interface{}) error {
 	if err != nil {
 		return err
 	}
-	resp, err := c.doRequest(ctx, http.MethodPut, path, bytes.NewReader(data))
+	resp, err := c.doRequest(ctx, http.MethodPut, path, data)
 	if err != nil {
 		return err
 	}
@@ -177,7 +176,7 @@ func (c *Client) post(ctx context.Context, path string, body interface{}) error 
 	if err != nil {
 		return err
 	}
-	resp, err := c.doRequest(ctx, http.MethodPost, path, bytes.NewReader(data))
+	resp, err := c.doRequest(ctx, http.MethodPost, path, data)
 	if err != nil {
 		return err
 	}

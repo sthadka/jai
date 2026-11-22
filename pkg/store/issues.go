@@ -182,37 +182,183 @@ func (db *DB) GetIssueUpdated(key string) (string, error) {
 	return updated.String, nil
 }
 
+// IssueHydrationState reports row-level sync timestamps for an issue so callers
+// can decide whether details (worklogs/attachments/full custom fields) or
+// complete unfiltered changelog history need lazy hydration.
+type IssueHydrationState struct {
+	Updated               string
+	SyncedAt              string
+	DetailsSyncedAt       string
+	ChangelogSyncedAt     string
+	ChangelogFullSyncedAt string
+}
+
+// GetIssueHydrationState returns the stored hydration timestamps for an issue
+// key (resolving historical aliases if needed), or nil if no row exists.
+func (db *DB) GetIssueHydrationState(key string) (*IssueHydrationState, error) {
+	query := func(k string) (*IssueHydrationState, error) {
+		var st IssueHydrationState
+		var updated, synced, details, cl, clFull sql.NullString
+		err := db.QueryRow(
+			`SELECT updated, synced_at, details_synced_at, changelog_synced_at, changelog_full_synced_at
+			 FROM issues WHERE key = ?`, k,
+		).Scan(&updated, &synced, &details, &cl, &clFull)
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		st.Updated = updated.String
+		st.SyncedAt = synced.String
+		st.DetailsSyncedAt = details.String
+		st.ChangelogSyncedAt = cl.String
+		st.ChangelogFullSyncedAt = clFull.String
+		return &st, nil
+	}
+
+	st, err := query(key)
+	if err != nil || st != nil {
+		return st, err
+	}
+	if resolved := db.resolveKey(key); resolved != key {
+		return query(resolved)
+	}
+	return nil, nil
+}
+
+// GetIssuesUpdatedByID returns a map of Jira numeric issue id → stored updated
+// timestamp for the given IDs, chunked to stay under SQLite's bind-variable
+// limit. Missing IDs or rows with empty/NULL updated are omitted.
+func (db *DB) GetIssuesUpdatedByID(ids []string) (map[string]string, error) {
+	return db.getIssuesUpdatedByColumn("id", ids)
+}
+
+// GetIssuesUpdatedByKey returns a map of issue key → stored updated timestamp
+// for the given keys, chunked to stay under SQLite's bind-variable limit.
+// Missing keys or rows with empty/NULL updated are omitted.
+func (db *DB) GetIssuesUpdatedByKey(keys []string) (map[string]string, error) {
+	return db.getIssuesUpdatedByColumn("key", keys)
+}
+
+func (db *DB) getIssuesUpdatedByColumn(col string, vals []string) (map[string]string, error) {
+	result := make(map[string]string, len(vals))
+	if len(vals) == 0 {
+		return result, nil
+	}
+	const chunkSize = 500
+	for i := 0; i < len(vals); i += chunkSize {
+		end := i + chunkSize
+		if end > len(vals) {
+			end = len(vals)
+		}
+		chunk := vals[i:end]
+		placeholders := make([]string, len(chunk))
+		args := make([]any, len(chunk))
+		for j, v := range chunk {
+			placeholders[j] = "?"
+			args[j] = v
+		}
+		q := fmt.Sprintf("SELECT %s, updated FROM issues WHERE %s IN (%s)", col, col, strings.Join(placeholders, ", "))
+		rows, err := db.Query(q, args...)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var k string
+			var updated sql.NullString
+			if err := rows.Scan(&k, &updated); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			if updated.Valid && updated.String != "" {
+				result[k] = updated.String
+			}
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		rows.Close()
+	}
+	return result, nil
+}
+
+// MarkIssueDetailsSynced stamps details_synced_at for the given issue keys.
+func (db *DB) MarkIssueDetailsSynced(keys []string) error {
+	if len(keys) == 0 {
+		return nil
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	const chunkSize = 500
+	for i := 0; i < len(keys); i += chunkSize {
+		end := i + chunkSize
+		if end > len(keys) {
+			end = len(keys)
+		}
+		chunk := keys[i:end]
+		placeholders := make([]string, len(chunk))
+		args := make([]any, len(chunk)+1)
+		args[0] = now
+		for j, k := range chunk {
+			placeholders[j] = "?"
+			args[j+1] = k
+		}
+		_, err := db.Exec(
+			fmt.Sprintf(`UPDATE issues SET details_synced_at = ? WHERE key IN (%s)`, strings.Join(placeholders, ", ")),
+			args...,
+		)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // GetIssuesRawJSON returns a map of issue key → stored raw_json for the given
-// keys. Keys with no stored row (or NULL raw_json) are omitted. Used by the
-// reconcile pass to diff live field values against what is stored locally.
+// keys. Keys with no stored row (or NULL raw_json) are omitted. Chunked to stay
+// safely under SQLite's bind-variable limit (important for maxResults=5000 scans).
 func (db *DB) GetIssuesRawJSON(keys []string) (map[string]string, error) {
 	result := make(map[string]string, len(keys))
 	if len(keys) == 0 {
 		return result, nil
 	}
-	placeholders := make([]string, len(keys))
-	args := make([]any, len(keys))
-	for i, k := range keys {
-		placeholders[i] = "?"
-		args[i] = k
-	}
-	q := "SELECT key, raw_json FROM issues WHERE key IN (" + strings.Join(placeholders, ", ") + ")"
-	rows, err := db.Query(q, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var key string
-		var raw sql.NullString
-		if err := rows.Scan(&key, &raw); err != nil {
+	const chunkSize = 500
+	for i := 0; i < len(keys); i += chunkSize {
+		end := i + chunkSize
+		if end > len(keys) {
+			end = len(keys)
+		}
+		chunk := keys[i:end]
+		placeholders := make([]string, len(chunk))
+		args := make([]any, len(chunk))
+		for j, k := range chunk {
+			placeholders[j] = "?"
+			args[j] = k
+		}
+		q := "SELECT key, raw_json FROM issues WHERE key IN (" + strings.Join(placeholders, ", ") + ")"
+		rows, err := db.Query(q, args...)
+		if err != nil {
 			return nil, err
 		}
-		if raw.Valid {
-			result[key] = raw.String
+		for rows.Next() {
+			var key string
+			var raw sql.NullString
+			if err := rows.Scan(&key, &raw); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			if raw.Valid {
+				result[key] = raw.String
+			}
 		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		rows.Close()
 	}
-	return result, rows.Err()
+	return result, nil
 }
 
 // GetIssue retrieves a single issue by key. If the key is not a live key it is
