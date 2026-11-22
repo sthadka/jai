@@ -553,4 +553,3 @@ func normalizeRaw(r json.RawMessage) []byte {
 	}
 	return canonical
 }
-

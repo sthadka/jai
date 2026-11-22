@@ -152,6 +152,7 @@ func (db *DB) MarkChangelogSynced(keys []string) error {
 	}
 	return nil
 }
+
 // MarkChangelogFullSynced stamps both changelog_full_synced_at and
 // changelog_synced_at for the given issue keys (full history is a strict
 // superset of tracked-field history).

@@ -37,14 +37,14 @@ type BulkFieldsQueryOptions struct {
 
 // BulkEditableField describes a single field eligible for bulk edit.
 type BulkEditableField struct {
-	ID                   string `json:"id"`
-	Name                 string `json:"name"`
-	Type                 string `json:"type"`
-	Description          string `json:"description,omitempty"`
-	IsRequired           bool   `json:"isRequired"`
-	UnavailableMessage   string `json:"unavailableMessage,omitempty"`
+	ID                   string          `json:"id"`
+	Name                 string          `json:"name"`
+	Type                 string          `json:"type"`
+	Description          string          `json:"description,omitempty"`
+	IsRequired           bool            `json:"isRequired"`
+	UnavailableMessage   string          `json:"unavailableMessage,omitempty"`
 	FieldOptions         json.RawMessage `json:"fieldOptions,omitempty"`
-	MultiSelectFieldOpts []string `json:"multiSelectFieldOptions,omitempty"`
+	MultiSelectFieldOpts []string        `json:"multiSelectFieldOptions,omitempty"`
 }
 
 // BulkEditableFieldsResponse is the response from GET /rest/api/3/bulk/issues/fields.
