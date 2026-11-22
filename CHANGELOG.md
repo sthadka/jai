@@ -1,5 +1,12 @@
 # Changelog
 
+## [6.2.0](https://github.com/sthadka/jai/compare/v6.1.1...v6.2.0) (2026-11-22)
+
+
+### Features
+
+* **jira,store,sync:** add two-stage delta sync, bulk REST v3 APIs, and rate-limit observability ([3ecfd41](https://github.com/sthadka/jai/commit/3ecfd41655848f174645af3736a149b4ffc6fb79))
+
 ## [6.1.1](https://github.com/sthadka/jai/compare/v6.1.0...v6.1.1) (2026-11-20)
 
 
