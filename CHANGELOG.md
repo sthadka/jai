@@ -1,5 +1,18 @@
 # Changelog
 
+## [6.3.0](https://github.com/sthadka/jai/compare/v6.2.0...v6.3.0) (2026-11-23)
+
+
+### Features
+
+* **store:** expose separate read-only WAL connection pool via ReadDB ([0fea7af](https://github.com/sthadka/jai/commit/0fea7afe8d4824374b4934c0055cdbc20d8ebb49))
+
+
+### Performance
+
+* **store:** add case-insensitive and composite indexes for JQL hot paths ([ccf72df](https://github.com/sthadka/jai/commit/ccf72dfc088c58ccaf1b7d30ff03223cc9e74905))
+* **store:** make idx_issues_id unconditional using NULL for absent ids ([e39ebef](https://github.com/sthadka/jai/commit/e39ebef400b195e547e06e87eb9ba2f8b8ca8ca7))
+
 ## [6.2.0](https://github.com/sthadka/jai/compare/v6.1.1...v6.2.0) (2026-11-22)
 
 
