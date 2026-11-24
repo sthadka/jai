@@ -574,17 +574,15 @@ func (e *Engine) syncSource(ctx context.Context, src config.SyncSource, full, re
 			return
 		}
 
-		var storedByKey map[string]string
-		if !full {
-			pageKeys := make([]string, 0, len(page))
-			for _, apiIssue := range page {
-				if apiIssue.Key != "" {
-					pageKeys = append(pageKeys, apiIssue.Key)
-				}
+		pageKeys := make([]string, 0, len(page))
+		for _, apiIssue := range page {
+			if apiIssue.Key != "" {
+				pageKeys = append(pageKeys, apiIssue.Key)
 			}
-			storedByKey, _ = e.db.GetIssuesUpdatedByKey(pageKeys)
 		}
+		storedByKey, _ := e.db.GetIssuesUpdatedByKey(pageKeys)
 
+		bundles := make([]*db.IssueBundle, 0, len(page))
 		for _, apiIssue := range page {
 			total++
 			rawBytes, err := json.Marshal(apiIssue)
@@ -602,8 +600,8 @@ func (e *Engine) syncSource(ctx context.Context, src config.SyncSource, full, re
 				lastUpdated = issue.Updated
 			}
 
+			existingUpdated := storedByKey[apiIssue.Key]
 			if !full {
-				existingUpdated := storedByKey[apiIssue.Key]
 				if existingUpdated == "" {
 					newCount++
 				} else if existingUpdated == issue.Updated {
@@ -614,7 +612,6 @@ func (e *Engine) syncSource(ctx context.Context, src config.SyncSource, full, re
 			} else {
 				// A full sync must NOT skip unchanged-"updated" issues: Jira does not
 				// bump "updated" for silent changes like LexoRank rebalances.
-				existingUpdated, _ := e.db.GetIssueUpdated(apiIssue.Key)
 				if existingUpdated == "" {
 					newCount++
 				} else if existingUpdated != issue.Updated {
@@ -622,29 +619,37 @@ func (e *Engine) syncSource(ctx context.Context, src config.SyncSource, full, re
 				}
 			}
 
-			if err := e.db.UpsertIssue(issue, extra); err != nil {
-				continue
+			b := &db.IssueBundle{
+				Issue:       issue,
+				Extra:       extra,
+				Links:       ExtractIssueLinks(apiIssue.Key, rawBytes),
+				UpdateLinks: true,
 			}
-			touchedKeys = append(touchedKeys, apiIssue.Key)
-			comments, err := ExtractComments(apiIssue.Key, rawBytes)
-			if err == nil {
-				for _, c := range comments {
-					_ = e.db.UpsertComment(c)
-				}
-				if len(comments) > 0 {
-					_ = e.db.UpdateIssueCommentsText(apiIssue.Key)
-				}
+			if comments, err := ExtractComments(apiIssue.Key, rawBytes); err == nil {
+				b.Comments = comments
+				b.UpdateCommentsText = len(comments) > 0
 			}
-
-			links := ExtractIssueLinks(apiIssue.Key, rawBytes)
-			_ = e.db.UpsertIssueLinks(apiIssue.Key, links)
-
-			attachments, err := ExtractAttachments(apiIssue.Key, rawBytes)
-			if err == nil && attachments != nil {
-				_ = e.db.UpsertAttachments(apiIssue.Key, attachments)
+			if attachments, err := ExtractAttachments(apiIssue.Key, rawBytes); err == nil && attachments != nil {
+				b.Attachments = attachments
+				b.UpdateAttachments = true
 			}
+			bundles = append(bundles, b)
 		}
 
+		if len(bundles) > 0 {
+			if err := e.db.UpsertIssueBundleTx(bundles); err != nil {
+				// Fall back to per-bundle commits so one malformed row never drops a page.
+				for _, b := range bundles {
+					if berr := e.db.UpsertIssueBundleTx([]*db.IssueBundle{b}); berr == nil {
+						touchedKeys = append(touchedKeys, b.Issue.Key)
+					}
+				}
+			} else {
+				for _, b := range bundles {
+					touchedKeys = append(touchedKeys, b.Issue.Key)
+				}
+			}
+		}
 		// Save cursor after each completed page so a restart can skip ahead.
 		if full && lastUpdated != "" {
 			_ = e.db.SetResumeCursor(src.Name, lastUpdated)

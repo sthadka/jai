@@ -74,10 +74,46 @@ type issueSource struct {
 	membership map[string]*MembershipHistory
 }
 
-// BuildAll performs a full restatement: it reads every in-scope issue's status history,
-// replays intervals under the policy, stages a brand-new generation, and activates it in
-// one transaction (then plain-DELETEs obsolete generations). projects empty = all. asOf
-// is recorded as the open-interval reference is applied at read time, not frozen here.
+// maxFactBatch bounds rows written per staging transaction in BuildAll so
+// concurrent UI/API writes never stall behind multi-second write locks.
+const maxFactBatch = 5000
+
+type stagedInterval struct {
+	issueKey   string
+	project    string
+	field      string
+	seq        int
+	valueID    string
+	value      string
+	stage      any
+	provenance string
+	enteredAt  time.Time
+	exitedAt   *time.Time
+	open       bool
+}
+
+type stagedMembership struct {
+	issueKey   string
+	project    string
+	dimension  string
+	seq        int
+	memberID   string
+	memberName string
+	enteredAt  time.Time
+	exitedAt   *time.Time
+	open       bool
+}
+
+type stagedFacts struct {
+	intervals   []stagedInterval
+	memberships []stagedMembership
+	flows       []FlowRow
+}
+
+// BuildAll performs a full restatement: it reads every in-scope issue's history
+// on ReadDB, replays intervals in Go before acquiring the writer lock, stages
+// the new generation in short batched transactions, flips the active-generation
+// pointer atomically, and cleans up obsolete generations in a post-commit tx.
 func (b *Builder) BuildAll(asOf time.Time, projects []string) (*BuildResult, error) {
 	lock, err := AcquireLock(b.store.dbPath)
 	if err != nil {
@@ -93,59 +129,87 @@ func (b *Builder) BuildAll(asOf time.Time, projects []string) (*BuildResult, err
 		b.afterRead()
 	}
 
-	tx, err := b.store.db.Begin()
+	// Perform all replay computation in Go before opening any write transaction.
+	staged, err := b.replaySources(sources, asOf)
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
 
 	builtAt := b.clk.Now().UTC()
-	res, err := tx.Exec(
+
+	// Step 1: register the staged generation row (invisible until activated).
+	genTx, err := b.store.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	res, err := genTx.Exec(
 		`INSERT INTO metrics_generation (fingerprint, scope, built_at, source_watermark, issue_count)
-		 VALUES (?, ?, ?, ?, 0)`,
-		b.pol.Fingerprint(), strings.Join(projects, ","), dbTime(builtAt), dbTimePtr(watermark),
+		 VALUES (?, ?, ?, ?, ?)`,
+		b.pol.Fingerprint(), strings.Join(projects, ","), dbTime(builtAt), dbTimePtr(watermark), len(sources),
 	)
 	if err != nil {
+		_ = genTx.Rollback()
 		return nil, fmt.Errorf("insert generation: %w", err)
 	}
 	gen, err := res.LastInsertId()
 	if err != nil {
+		_ = genTx.Rollback()
+		return nil, err
+	}
+	if err := genTx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit generation header: %w", err)
+	}
+
+	cleanupStaged := func() {
+		if ctxTx, cerr := b.store.db.Begin(); cerr == nil {
+			_, _ = ctxTx.Exec(`DELETE FROM fact_field_interval WHERE generation = ?`, gen)
+			_, _ = ctxTx.Exec(`DELETE FROM fact_issue_flow WHERE generation = ?`, gen)
+			_, _ = ctxTx.Exec(`DELETE FROM fact_issue_membership WHERE generation = ?`, gen)
+			_, _ = ctxTx.Exec(`DELETE FROM metrics_generation WHERE generation = ?`, gen)
+			_ = ctxTx.Commit()
+		}
+	}
+
+	// Step 2: insert staged facts in short chunked transactions so writers never
+	// hold an exclusive WAL write lock across tens of thousands of rows.
+	if err := b.writeStagedChunked(gen, staged); err != nil {
+		cleanupStaged()
 		return nil, err
 	}
 
-	intervalCount, err := b.writeFacts(tx, gen, sources, asOf)
+	// Step 3: atomic publication via active-generation pointer swap.
+	actTx, err := b.store.db.Begin()
 	if err != nil {
+		cleanupStaged()
 		return nil, err
 	}
-	if _, err := tx.Exec(`UPDATE metrics_generation SET issue_count = ? WHERE generation = ?`, len(sources), gen); err != nil {
-		return nil, err
-	}
-
-	// Atomic publication: swap the pointer, then drop every obsolete generation. A reader
-	// in another process sees either the whole old generation or the whole new one.
-	if _, err := tx.Exec(`UPDATE metrics_active_generation SET generation = ? WHERE id = 1`, gen); err != nil {
+	if _, err := actTx.Exec(`UPDATE metrics_active_generation SET generation = ? WHERE id = 1`, gen); err != nil {
+		_ = actTx.Rollback()
+		cleanupStaged()
 		return nil, fmt.Errorf("activate generation: %w", err)
 	}
-	if _, err := tx.Exec(`DELETE FROM fact_field_interval WHERE generation != ?`, gen); err != nil {
-		return nil, err
+	if err := actTx.Commit(); err != nil {
+		cleanupStaged()
+		return nil, fmt.Errorf("commit generation activation: %w", err)
 	}
-	if _, err := tx.Exec(`DELETE FROM fact_issue_flow WHERE generation != ?`, gen); err != nil {
-		return nil, err
-	}
-	if _, err := tx.Exec(`DELETE FROM fact_issue_membership WHERE generation != ?`, gen); err != nil {
-		return nil, err
-	}
-	if _, err := tx.Exec(`DELETE FROM metrics_generation WHERE generation != ?`, gen); err != nil {
-		return nil, err
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("commit generation: %w", err)
+
+	// Step 4: drop obsolete generations in a separate post-commit transaction.
+	if cleanTx, cerr := b.store.db.Begin(); cerr == nil {
+		_, e1 := cleanTx.Exec(`DELETE FROM fact_field_interval WHERE generation != ?`, gen)
+		_, e2 := cleanTx.Exec(`DELETE FROM fact_issue_flow WHERE generation != ?`, gen)
+		_, e3 := cleanTx.Exec(`DELETE FROM fact_issue_membership WHERE generation != ?`, gen)
+		_, e4 := cleanTx.Exec(`DELETE FROM metrics_generation WHERE generation != ?`, gen)
+		if e1 == nil && e2 == nil && e3 == nil && e4 == nil {
+			_ = cleanTx.Commit()
+		} else {
+			_ = cleanTx.Rollback()
+		}
 	}
 
 	return &BuildResult{
 		Generation:      gen,
 		IssueCount:      len(sources),
-		IntervalCount:   intervalCount,
+		IntervalCount:   len(staged.intervals),
 		Fingerprint:     b.pol.Fingerprint(),
 		BuiltAt:         builtAt,
 		SourceWatermark: watermark,
@@ -181,6 +245,10 @@ func (b *Builder) Incremental(asOf time.Time, keys []string) (*BuildResult, erro
 	if err != nil {
 		return nil, err
 	}
+	staged, err := b.replaySources(sources, asOf)
+	if err != nil {
+		return nil, err
+	}
 
 	tx, err := b.store.db.Begin()
 	if err != nil {
@@ -205,10 +273,10 @@ func (b *Builder) Incremental(asOf time.Time, keys []string) (*BuildResult, erro
 			return nil, err
 		}
 	}
-	intervalCount, err := b.writeFacts(tx, gen, sources, asOf)
-	if err != nil {
+	if err := writeStagedInTx(tx, gen, staged); err != nil {
 		return nil, err
 	}
+	intervalCount := len(staged.intervals)
 
 	var count int
 	if err := tx.QueryRow(`SELECT COUNT(*) FROM fact_issue_flow WHERE generation = ?`, gen).Scan(&count); err != nil {
@@ -234,56 +302,34 @@ func (b *Builder) Incremental(asOf time.Time, keys []string) (*BuildResult, erro
 	}, nil
 }
 
-// writeFacts replays each source and inserts its interval and flow facts under gen,
-// returning the number of interval rows written. asOf ages open intervals only for the
-// derived flow fields; exited_at stays NULL on disk.
-func (b *Builder) writeFacts(tx *sql.Tx, gen int64, sources []issueSource, asOf time.Time) (int, error) {
-	ivStmt, err := tx.Prepare(
-		`INSERT INTO fact_field_interval
-		   (generation, issue_key, project, field, seq, value_id, value, stage, provenance, entered_at, exited_at, is_open)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-	if err != nil {
-		return 0, err
-	}
-	defer ivStmt.Close()
-	flowStmt, err := tx.Prepare(
-		`INSERT INTO fact_issue_flow
-		   (generation, issue_key, project, type, created, first_active_at, resolved, resolution,
-		    lead_seconds, cycle_seconds, reopen_count, current_stage, has_active, has_unknown,
-		    flow_occupancy, estimate)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-	if err != nil {
-		return 0, err
-	}
-	defer flowStmt.Close()
-	memStmt, err := tx.Prepare(
-		`INSERT INTO fact_issue_membership
-		   (generation, issue_key, project, dimension, seq, member_id, member_name, entered_at, exited_at, is_open)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-	if err != nil {
-		return 0, err
-	}
-	defer memStmt.Close()
-
+// replaySources performs all status, scalar, membership, and flow replays in Go
+// memory so no SQLite write lock is held during computation.
+func (b *Builder) replaySources(sources []issueSource, asOf time.Time) (*stagedFacts, error) {
 	scalarFields := ScalarTrackedFields(b.pol)
 	membershipFields := b.pol.MembershipFields()
-	intervalCount := 0
+	staged := &stagedFacts{
+		intervals:   make([]stagedInterval, 0, len(sources)*2),
+		memberships: make([]stagedMembership, 0, len(sources)),
+		flows:       make([]FlowRow, 0, len(sources)),
+	}
 	for _, src := range sources {
 		result := ReplayStatus(src.hist, b.pol, asOf)
 		for seq, iv := range result.Intervals {
-			if _, err := ivStmt.Exec(
-				gen, src.hist.Key, src.hist.Project, "status", seq,
-				nullStr(iv.ValueID), nullStr(iv.Value), nullStr(iv.Stage), nullStr(iv.Provenance),
-				dbTime(iv.EnteredAt), dbTimePtr(iv.ExitedAt), iv.Open,
-			); err != nil {
-				return 0, err
-			}
-			intervalCount++
+			staged.intervals = append(staged.intervals, stagedInterval{
+				issueKey:   src.hist.Key,
+				project:    src.hist.Project,
+				field:      "status",
+				seq:        seq,
+				valueID:    iv.ValueID,
+				value:      iv.Value,
+				stage:      nullStr(iv.Stage),
+				provenance: iv.Provenance,
+				enteredAt:  iv.EnteredAt,
+				exitedAt:   iv.ExitedAt,
+				open:       iv.Open,
+			})
 		}
 
-		// Scalar tracked fields (priority, assignee, Team, Rank, ...). Set-valued fields
-		// are excluded by ScalarTrackedFields and modeled as membership intervals instead;
-		// scalar replay never has a stage, so the stage column is NULL.
 		for _, field := range scalarFields {
 			sh := src.scalar[field]
 			if sh == nil {
@@ -291,23 +337,25 @@ func (b *Builder) writeFacts(tx *sql.Tx, gen int64, sources []issueSource, asOf 
 			}
 			sr, err := ReplayScalar(*sh, b.pol, asOf)
 			if err != nil {
-				return 0, fmt.Errorf("replay scalar %q for %s: %w", field, src.hist.Key, err)
+				return nil, fmt.Errorf("replay scalar %q for %s: %w", field, src.hist.Key, err)
 			}
 			for seq, iv := range sr.Intervals {
-				if _, err := ivStmt.Exec(
-					gen, src.hist.Key, src.hist.Project, field, seq,
-					nullStr(iv.ValueID), nullStr(iv.Value), nil, nullStr(iv.Provenance),
-					dbTime(iv.EnteredAt), dbTimePtr(iv.ExitedAt), iv.Open,
-				); err != nil {
-					return 0, err
-				}
-				intervalCount++
+				staged.intervals = append(staged.intervals, stagedInterval{
+					issueKey:   src.hist.Key,
+					project:    src.hist.Project,
+					field:      field,
+					seq:        seq,
+					valueID:    iv.ValueID,
+					value:      iv.Value,
+					stage:      nil,
+					provenance: iv.Provenance,
+					enteredAt:  iv.EnteredAt,
+					exitedAt:   iv.ExitedAt,
+					open:       iv.Open,
+				})
 			}
 		}
 
-		// Set-valued membership fields (components, labels, Sprint). Each resulting
-		// interval is one event-time row per (issue, member, interval); exited_at stays
-		// NULL for open memberships. Membership is never scalar-replayed.
 		for _, field := range membershipFields {
 			mh := src.membership[field]
 			if mh == nil {
@@ -319,28 +367,137 @@ func (b *Builder) writeFacts(tx *sql.Tx, gen int64, sources []issueSource, asOf 
 			}
 			mr := ReplayMembership(*mh)
 			for seq, iv := range mr.Intervals {
-				if _, err := memStmt.Exec(
-					gen, src.hist.Key, src.hist.Project, dim, seq,
-					nullStr(iv.Member.ID), nullStr(iv.Member.Name),
-					dbTime(iv.EnteredAt), dbTimePtr(iv.ExitedAt), iv.Open,
-				); err != nil {
-					return 0, err
-				}
+				staged.memberships = append(staged.memberships, stagedMembership{
+					issueKey:   src.hist.Key,
+					project:    src.hist.Project,
+					dimension:  dim,
+					seq:        seq,
+					memberID:   iv.Member.ID,
+					memberName: iv.Member.Name,
+					enteredAt:  iv.EnteredAt,
+					exitedAt:   iv.ExitedAt,
+					open:       iv.Open,
+				})
 			}
 		}
 
-		flow := deriveFlow(result, src, b.pol)
-		if _, err := flowStmt.Exec(
-			gen, src.hist.Key, src.hist.Project, nullStr(src.itype),
-			dbTimePtr(flow.Created), dbTimePtr(flow.FirstActiveAt), dbTimePtr(flow.Resolved), nullStr(flow.Resolution),
-			nullInt64(flow.LeadSeconds), nullInt64(flow.CycleSeconds), flow.ReopenCount,
-			nullStr(flow.CurrentStage), flow.HasActive, flow.HasUnknown,
-			nullFloat64(flow.FlowOccupancy), nullFloat64(flow.Estimate),
-		); err != nil {
-			return 0, err
+		staged.flows = append(staged.flows, deriveFlow(result, src, b.pol))
+	}
+	return staged, nil
+}
+
+const (
+	insertIntervalSQL = `INSERT INTO fact_field_interval
+		(generation, issue_key, project, field, seq, value_id, value, stage, provenance, entered_at, exited_at, is_open)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	insertFlowSQL = `INSERT INTO fact_issue_flow
+		(generation, issue_key, project, type, created, first_active_at, resolved, resolution,
+		 lead_seconds, cycle_seconds, reopen_count, current_stage, has_active, has_unknown,
+		 flow_occupancy, estimate)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	insertMembershipSQL = `INSERT INTO fact_issue_membership
+		(generation, issue_key, project, dimension, seq, member_id, member_name, entered_at, exited_at, is_open)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+)
+
+func writeStagedInTx(tx *sql.Tx, gen int64, staged *stagedFacts) error {
+	if len(staged.intervals) > 0 {
+		stmt, err := tx.Prepare(insertIntervalSQL)
+		if err != nil {
+			return err
+		}
+		defer stmt.Close()
+		for _, iv := range staged.intervals {
+			if _, err := stmt.Exec(
+				gen, iv.issueKey, iv.project, iv.field, iv.seq,
+				nullStr(iv.valueID), nullStr(iv.value), iv.stage, nullStr(iv.provenance),
+				dbTime(iv.enteredAt), dbTimePtr(iv.exitedAt), iv.open,
+			); err != nil {
+				return err
+			}
 		}
 	}
-	return intervalCount, nil
+	if len(staged.memberships) > 0 {
+		stmt, err := tx.Prepare(insertMembershipSQL)
+		if err != nil {
+			return err
+		}
+		defer stmt.Close()
+		for _, m := range staged.memberships {
+			if _, err := stmt.Exec(
+				gen, m.issueKey, m.project, m.dimension, m.seq,
+				nullStr(m.memberID), nullStr(m.memberName),
+				dbTime(m.enteredAt), dbTimePtr(m.exitedAt), m.open,
+			); err != nil {
+				return err
+			}
+		}
+	}
+	if len(staged.flows) > 0 {
+		stmt, err := tx.Prepare(insertFlowSQL)
+		if err != nil {
+			return err
+		}
+		defer stmt.Close()
+		for _, flow := range staged.flows {
+			if _, err := stmt.Exec(
+				gen, flow.IssueKey, flow.Project, nullStr(flow.Type),
+				dbTimePtr(flow.Created), dbTimePtr(flow.FirstActiveAt), dbTimePtr(flow.Resolved), nullStr(flow.Resolution),
+				nullInt64(flow.LeadSeconds), nullInt64(flow.CycleSeconds), flow.ReopenCount,
+				nullStr(flow.CurrentStage), flow.HasActive, flow.HasUnknown,
+				nullFloat64(flow.FlowOccupancy), nullFloat64(flow.Estimate),
+			); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (b *Builder) writeStagedChunked(gen int64, staged *stagedFacts) error {
+	for i := 0; i < len(staged.intervals); i += maxFactBatch {
+		end := min(i+maxFactBatch, len(staged.intervals))
+		tx, err := b.store.db.Begin()
+		if err != nil {
+			return err
+		}
+		if err := writeStagedInTx(tx, gen, &stagedFacts{intervals: staged.intervals[i:end]}); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+	}
+	for i := 0; i < len(staged.memberships); i += maxFactBatch {
+		end := min(i+maxFactBatch, len(staged.memberships))
+		tx, err := b.store.db.Begin()
+		if err != nil {
+			return err
+		}
+		if err := writeStagedInTx(tx, gen, &stagedFacts{memberships: staged.memberships[i:end]}); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+	}
+	for i := 0; i < len(staged.flows); i += maxFactBatch {
+		end := min(i+maxFactBatch, len(staged.flows))
+		tx, err := b.store.db.Begin()
+		if err != nil {
+			return err
+		}
+		if err := writeStagedInTx(tx, gen, &stagedFacts{flows: staged.flows[i:end]}); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // deriveFlow computes the Phase-1 snapshot flow rollup from the replayed intervals and
@@ -425,8 +582,37 @@ func (b *Builder) loadSources(projects, keys []string) ([]issueSource, *time.Tim
 	scalarFields := ScalarTrackedFields(b.pol)
 	membershipFields := b.pol.MembershipFields()
 
+	var scalarFieldOrder []string
+	var scalarSelCols []string
+	if len(scalarFields) > 0 {
+		cols, err := b.scalarColumns(scalarFields)
+		if err != nil {
+			return nil, nil, err
+		}
+		for _, f := range scalarFields {
+			if col, ok := cols[f]; ok {
+				scalarFieldOrder = append(scalarFieldOrder, f)
+				scalarSelCols = append(scalarSelCols, `"`+col+`"`)
+			}
+		}
+	}
+
+	// Single-pass SELECT over issues covering base flow fields, membership
+	// snapshot fields (sprint_id/sprint_name/components/labels), and all
+	// configured scalar columns.
+	selCols := []string{
+		"key", "project", "type", "created", "status", "status_category",
+		"changelog_synced_at", "updated", "resolved", "resolution", "story_points",
+	}
+	hasMembership := len(membershipFields) > 0
+	if hasMembership {
+		selCols = append(selCols, "sprint_id", "sprint_name", "components", "labels")
+	}
+	selCols = append(selCols, scalarSelCols...)
+	baseQ := "SELECT " + strings.Join(selCols, ", ") + " FROM issues"
+
 	for _, keyChunk := range keyBatches(keys, maxKeyBindChunk) {
-		iq := `SELECT key, project, type, created, status, status_category, changelog_synced_at, updated, resolved, resolution, story_points FROM issues`
+		iq := baseQ
 		var iargs []any
 		switch {
 		case len(keyChunk) > 0:
@@ -450,8 +636,19 @@ func (b *Builder) loadSources(projects, keys []string) ([]issueSource, *time.Tim
 				itype, created, status, category  sql.NullString
 				synced, updated, resolved, resltn sql.NullString
 				storyPoints                       sql.NullFloat64
+				sprintID                          sql.NullInt64
+				sprintName, comps, labels         sql.NullString
 			)
-			if err := rows.Scan(&key, &project, &itype, &created, &status, &category, &synced, &updated, &resolved, &resltn, &storyPoints); err != nil {
+			scalarVals := make([]sql.NullString, len(scalarFieldOrder))
+			dest := make([]any, 0, 15+len(scalarFieldOrder))
+			dest = append(dest, &key, &project, &itype, &created, &status, &category, &synced, &updated, &resolved, &resltn, &storyPoints)
+			if hasMembership {
+				dest = append(dest, &sprintID, &sprintName, &comps, &labels)
+			}
+			for j := range scalarVals {
+				dest = append(dest, &scalarVals[j])
+			}
+			if err := rows.Scan(dest...); err != nil {
 				rows.Close()
 				return nil, nil, err
 			}
@@ -488,17 +685,42 @@ func (b *Builder) loadSources(projects, keys []string) ([]issueSource, *time.Tim
 						HistoryComplete: src.hist.HistoryComplete,
 					}
 				}
+				for j, f := range scalarFieldOrder {
+					if sh := src.scalar[f]; sh != nil {
+						sh.CurrentKnown = true
+						sh.CurrentValue = scalarVals[j].String
+					}
+				}
 			}
-			if len(membershipFields) > 0 {
+			if hasMembership {
 				src.membership = make(map[string]*MembershipHistory, len(membershipFields))
 				for _, f := range membershipFields {
-					src.membership[f] = &MembershipHistory{
+					mh := &MembershipHistory{
 						Key:             key,
 						Project:         project,
 						Field:           f,
 						CreatedAt:       src.hist.CreatedAt,
 						HistoryComplete: src.hist.HistoryComplete,
 					}
+					dim, _ := MembershipDimension(f)
+					switch dim {
+					case "sprint":
+						if sprintID.Valid {
+							mh.CurrentValue = strconv.FormatInt(sprintID.Int64, 10)
+						}
+						if sprintName.Valid {
+							mh.CurrentString = sprintName.String
+						}
+					case "component":
+						if names := parseJSONArray(comps.String); len(names) > 0 {
+							mh.CurrentString = strings.Join(names, ",")
+						}
+					case "label":
+						if names := parseJSONArray(labels.String); len(names) > 0 {
+							mh.CurrentString = strings.Join(names, " ")
+						}
+					}
+					src.membership[f] = mh
 				}
 			}
 			index[key] = len(sources)
@@ -510,26 +732,15 @@ func (b *Builder) loadSources(projects, keys []string) ([]issueSource, *time.Tim
 		}
 		rows.Close()
 	}
-	if err := b.loadStatusEvents(projects, keys, index, sources, &watermark); err != nil {
+
+	allFields := make([]string, 0, 1+len(scalarFields)+len(membershipFields))
+	allFields = append(allFields, "status")
+	allFields = append(allFields, scalarFields...)
+	allFields = append(allFields, membershipFields...)
+	allFields = dedupStrings(allFields)
+
+	if err := b.loadAllEvents(projects, keys, allFields, index, sources, &watermark); err != nil {
 		return nil, nil, err
-	}
-
-	if len(scalarFields) > 0 {
-		if err := b.loadScalarCurrent(projects, keys, scalarFields, index, sources); err != nil {
-			return nil, nil, err
-		}
-		if err := b.loadScalarEvents(projects, keys, scalarFields, index, sources, &watermark); err != nil {
-			return nil, nil, err
-		}
-	}
-
-	if len(membershipFields) > 0 {
-		if err := b.loadMembershipCurrent(projects, keys, membershipFields, index, sources); err != nil {
-			return nil, nil, err
-		}
-		if err := b.loadMembershipEvents(projects, keys, membershipFields, index, sources, &watermark); err != nil {
-			return nil, nil, err
-		}
 	}
 
 	var wm *time.Time
@@ -539,72 +750,10 @@ func (b *Builder) loadSources(projects, keys []string) ([]issueSource, *time.Tim
 	return sources, wm, nil
 }
 
-// loadStatusEvents appends status changelog transitions to the already-loaded sources.
-func (b *Builder) loadStatusEvents(projects, keys []string, index map[string]int, sources []issueSource, watermark *time.Time) error {
-	for _, keyChunk := range keyBatches(keys, maxKeyBindChunk) {
-		cq := `SELECT id, issue_key, from_value, from_string, to_value, to_string, changed_at
-	         FROM changelog WHERE field = 'status'`
-		var cargs []any
-		switch {
-		case len(keyChunk) > 0:
-			args, in := keyFilter(keyChunk, nil)
-			cq += " AND issue_key IN " + in
-			cargs = args
-		case len(projects) > 0:
-			ph := make([]string, len(projects))
-			for i, p := range projects {
-				ph[i] = "?"
-				cargs = append(cargs, p)
-			}
-			cq += " AND issue_key IN (SELECT key FROM issues WHERE project IN (" + strings.Join(ph, ", ") + "))"
-		}
-		cq += " ORDER BY issue_key, changed_at"
-
-		crows, err := b.store.db.ReadDB().Query(cq, cargs...)
-		if err != nil {
-			return fmt.Errorf("load status events: %w", err)
-		}
-		for crows.Next() {
-			var (
-				id, issueKey                    string
-				fromV, fromS, toV, toS, changed sql.NullString
-			)
-			if err := crows.Scan(&id, &issueKey, &fromV, &fromS, &toV, &toS, &changed); err != nil {
-				crows.Close()
-				return err
-			}
-			i, ok := index[issueKey]
-			if !ok {
-				continue
-			}
-			ev := StatusEvent{
-				ID:         id,
-				FromValue:  fromV.String,
-				FromString: fromS.String,
-				ToValue:    toV.String,
-				ToString:   toS.String,
-			}
-			if changed.Valid && strings.TrimSpace(changed.String) != "" {
-				ev.ChangedAt = parseDBTime(changed.String)
-				if ev.ChangedAt.After(*watermark) {
-					*watermark = ev.ChangedAt
-				}
-			}
-			sources[i].hist.Events = append(sources[i].hist.Events, ev)
-		}
-		if err := crows.Err(); err != nil {
-			crows.Close()
-			return err
-		}
-		crows.Close()
-	}
-	return nil
-}
-
-// loadScalarEvents appends changelog transitions for the scalar tracked fields to the
-// per-field replay inputs already attached to each source. One query covers all scalar
-// fields; rows are grouped by (issue, field).
-func (b *Builder) loadScalarEvents(projects, keys, fields []string, index map[string]int, sources []issueSource, watermark *time.Time) error {
+// loadAllEvents reads status, scalar, and membership changelog transitions in a
+// single SELECT pass over changelog on ReadDB, dispatching each row into the
+// matching replay history on sources.
+func (b *Builder) loadAllEvents(projects, keys, fields []string, index map[string]int, sources []issueSource, watermark *time.Time) error {
 	fph := make([]string, len(fields))
 	fargs := make([]any, len(fields))
 	for i, f := range fields {
@@ -631,11 +780,11 @@ func (b *Builder) loadScalarEvents(projects, keys, fields []string, index map[st
 			}
 			cq += " AND issue_key IN (SELECT key FROM issues WHERE project IN (" + strings.Join(ph, ", ") + "))"
 		}
-		cq += " ORDER BY issue_key, field, changed_at"
+		cq += " ORDER BY issue_key, changed_at"
 
 		crows, err := b.store.db.ReadDB().Query(cq, cargs...)
 		if err != nil {
-			return fmt.Errorf("load scalar events: %w", err)
+			return fmt.Errorf("load changelog events: %w", err)
 		}
 		for crows.Next() {
 			var (
@@ -650,102 +799,49 @@ func (b *Builder) loadScalarEvents(projects, keys, fields []string, index map[st
 			if !ok {
 				continue
 			}
-			sh := sources[i].scalar[field]
-			if sh == nil {
-				continue
-			}
-			ev := ScalarEvent{
-				ID:         id,
-				FromValue:  fromV.String,
-				FromString: fromS.String,
-				ToValue:    toV.String,
-				ToString:   toS.String,
-			}
+			var changedAt time.Time
 			if changed.Valid && strings.TrimSpace(changed.String) != "" {
-				ev.ChangedAt = parseDBTime(changed.String)
-				if ev.ChangedAt.After(*watermark) {
-					*watermark = ev.ChangedAt
+				changedAt = parseDBTime(changed.String)
+				if changedAt.After(*watermark) {
+					*watermark = changedAt
 				}
 			}
-			sh.Events = append(sh.Events, ev)
+			if field == "status" {
+				sources[i].hist.Events = append(sources[i].hist.Events, StatusEvent{
+					ID:         id,
+					ChangedAt:  changedAt,
+					FromValue:  fromV.String,
+					FromString: fromS.String,
+					ToValue:    toV.String,
+					ToString:   toS.String,
+				})
+			}
+			if sh := sources[i].scalar[field]; sh != nil {
+				sh.Events = append(sh.Events, ScalarEvent{
+					ID:         id,
+					ChangedAt:  changedAt,
+					FromValue:  fromV.String,
+					FromString: fromS.String,
+					ToValue:    toV.String,
+					ToString:   toS.String,
+				})
+			}
+			if mh := sources[i].membership[field]; mh != nil {
+				mh.Events = append(mh.Events, MembershipEvent{
+					ID:         id,
+					ChangedAt:  changedAt,
+					FromValue:  fromV.String,
+					FromString: fromS.String,
+					ToValue:    toV.String,
+					ToString:   toS.String,
+				})
+			}
 		}
 		if err := crows.Err(); err != nil {
 			crows.Close()
 			return err
 		}
 		crows.Close()
-	}
-	return nil
-}
-
-// loadMembershipCurrent fills each set-valued field's current snapshot set from the issues
-// row (sprint_id/sprint_name, components, labels). It is used only for the never-changed
-// seeding path (no changelog events): historical membership always comes from events, never
-// from today's snapshot. The snapshot carries names only for components/labels (no stable
-// ids), so those seed name-keyed members; sprint carries its id.
-func (b *Builder) loadMembershipCurrent(projects, keys, fields []string, index map[string]int, sources []issueSource) error {
-	for _, keyChunk := range keyBatches(keys, maxKeyBindChunk) {
-		q := `SELECT key, sprint_id, sprint_name, components, labels FROM issues`
-		var args []any
-		switch {
-		case len(keyChunk) > 0:
-			args, _ = keyFilter(keyChunk, &q)
-		case len(projects) > 0:
-			ph := make([]string, len(projects))
-			for i, p := range projects {
-				ph[i] = "?"
-				args = append(args, p)
-			}
-			q += " WHERE project IN (" + strings.Join(ph, ", ") + ")"
-		}
-		rows, err := b.store.db.ReadDB().Query(q, args...)
-		if err != nil {
-			return fmt.Errorf("load membership current values: %w", err)
-		}
-		for rows.Next() {
-			var (
-				key                       string
-				sprintID                  sql.NullInt64
-				sprintName, comps, labels sql.NullString
-			)
-			if err := rows.Scan(&key, &sprintID, &sprintName, &comps, &labels); err != nil {
-				rows.Close()
-				return err
-			}
-			i, ok := index[key]
-			if !ok {
-				continue
-			}
-			for _, f := range fields {
-				mh := sources[i].membership[f]
-				if mh == nil {
-					continue
-				}
-				dim, _ := MembershipDimension(f)
-				switch dim {
-				case "sprint":
-					if sprintID.Valid {
-						mh.CurrentValue = strconv.FormatInt(sprintID.Int64, 10)
-					}
-					if sprintName.Valid {
-						mh.CurrentString = sprintName.String
-					}
-				case "component":
-					if names := parseJSONArray(comps.String); len(names) > 0 {
-						mh.CurrentString = strings.Join(names, ",")
-					}
-				case "label":
-					if names := parseJSONArray(labels.String); len(names) > 0 {
-						mh.CurrentString = strings.Join(names, " ")
-					}
-				}
-			}
-		}
-		if err := rows.Err(); err != nil {
-			rows.Close()
-			return err
-		}
-		rows.Close()
 	}
 	return nil
 }
@@ -763,155 +859,6 @@ func parseJSONArray(s string) []string {
 		return nil
 	}
 	return names
-}
-
-// loadMembershipEvents appends the set-valued changelog transitions for the membership
-// fields to the per-field membership histories already attached to each source. One query
-// covers all membership fields; rows are grouped by (issue, field).
-func (b *Builder) loadMembershipEvents(projects, keys, fields []string, index map[string]int, sources []issueSource, watermark *time.Time) error {
-	fph := make([]string, len(fields))
-	fargs := make([]any, len(fields))
-	for i, f := range fields {
-		fph[i] = "?"
-		fargs[i] = f
-	}
-	inFields := strings.Join(fph, ", ")
-	chunkSize := max(1, maxKeyBindChunk-len(fields))
-	for _, keyChunk := range keyBatches(keys, chunkSize) {
-		cargs := make([]any, 0, len(fields)+len(keyChunk)+len(projects))
-		cargs = append(cargs, fargs...)
-		cq := `SELECT id, issue_key, field, from_value, from_string, to_value, to_string, changed_at
-	         FROM changelog WHERE field IN (` + inFields + `)`
-		switch {
-		case len(keyChunk) > 0:
-			args, in := keyFilter(keyChunk, nil)
-			cq += " AND issue_key IN " + in
-			cargs = append(cargs, args...)
-		case len(projects) > 0:
-			ph := make([]string, len(projects))
-			for i, p := range projects {
-				ph[i] = "?"
-				cargs = append(cargs, p)
-			}
-			cq += " AND issue_key IN (SELECT key FROM issues WHERE project IN (" + strings.Join(ph, ", ") + "))"
-		}
-		cq += " ORDER BY issue_key, field, changed_at"
-
-		crows, err := b.store.db.ReadDB().Query(cq, cargs...)
-		if err != nil {
-			return fmt.Errorf("load membership events: %w", err)
-		}
-		for crows.Next() {
-			var (
-				id, issueKey, field             string
-				fromV, fromS, toV, toS, changed sql.NullString
-			)
-			if err := crows.Scan(&id, &issueKey, &field, &fromV, &fromS, &toV, &toS, &changed); err != nil {
-				crows.Close()
-				return err
-			}
-			i, ok := index[issueKey]
-			if !ok {
-				continue
-			}
-			mh := sources[i].membership[field]
-			if mh == nil {
-				continue
-			}
-			ev := MembershipEvent{
-				ID:         id,
-				FromValue:  fromV.String,
-				FromString: fromS.String,
-				ToValue:    toV.String,
-				ToString:   toS.String,
-			}
-			if changed.Valid && strings.TrimSpace(changed.String) != "" {
-				ev.ChangedAt = parseDBTime(changed.String)
-				if ev.ChangedAt.After(*watermark) {
-					*watermark = ev.ChangedAt
-				}
-			}
-			mh.Events = append(mh.Events, ev)
-		}
-		if err := crows.Err(); err != nil {
-			crows.Close()
-			return err
-		}
-		crows.Close()
-	}
-	return nil
-}
-
-// loadScalarCurrent fills each scalar field's current snapshot value from the issues row,
-// but only for fields that map to an existing issues column. A field with no column keeps
-// CurrentKnown == false, so a never-changed issue surfaces as an explicit unknown period
-// rather than fabricating a value (field availability is a coverage diagnostic).
-func (b *Builder) loadScalarCurrent(projects, keys, fields []string, index map[string]int, sources []issueSource) error {
-	cols, err := b.scalarColumns(fields)
-	if err != nil {
-		return err
-	}
-	if len(cols) == 0 {
-		return nil
-	}
-	// Deterministic column order following the configured field order.
-	fieldOrder := make([]string, 0, len(cols))
-	selCols := make([]string, 0, len(cols))
-	for _, f := range fields {
-		if col, ok := cols[f]; ok {
-			fieldOrder = append(fieldOrder, f)
-			selCols = append(selCols, `"`+col+`"`)
-		}
-	}
-	baseQ := `SELECT key, ` + strings.Join(selCols, ", ") + ` FROM issues`
-	for _, keyChunk := range keyBatches(keys, maxKeyBindChunk) {
-		q := baseQ
-		var args []any
-		switch {
-		case len(keyChunk) > 0:
-			args, _ = keyFilter(keyChunk, &q)
-		case len(projects) > 0:
-			ph := make([]string, len(projects))
-			for i, p := range projects {
-				ph[i] = "?"
-				args = append(args, p)
-			}
-			q += " WHERE project IN (" + strings.Join(ph, ", ") + ")"
-		}
-		rows, err := b.store.db.ReadDB().Query(q, args...)
-		if err != nil {
-			return fmt.Errorf("load scalar current values: %w", err)
-		}
-		for rows.Next() {
-			var key string
-			vals := make([]sql.NullString, len(fieldOrder))
-			dest := make([]any, 0, len(fieldOrder)+1)
-			dest = append(dest, &key)
-			for i := range vals {
-				dest = append(dest, &vals[i])
-			}
-			if err := rows.Scan(dest...); err != nil {
-				rows.Close()
-				return err
-			}
-			i, ok := index[key]
-			if !ok {
-				continue
-			}
-			for j, f := range fieldOrder {
-				if sh := sources[i].scalar[f]; sh != nil {
-					sh.CurrentKnown = true
-					sh.CurrentValue = vals[j].String
-				}
-			}
-		}
-		if err := rows.Err(); err != nil {
-			rows.Close()
-			return err
-		}
-		rows.Close()
-	}
-	return nil
 }
 
 // scalarColumns resolves each scalar tracked field to the issues column holding its current

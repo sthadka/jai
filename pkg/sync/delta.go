@@ -462,6 +462,7 @@ func (e *Engine) DeltaSync(ctx context.Context, opts DeltaOptions) (*DeltaResult
 
 		returnedIDs := make(map[string]struct{}, len(bulkResp.Issues))
 		returnedKeys := make(map[string]struct{}, len(bulkResp.Issues))
+		bundles := make([]*db.IssueBundle, 0, len(bulkResp.Issues))
 		for _, apiIssue := range bulkResp.Issues {
 			if apiIssue.ID != "" {
 				returnedIDs[apiIssue.ID] = struct{}{}
@@ -480,13 +481,35 @@ func (e *Engine) DeltaSync(ctx context.Context, opts DeltaOptions) (*DeltaResult
 			if issue.Updated > maxUpdated {
 				maxUpdated = issue.Updated
 			}
-			if err := e.db.UpsertIssue(issue, extra); err != nil {
-				continue
+			b := &db.IssueBundle{
+				Issue:       issue,
+				Extra:       extra,
+				Links:       ExtractIssueLinks(apiIssue.Key, rawBytes),
+				UpdateLinks: true,
 			}
-			e.applyIssueSideEffects(apiIssue.Key, rawBytes)
-			res.SyncedKeys = append(res.SyncedKeys, apiIssue.Key)
+			if comments, err := ExtractComments(apiIssue.Key, rawBytes); err == nil {
+				b.Comments = comments
+				b.UpdateCommentsText = len(comments) > 0
+			}
+			if attachments, err := ExtractAttachments(apiIssue.Key, rawBytes); err == nil && attachments != nil {
+				b.Attachments = attachments
+				b.UpdateAttachments = true
+			}
+			bundles = append(bundles, b)
 		}
-
+		if len(bundles) > 0 {
+			if err := e.db.UpsertIssueBundleTx(bundles); err != nil {
+				for _, b := range bundles {
+					if berr := e.db.UpsertIssueBundleTx([]*db.IssueBundle{b}); berr == nil {
+						res.SyncedKeys = append(res.SyncedKeys, b.Issue.Key)
+					}
+				}
+			} else {
+				for _, b := range bundles {
+					res.SyncedKeys = append(res.SyncedKeys, b.Issue.Key)
+				}
+			}
+		}
 		for _, t := range targets {
 			_, gotID := returnedIDs[t.id]
 			_, gotKey := returnedKeys[t.key]

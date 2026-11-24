@@ -3,6 +3,7 @@ package metrics
 import (
 	"database/sql"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -136,11 +137,6 @@ func (sprintResolutionProvider) Compute(s *Service, q Query) (*Result, error) {
 // Results are returned sorted by stable member key for deterministic output. This is the
 // typed contract consumed by the downstream sprint consumers (M21/M22/M23, X03).
 func (s *Service) SprintResolutions(q Query) ([]SprintResolution, SprintDiagnostics, error) {
-	results, err := s.sprintMembership(q.Projects)
-	if err != nil {
-		return nil, SprintDiagnostics{}, err
-	}
-
 	rows, err := s.flowRows(q)
 	if err != nil {
 		return nil, SprintDiagnostics{}, err
@@ -156,6 +152,22 @@ func (s *Service) SprintResolutions(q Query) ([]SprintResolution, SprintDiagnost
 			continue
 		}
 		resolvedSet[fr.IssueKey] = true
+	}
+
+	// Fast path: when an active fact generation exists and tracks sprint
+	// membership, read pre-materialized fact_issue_membership directly instead
+	// of scanning and replaying raw changelog rows on every call.
+	active, err := s.store.ActiveGeneration()
+	if err != nil {
+		return nil, SprintDiagnostics{}, err
+	}
+	if active != nil && slices.Contains(s.pol.membershipDimensions(), "sprint") {
+		return s.sprintResolutionsFromFacts(q.Projects, rows, resolvedSet, genuine)
+	}
+
+	results, err := s.sprintMembership(q.Projects)
+	if err != nil {
+		return nil, SprintDiagnostics{}, err
 	}
 
 	agg := map[string]*SprintResolution{}
@@ -186,6 +198,86 @@ func (s *Service) SprintResolutions(q Query) ([]SprintResolution, SprintDiagnost
 			if !m.Resolved {
 				diag.UnresolvedMemberships++
 			}
+		}
+	}
+
+	out := make([]SprintResolution, 0, len(agg))
+	for _, sr := range agg {
+		out = append(out, *sr)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Key < out[j].Key })
+	diag.Sprints = len(out)
+	return out, diag, nil
+}
+
+func (s *Service) sprintResolutionsFromFacts(projects []string, rows []FlowRow, resolvedSet map[string]bool, genuine bool) ([]SprintResolution, SprintDiagnostics, error) {
+	intervals, err := s.store.MembershipIntervals(projects, "sprint")
+	if err != nil {
+		return nil, SprintDiagnostics{}, err
+	}
+
+	// Count issues with incomplete changelog history via idx_issues_proj_cl_sync.
+	unkQ := `SELECT COUNT(*) FROM issues WHERE changelog_synced_at IS NULL`
+	var unkArgs []any
+	if len(projects) > 0 {
+		ph := make([]string, len(projects))
+		for i, p := range projects {
+			ph[i] = "?"
+			unkArgs = append(unkArgs, p)
+		}
+		unkQ += " AND project IN (" + strings.Join(ph, ", ") + ")"
+	}
+	var initialUnknown int
+	if err := s.db.ReadDB().QueryRow(unkQ, unkArgs...).Scan(&initialUnknown); err != nil {
+		return nil, SprintDiagnostics{}, fmt.Errorf("count unknown sprint history issues: %w", err)
+	}
+
+	// Deduplicate (issue_key, member_key) pairs so add/remove/re-add counts once.
+	type issueMemberKey struct {
+		issue  string
+		member string
+	}
+	seenPairs := make(map[issueMemberKey]struct{}, len(intervals))
+	hasSprint := make(map[string]struct{}, len(rows))
+	agg := map[string]*SprintResolution{}
+	diag := SprintDiagnostics{
+		InitialUnknownIssues: initialUnknown,
+		GenuineDone:          genuine,
+	}
+
+	for _, iv := range intervals {
+		m := Member{
+			ID:       iv.MemberID,
+			Name:     iv.MemberName,
+			Resolved: iv.MemberID != "",
+		}
+		mk := m.Key()
+		hasSprint[iv.IssueKey] = struct{}{}
+		pair := issueMemberKey{issue: iv.IssueKey, member: mk}
+		if _, dup := seenPairs[pair]; dup {
+			continue
+		}
+		seenPairs[pair] = struct{}{}
+
+		sr := agg[mk]
+		if sr == nil {
+			sr = &SprintResolution{Key: mk, SprintID: m.ID, SprintName: m.Name, Resolved: m.Resolved}
+			agg[mk] = sr
+		}
+		sr.EverMembers++
+		diag.TotalEverMembers++
+		if resolvedSet[iv.IssueKey] {
+			sr.ResolvedMembers++
+			diag.TotalResolvedMembers++
+		}
+		if !m.Resolved {
+			diag.UnresolvedMemberships++
+		}
+	}
+
+	for i := range rows {
+		if _, ok := hasSprint[rows[i].IssueKey]; !ok {
+			diag.NeverMemberIssues++
 		}
 	}
 

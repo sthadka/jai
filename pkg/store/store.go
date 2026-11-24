@@ -36,6 +36,8 @@ type Store interface {
 	FieldPopulationStats(columns []string, project string) (map[string]*FieldStats, error)
 	GetChangelogSyncCandidates(projectFilter []string) ([]string, error)
 	GetComments(issueKey string) ([]*Comment, error)
+	GetIssueSummary(key string) (map[string]interface{}, error)
+	GetIssuesSummaryByIDs(ids []string) (map[string]map[string]interface{}, error)
 	GetIssue(key string) (map[string]interface{}, error)
 	GetIssueHydrationState(key string) (*IssueHydrationState, error)
 	GetIssueIDToKeyMap() (map[string]string, error)
@@ -77,6 +79,7 @@ type Store interface {
 	UpsertDevLinks(issueKey string, links []*DevLink) error
 	UpsertFieldMapping(f *FieldMapping) error
 	UpsertIssue(issue *Issue, extra map[string]interface{}) error
+	UpsertIssueBundleTx(bundles []*IssueBundle) error
 	UpsertIssuesTx(items []*IssueUpsert) error
 	UpsertIssueLinks(issueKey string, links []IssueLink) error
 	UpsertProject(key, name string) error

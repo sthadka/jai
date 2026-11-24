@@ -116,11 +116,18 @@ func (db *DB) GetChangelogSyncCandidates(projectFilter []string) ([]string, erro
 	return keys, nil
 }
 
-// MarkChangelogSynced stamps changelog_synced_at for the given issue keys.
+// MarkChangelogSynced stamps changelog_synced_at for the given issue keys in
+// a single transaction.
 func (db *DB) MarkChangelogSynced(keys []string) error {
 	if len(keys) == 0 {
 		return nil
 	}
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	// Batch in chunks of 500 to stay under SQLite variable limit.
@@ -140,7 +147,7 @@ func (db *DB) MarkChangelogSynced(keys []string) error {
 			args[j+1] = k
 		}
 
-		_, err := db.Exec(
+		_, err := tx.Exec(
 			fmt.Sprintf(`UPDATE issues SET changelog_synced_at = ? WHERE key IN (%s)`,
 				strings.Join(placeholders, ", ")),
 			args...,
@@ -149,16 +156,22 @@ func (db *DB) MarkChangelogSynced(keys []string) error {
 			return err
 		}
 	}
-	return nil
+	return tx.Commit()
 }
 
 // MarkChangelogFullSynced stamps both changelog_full_synced_at and
-// changelog_synced_at for the given issue keys (full history is a strict
-// superset of tracked-field history).
+// changelog_synced_at for the given issue keys in a single transaction
+// (full history is a strict superset of tracked-field history).
 func (db *DB) MarkChangelogFullSynced(keys []string) error {
 	if len(keys) == 0 {
 		return nil
 	}
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	const chunkSize = 500
@@ -178,7 +191,7 @@ func (db *DB) MarkChangelogFullSynced(keys []string) error {
 			args[j+2] = k
 		}
 
-		_, err := db.Exec(
+		_, err := tx.Exec(
 			fmt.Sprintf(`UPDATE issues SET changelog_full_synced_at = ?, changelog_synced_at = ? WHERE key IN (%s)`,
 				strings.Join(placeholders, ", ")),
 			args...,
@@ -187,7 +200,7 @@ func (db *DB) MarkChangelogFullSynced(keys []string) error {
 			return err
 		}
 	}
-	return nil
+	return tx.Commit()
 }
 
 // ResetChangelogSyncTimestamps clears changelog_synced_at and

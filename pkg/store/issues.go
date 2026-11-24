@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 )
@@ -63,6 +64,19 @@ type IssueUpsert struct {
 	Extra map[string]interface{}
 }
 
+// IssueBundle pairs an issue upsert with its child rows (comments, links,
+// attachments) so a full Jira sync page can commit atomically in one tx.
+type IssueBundle struct {
+	Issue              *Issue
+	Extra              map[string]interface{}
+	Comments           []*Comment
+	UpdateCommentsText bool
+	Links              []IssueLink
+	UpdateLinks        bool
+	Attachments        []*Attachment
+	UpdateAttachments  bool
+}
+
 // buildUpsertIssue returns the INSERT ... ON CONFLICT statement and bound args
 // that upsert one issue row. It is shared by UpsertIssue (single autocommit)
 // and UpsertIssuesTx (many rows in one transaction) so both paths stay in sync.
@@ -106,11 +120,17 @@ func buildUpsertIssue(issue *Issue, extra map[string]interface{}) (string, []int
 		issue.SubtaskKeys, issue.SprintID, issue.SprintName,
 	}
 
-	for k, v := range extra {
-		cols = append(cols, k)
-		vals = append(vals, v)
+	if len(extra) > 0 {
+		extraKeys := make([]string, 0, len(extra))
+		for k := range extra {
+			extraKeys = append(extraKeys, k)
+		}
+		sort.Strings(extraKeys)
+		for _, k := range extraKeys {
+			cols = append(cols, k)
+			vals = append(vals, extra[k])
+		}
 	}
-
 	placeholders := make([]string, len(cols))
 	// Two SET lists: the id-conflict arm overwrites every column except id (so a
 	// moved issue's new key lands on the existing row); the key-conflict arm
@@ -160,19 +180,189 @@ func (db *DB) UpsertIssuesTx(items []*IssueUpsert) error {
 	if err != nil {
 		return fmt.Errorf("begin issue upsert tx: %w", err)
 	}
+	stmts := make(map[string]*sql.Stmt, 4)
+	closeStmts := func() {
+		for _, s := range stmts {
+			_ = s.Close()
+		}
+	}
 	for _, it := range items {
 		query, vals := buildUpsertIssue(it.Issue, it.Extra)
-		if _, err := tx.Exec(query, vals...); err != nil {
+		stmt, ok := stmts[query]
+		if !ok {
+			stmt, err = tx.Prepare(query)
+			if err != nil {
+				closeStmts()
+				_ = tx.Rollback()
+				return fmt.Errorf("preparing upsert for issue %s in tx: %w", it.Issue.Key, err)
+			}
+			stmts[query] = stmt
+		}
+		if _, err := stmt.Exec(vals...); err != nil {
+			closeStmts()
 			_ = tx.Rollback()
 			return fmt.Errorf("upserting issue %s in tx: %w", it.Issue.Key, err)
 		}
 	}
+	closeStmts()
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit issue upsert tx: %w", err)
 	}
 	return nil
 }
 
+// UpsertIssueBundleTx commits an entire batch of issues and their child rows
+// (comments, comments_text, issue_links, attachments) in a single transaction,
+// reusing prepared statements across all bundles.
+func (db *DB) UpsertIssueBundleTx(bundles []*IssueBundle) error {
+	if len(bundles) == 0 {
+		return nil
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin issue bundle tx: %w", err)
+	}
+
+	issueStmts := make(map[string]*sql.Stmt, 4)
+	var commentStmt, commentsTextStmt, delLinksStmt, insLinkStmt, delAttStmt, insAttStmt, updAttCountStmt *sql.Stmt
+	closeAll := func() {
+		for _, s := range issueStmts {
+			_ = s.Close()
+		}
+		for _, s := range []*sql.Stmt{commentStmt, commentsTextStmt, delLinksStmt, insLinkStmt, delAttStmt, insAttStmt, updAttCountStmt} {
+			if s != nil {
+				_ = s.Close()
+			}
+		}
+	}
+	fail := func(err error) error {
+		closeAll()
+		_ = tx.Rollback()
+		return err
+	}
+
+	nowComments := time.Now().UTC().Format("2006-01-02T15:04:05Z")
+	nowRFC3339 := time.Now().UTC().Format(time.RFC3339)
+
+	for _, b := range bundles {
+		if b == nil || b.Issue == nil {
+			continue
+		}
+		query, vals := buildUpsertIssue(b.Issue, b.Extra)
+		stmt, ok := issueStmts[query]
+		if !ok {
+			stmt, err = tx.Prepare(query)
+			if err != nil {
+				return fail(fmt.Errorf("preparing upsert for issue %s: %w", b.Issue.Key, err))
+			}
+			issueStmts[query] = stmt
+		}
+		if _, err := stmt.Exec(vals...); err != nil {
+			return fail(fmt.Errorf("upserting issue %s: %w", b.Issue.Key, err))
+		}
+
+		key := b.Issue.Key
+		if len(b.Comments) > 0 {
+			if commentStmt == nil {
+				commentStmt, err = tx.Prepare(
+					`INSERT OR REPLACE INTO comments (id, issue_key, author, author_email, body, created, updated)
+					 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+				)
+				if err != nil {
+					return fail(err)
+				}
+			}
+			for _, c := range b.Comments {
+				if _, err := commentStmt.Exec(c.ID, c.IssueKey, c.Author, c.AuthorEmail, c.Body, c.Created, c.Updated); err != nil {
+					return fail(fmt.Errorf("upserting comment %s for %s: %w", c.ID, key, err))
+				}
+			}
+		}
+		if b.UpdateCommentsText {
+			if commentsTextStmt == nil {
+				commentsTextStmt, err = tx.Prepare(`
+					UPDATE issues SET comments_text = (
+						SELECT GROUP_CONCAT(body, ' ') FROM comments WHERE issue_key = ?
+					), synced_at = ?
+					WHERE key = ?`)
+				if err != nil {
+					return fail(err)
+				}
+			}
+			if _, err := commentsTextStmt.Exec(key, nowComments, key); err != nil {
+				return fail(fmt.Errorf("updating comments_text for %s: %w", key, err))
+			}
+		}
+		if b.UpdateLinks {
+			if delLinksStmt == nil {
+				delLinksStmt, err = tx.Prepare(`DELETE FROM issue_links WHERE issue_key = ?`)
+				if err != nil {
+					return fail(err)
+				}
+			}
+			if _, err := delLinksStmt.Exec(key); err != nil {
+				return fail(fmt.Errorf("deleting links for %s: %w", key, err))
+			}
+			if len(b.Links) > 0 {
+				if insLinkStmt == nil {
+					insLinkStmt, err = tx.Prepare(
+						`INSERT OR REPLACE INTO issue_links (id, issue_key, link_type, direction, linked_key, linked_summary, linked_status, linked_project) VALUES (?,?,?,?,?,?,?,?)`,
+					)
+					if err != nil {
+						return fail(err)
+					}
+				}
+				for _, l := range b.Links {
+					if _, err := insLinkStmt.Exec(l.ID, l.IssueKey, l.LinkType, l.Direction, l.LinkedKey, l.LinkedSummary, l.LinkedStatus, l.LinkedProject); err != nil {
+						return fail(fmt.Errorf("inserting link for %s: %w", key, err))
+					}
+				}
+			}
+		}
+		if b.UpdateAttachments {
+			if delAttStmt == nil {
+				delAttStmt, err = tx.Prepare(`DELETE FROM attachments WHERE issue_key = ?`)
+				if err != nil {
+					return fail(err)
+				}
+			}
+			if _, err := delAttStmt.Exec(key); err != nil {
+				return fail(fmt.Errorf("deleting attachments for %s: %w", key, err))
+			}
+			if len(b.Attachments) > 0 {
+				if insAttStmt == nil {
+					insAttStmt, err = tx.Prepare(
+						`INSERT INTO attachments (id, issue_key, filename, size, mime_type, author, created, url, synced_at)
+						 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+					)
+					if err != nil {
+						return fail(err)
+					}
+				}
+				for _, a := range b.Attachments {
+					if _, err := insAttStmt.Exec(a.ID, a.IssueKey, a.Filename, a.Size, a.MimeType, a.Author, a.Created, a.URL, nowRFC3339); err != nil {
+						return fail(fmt.Errorf("inserting attachment %d for %s: %w", a.ID, key, err))
+					}
+				}
+			}
+			if updAttCountStmt == nil {
+				updAttCountStmt, err = tx.Prepare(`UPDATE issues SET attachment_count = ? WHERE key = ?`)
+				if err != nil {
+					return fail(err)
+				}
+			}
+			if _, err := updAttCountStmt.Exec(len(b.Attachments), key); err != nil {
+				return fail(fmt.Errorf("updating attachment_count for %s: %w", key, err))
+			}
+		}
+	}
+
+	closeAll()
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit issue bundle tx: %w", err)
+	}
+	return nil
+}
 // GetIssueUpdated returns the stored "updated" timestamp for an issue, or "" if not found.
 func (db *DB) GetIssueUpdated(key string) (string, error) {
 	var updated sql.NullString
@@ -288,11 +478,18 @@ func (db *DB) getIssuesUpdatedByColumn(col string, vals []string) (map[string]st
 	return result, nil
 }
 
-// MarkIssueDetailsSynced stamps details_synced_at for the given issue keys.
+// MarkIssueDetailsSynced stamps details_synced_at for the given issue keys in
+// a single transaction.
 func (db *DB) MarkIssueDetailsSynced(keys []string) error {
 	if len(keys) == 0 {
 		return nil
 	}
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
 	now := time.Now().UTC().Format(time.RFC3339)
 	const chunkSize = 500
 	for i := 0; i < len(keys); i += chunkSize {
@@ -308,7 +505,7 @@ func (db *DB) MarkIssueDetailsSynced(keys []string) error {
 			placeholders[j] = "?"
 			args[j+1] = k
 		}
-		_, err := db.Exec(
+		_, err := tx.Exec(
 			fmt.Sprintf(`UPDATE issues SET details_synced_at = ? WHERE key IN (%s)`, strings.Join(placeholders, ", ")),
 			args...,
 		)
@@ -316,7 +513,7 @@ func (db *DB) MarkIssueDetailsSynced(keys []string) error {
 			return err
 		}
 	}
-	return nil
+	return tx.Commit()
 }
 
 // GetIssuesRawJSON returns a map of issue key → stored raw_json for the given
@@ -513,14 +710,189 @@ func (db *DB) getIssueByKey(key string) (map[string]interface{}, error) {
 	return result, nil
 }
 
-// UpsertIssueLinks replaces all link rows for an issue.
+// summaryExcludedCols lists heavy overflow-page text columns omitted from
+// GetIssueSummary and GetIssuesSummaryByIDs.
+var summaryExcludedCols = map[string]bool{
+	"raw_json":      true,
+	"description":   true,
+	"environment":   true,
+	"comments_text": true,
+}
+
+func (db *DB) summaryColumns() ([]string, error) {
+	rows, err := db.ReadDB().Query(`PRAGMA table_info(issues)`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var cols []string
+	for rows.Next() {
+		var (
+			cid     int
+			name    string
+			colType string
+			notNull int
+			dflt    sql.NullString
+			pk      int
+		)
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
+			return nil, err
+		}
+		if summaryExcludedCols[name] {
+			continue
+		}
+		cols = append(cols, `"`+name+`"`)
+	}
+	return cols, rows.Err()
+}
+
+// GetIssueSummary retrieves a single issue by key (resolving aliases) without
+// reading heavy blob/text columns (raw_json, description, environment, comments_text).
+func (db *DB) GetIssueSummary(key string) (map[string]interface{}, error) {
+	selCols, err := db.summaryColumns()
+	if err != nil {
+		return nil, err
+	}
+	fetch := func(k string) (map[string]interface{}, error) {
+		rows, err := db.ReadDB().Query("SELECT "+strings.Join(selCols, ", ")+" FROM issues WHERE key = ?", k)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		cols, err := rows.Columns()
+		if err != nil {
+			return nil, err
+		}
+		if !rows.Next() {
+			return nil, nil
+		}
+		vals := make([]interface{}, len(cols))
+		ptrs := make([]interface{}, len(cols))
+		for i := range vals {
+			ptrs[i] = &vals[i]
+		}
+		if err := rows.Scan(ptrs...); err != nil {
+			return nil, err
+		}
+		res := make(map[string]interface{}, len(cols))
+		for i, c := range cols {
+			res[c] = vals[i]
+		}
+		return res, nil
+	}
+	res, err := fetch(key)
+	if err != nil {
+		return nil, err
+	}
+	if res == nil {
+		if resolved := db.resolveKey(key); resolved != key {
+			if res, err = fetch(resolved); err != nil {
+				return nil, err
+			}
+		}
+	}
+	if res == nil {
+		return nil, nil
+	}
+	if err := db.mergeCustomFields(res); err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+// GetIssuesSummaryByIDs retrieves issue summaries keyed by Jira numeric id,
+// excluding heavy blob/text columns and chunking to stay under SQLite bind limits.
+func (db *DB) GetIssuesSummaryByIDs(ids []string) (map[string]map[string]interface{}, error) {
+	out := make(map[string]map[string]interface{}, len(ids))
+	if len(ids) == 0 {
+		return out, nil
+	}
+	selCols, err := db.summaryColumns()
+	if err != nil {
+		return nil, err
+	}
+	selectList := strings.Join(selCols, ", ")
+	const chunkSize = 500
+	for i := 0; i < len(ids); i += chunkSize {
+		end := i + chunkSize
+		if end > len(ids) {
+			end = len(ids)
+		}
+		chunk := ids[i:end]
+		placeholders := make([]string, len(chunk))
+		args := make([]any, len(chunk))
+		for j, id := range chunk {
+			placeholders[j] = "?"
+			args[j] = id
+		}
+		rows, err := db.ReadDB().Query("SELECT "+selectList+" FROM issues WHERE id IN ("+strings.Join(placeholders, ", ")+")", args...)
+		if err != nil {
+			return nil, err
+		}
+		cols, err := rows.Columns()
+		if err != nil {
+			rows.Close()
+			return nil, err
+		}
+		for rows.Next() {
+			vals := make([]interface{}, len(cols))
+			ptrs := make([]interface{}, len(cols))
+			for j := range vals {
+				ptrs[j] = &vals[j]
+			}
+			if err := rows.Scan(ptrs...); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			res := make(map[string]interface{}, len(cols))
+			for j, c := range cols {
+				res[c] = vals[j]
+			}
+			if err := db.mergeCustomFields(res); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			if idStr, ok := res["id"].(string); ok && idStr != "" {
+				out[idStr] = res
+			}
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		rows.Close()
+	}
+	return out, nil
+}
+
+// UpsertIssueLinks replaces all link rows for an issue atomically in a transaction.
 func (db *DB) UpsertIssueLinks(issueKey string, links []IssueLink) error {
-	if _, err := db.Exec(`DELETE FROM issue_links WHERE issue_key = ?`, issueKey); err != nil {
+	tx, err := db.Begin()
+	if err != nil {
 		return err
 	}
+	defer tx.Rollback()
+	if err := UpsertIssueLinksTx(tx, issueKey, links); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// UpsertIssueLinksTx replaces all link rows for an issue within an existing transaction.
+func UpsertIssueLinksTx(tx *sql.Tx, issueKey string, links []IssueLink) error {
+	if _, err := tx.Exec(`DELETE FROM issue_links WHERE issue_key = ?`, issueKey); err != nil {
+		return err
+	}
+	if len(links) == 0 {
+		return nil
+	}
+	stmt, err := tx.Prepare(`INSERT OR REPLACE INTO issue_links (id, issue_key, link_type, direction, linked_key, linked_summary, linked_status, linked_project) VALUES (?,?,?,?,?,?,?,?)`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
 	for _, l := range links {
-		if _, err := db.Exec(
-			`INSERT OR REPLACE INTO issue_links (id, issue_key, link_type, direction, linked_key, linked_summary, linked_status, linked_project) VALUES (?,?,?,?,?,?,?,?)`,
+		if _, err := stmt.Exec(
 			l.ID, l.IssueKey, l.LinkType, l.Direction, l.LinkedKey, l.LinkedSummary, l.LinkedStatus, l.LinkedProject,
 		); err != nil {
 			return err

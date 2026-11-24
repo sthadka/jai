@@ -107,3 +107,32 @@ func TestMigrationBackfillsBuiltinItemTypes(t *testing.T) {
 		}
 	}
 }
+
+func TestFieldPopulationStats_SinglePass(t *testing.T) {
+	db := openTestDB(t)
+
+	longSummary := "zzzzzzzzzz01234567890123456789012345678901234567890123456789EXTRA"
+	for _, iss := range []*Issue{
+		{ID: "1", Key: "P1-1", Project: "P1", Summary: longSummary, Priority: "High", Assignee: "Alice", RawJSON: "{}"},
+		{ID: "2", Key: "P1-2", Project: "P1", Summary: "short", Priority: "", Assignee: "", RawJSON: "{}"},
+		{ID: "3", Key: "P2-1", Project: "P2", Summary: "other", Priority: "Low", Assignee: "Bob", RawJSON: "{}"},
+	} {
+		if err := db.UpsertIssue(iss, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	stats, err := db.FieldPopulationStats([]string{"summary", "priority", "assignee", "nonexistent_col"}, "P1")
+	if err != nil {
+		t.Fatalf("FieldPopulationStats: %v", err)
+	}
+	if st := stats["priority"]; st == nil || st.NonNull != 1 || st.Total != 2 || st.Sample != "High" {
+		t.Errorf("priority stats = %+v, want NonNull=1 Total=2 Sample=High", st)
+	}
+	if st := stats["summary"]; st == nil || st.NonNull != 2 || st.Total != 2 || len(st.Sample) != 63 {
+		t.Errorf("summary stats = %+v, want NonNull=2 Total=2 truncated sample len 63", st)
+	}
+	if st := stats["nonexistent_col"]; st == nil || st.NonNull != 0 || st.Total != 2 {
+		t.Errorf("nonexistent_col stats = %+v, want NonNull=0 Total=2", st)
+	}
+}

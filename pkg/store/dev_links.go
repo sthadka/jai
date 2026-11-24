@@ -1,6 +1,9 @@
 package store
 
-import "time"
+import (
+	"database/sql"
+	"time"
+)
 
 // DevLink represents a row from the dev_links table.
 type DevLink struct {
@@ -14,27 +17,43 @@ type DevLink struct {
 	Created  string
 }
 
-// UpsertDevLinks replaces all dev links for an issue and updates pr_count, has_open_pr, branch_name.
+// UpsertDevLinks replaces all dev links for an issue and updates pr_count,
+// has_open_pr, and branch_name atomically in a single transaction.
 func (db *DB) UpsertDevLinks(issueKey string, links []*DevLink) error {
-	// Delete existing dev links for this issue.
-	if _, err := db.Exec(`DELETE FROM dev_links WHERE issue_key = ?`, issueKey); err != nil {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := UpsertDevLinksTx(tx, issueKey, links); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// UpsertDevLinksTx replaces all dev links for an issue within an existing transaction.
+func UpsertDevLinksTx(tx *sql.Tx, issueKey string, links []*DevLink) error {
+	if _, err := tx.Exec(`DELETE FROM dev_links WHERE issue_key = ?`, issueKey); err != nil {
 		return err
 	}
 
-	// Insert new dev links.
-	for _, link := range links {
-		_, err := db.Exec(
+	if len(links) > 0 {
+		stmt, err := tx.Prepare(
 			`INSERT INTO dev_links (issue_key, type, url, title, status, repo, author, created, synced_at)
 			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			link.IssueKey, link.Type, link.URL, link.Title, link.Status, link.Repo, link.Author, link.Created,
-			time.Now().UTC().Format(time.RFC3339),
 		)
 		if err != nil {
 			return err
 		}
+		defer stmt.Close()
+		now := time.Now().UTC().Format(time.RFC3339)
+		for _, link := range links {
+			if _, err := stmt.Exec(link.IssueKey, link.Type, link.URL, link.Title, link.Status, link.Repo, link.Author, link.Created, now); err != nil {
+				return err
+			}
+		}
 	}
 
-	// Update denormalized columns on issues.
 	prCount := 0
 	hasOpenPR := 0
 	branchName := ""
@@ -51,7 +70,7 @@ func (db *DB) UpsertDevLinks(issueKey string, links []*DevLink) error {
 		}
 	}
 
-	_, err := db.Exec(
+	_, err := tx.Exec(
 		`UPDATE issues SET pr_count = ?, has_open_pr = ?, branch_name = ? WHERE key = ?`,
 		prCount, hasOpenPR, branchName, issueKey,
 	)

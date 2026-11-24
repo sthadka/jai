@@ -1,10 +1,11 @@
 package store
 
 import (
+	"database/sql"
 	"fmt"
 	"regexp"
+	"strings"
 )
-
 var safeColumnRe = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 
 // FieldMapping represents a row from the field_map table.
@@ -103,51 +104,104 @@ type FieldStats struct {
 	Sample  string
 }
 
-// FieldPopulationStats returns non-null counts for the given columns in the issues table.
+// FieldPopulationStats returns non-null counts and a sample value for the given
+// columns in the issues table using a single pass (chunked at 40 columns when wide).
 // If project is non-empty, counts are scoped to that project.
 func (db *DB) FieldPopulationStats(columns []string, project string) (map[string]*FieldStats, error) {
 	where := ""
-	var totalArgs []interface{}
+	var args []any
 	if project != "" {
 		where = " WHERE project = ?"
-		totalArgs = append(totalArgs, project)
+		args = append(args, project)
 	}
 
-	var total int
-	if err := db.ReadDB().QueryRow("SELECT COUNT(*) FROM issues"+where, totalArgs...).Scan(&total); err != nil {
+	// Filter to safe column names that actually exist on the issues table so
+	// one bad/missing column does not fail the entire single-pass query.
+	existing := make(map[string]bool)
+	crows, err := db.ReadDB().Query(`PRAGMA table_info(issues)`)
+	if err != nil {
 		return nil, err
 	}
+	for crows.Next() {
+		var (
+			cid     int
+			name    string
+			colType string
+			notNull int
+			dflt    sql.NullString
+			pk      int
+		)
+		if err := crows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err == nil {
+			existing[name] = true
+		}
+	}
+	crows.Close()
 
 	result := make(map[string]*FieldStats, len(columns))
+	var validCols []string
+	var missingCols []string
 	for _, col := range columns {
 		if !safeColumnRe.MatchString(col) {
 			continue
 		}
-
-		cond := `"` + col + `" IS NOT NULL AND "` + col + `" != ''`
-		if project != "" {
-			cond += " AND project = ?"
+		if existing[col] {
+			validCols = append(validCols, col)
+		} else {
+			missingCols = append(missingCols, col)
 		}
+	}
 
-		var args []interface{}
-		if project != "" {
-			args = append(args, project)
+	total := 0
+	if len(validCols) == 0 {
+		if len(missingCols) > 0 {
+			if err := db.ReadDB().QueryRow("SELECT COUNT(*) FROM issues"+where, args...).Scan(&total); err != nil {
+				return nil, err
+			}
+			for _, col := range missingCols {
+				result[col] = &FieldStats{Total: total}
+			}
 		}
+		return result, nil
+	}
 
-		var count int
-		if err := db.ReadDB().QueryRow(`SELECT COUNT(*) FROM issues WHERE `+cond, args...).Scan(&count); err != nil {
-			result[col] = &FieldStats{Total: total}
-			continue
+	const colChunkSize = 40
+	for i := 0; i < len(validCols); i += colChunkSize {
+		end := i + colChunkSize
+		if end > len(validCols) {
+			end = len(validCols)
 		}
+		chunk := validCols[i:end]
 
-		var sample string
-		row := db.ReadDB().QueryRow(`SELECT "`+col+`" FROM issues WHERE `+cond+` LIMIT 1`, args...)
-		_ = row.Scan(&sample)
-		if len(sample) > 60 {
-			sample = sample[:60] + "..."
+		exprs := make([]string, 0, 1+len(chunk)*2)
+		exprs = append(exprs, "COUNT(*)")
+		for _, col := range chunk {
+			qcol := `"` + col + `"`
+			exprs = append(exprs,
+				fmt.Sprintf(`COALESCE(SUM(CASE WHEN %s IS NOT NULL AND %s <> '' THEN 1 ELSE 0 END), 0)`, qcol, qcol),
+				fmt.Sprintf(`MAX(CASE WHEN %s IS NOT NULL AND %s <> '' THEN SUBSTR(CAST(%s AS TEXT), 1, 61) END)`, qcol, qcol, qcol),
+			)
 		}
-
-		result[col] = &FieldStats{NonNull: count, Total: total, Sample: sample}
+		q := "SELECT " + strings.Join(exprs, ", ") + " FROM issues" + where
+		counts := make([]int, len(chunk))
+		samples := make([]sql.NullString, len(chunk))
+		dest := make([]any, 0, 1+len(chunk)*2)
+		dest = append(dest, &total)
+		for j := range chunk {
+			dest = append(dest, &counts[j], &samples[j])
+		}
+		if err := db.ReadDB().QueryRow(q, args...).Scan(dest...); err != nil {
+			return nil, err
+		}
+		for j, col := range chunk {
+			sample := samples[j].String
+			if len(sample) > 60 {
+				sample = sample[:60] + "..."
+			}
+			result[col] = &FieldStats{NonNull: counts[j], Total: total, Sample: sample}
+		}
+	}
+	for _, col := range missingCols {
+		result[col] = &FieldStats{Total: total}
 	}
 
 	return result, nil

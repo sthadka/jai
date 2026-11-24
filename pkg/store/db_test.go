@@ -430,3 +430,77 @@ func TestReadDB_CloseAndURISpecialPath(t *testing.T) {
 		t.Fatal("expected ReadDB to be closed after db.Close()")
 	}
 }
+
+func TestUpsertIssueBundleTx_AndSlimSummary(t *testing.T) {
+	db := openTestDB(t)
+
+	bundles := []*IssueBundle{
+		{
+			Issue: &Issue{
+				ID:          "201",
+				Key:         "BND-1",
+				Project:     "BND",
+				Summary:     "Bundled issue",
+				Description: "Very long description body",
+				RawJSON:     `{"key":"BND-1","large":"blob"}`,
+			},
+			Comments: []*Comment{
+				{ID: "cm-1", IssueKey: "BND-1", Author: "Alice", Body: "hello world", Created: "2026-01-01T00:00:00Z"},
+			},
+			UpdateCommentsText: true,
+			Links: []IssueLink{
+				{ID: "lnk-1", IssueKey: "BND-1", LinkType: "Blocks", Direction: "outward", LinkedKey: "BND-2"},
+			},
+			UpdateLinks: true,
+			Attachments: []*Attachment{
+				{ID: 11, IssueKey: "BND-1", Filename: "spec.pdf", Size: 1024},
+			},
+			UpdateAttachments: true,
+		},
+		{
+			Issue: &Issue{
+				ID:      "202",
+				Key:     "BND-2",
+				Project: "BND",
+				Summary: "Second issue",
+				RawJSON: `{"key":"BND-2"}`,
+			},
+		},
+	}
+
+	if err := db.UpsertIssueBundleTx(bundles); err != nil {
+		t.Fatalf("UpsertIssueBundleTx: %v", err)
+	}
+
+	assertCount(t, db, "SELECT count(*) FROM issues", 2)
+	assertCount(t, db, "SELECT count(*) FROM comments WHERE issue_key = 'BND-1'", 1)
+	assertCount(t, db, "SELECT count(*) FROM issue_links WHERE issue_key = 'BND-1'", 1)
+	assertCount(t, db, "SELECT count(*) FROM attachments WHERE issue_key = 'BND-1'", 1)
+	assertCount(t, db, "SELECT attachment_count FROM issues WHERE key = 'BND-1'", 1)
+	assertCount(t, db, "SELECT count(*) FROM issues_fts WHERE issues_fts MATCH 'hello'", 1)
+
+	// Slim summary projection omits heavy blob/text columns.
+	sum, err := db.GetIssueSummary("BND-1")
+	if err != nil {
+		t.Fatalf("GetIssueSummary: %v", err)
+	}
+	if sum == nil || sum["summary"] != "Bundled issue" {
+		t.Fatalf("unexpected GetIssueSummary: %v", sum)
+	}
+	for _, excluded := range []string{"raw_json", "description", "environment", "comments_text"} {
+		if _, present := sum[excluded]; present {
+			t.Errorf("GetIssueSummary should omit %q", excluded)
+		}
+	}
+
+	byID, err := db.GetIssuesSummaryByIDs([]string{"201", "202", "999"})
+	if err != nil {
+		t.Fatalf("GetIssuesSummaryByIDs: %v", err)
+	}
+	if len(byID) != 2 || byID["201"]["key"] != "BND-1" || byID["202"]["key"] != "BND-2" {
+		t.Fatalf("unexpected GetIssuesSummaryByIDs: %v", byID)
+	}
+	if _, present := byID["201"]["raw_json"]; present {
+		t.Errorf("GetIssuesSummaryByIDs should omit raw_json")
+	}
+}

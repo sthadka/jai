@@ -316,8 +316,16 @@ func ReportCoverage(database db.Store, projects []string, pol *Policy, cfg *conf
 		return nil, err
 	}
 
-	// Observed changelog fields.
-	fieldRows, err := database.ReadDB().Query(`SELECT DISTINCT field FROM changelog WHERE field IS NOT NULL`)
+	// Observed changelog fields via loose-index skip-scan on idx_changelog_field_issue_time.
+	fieldRows, err := database.ReadDB().Query(`
+		WITH RECURSIVE distinct_fields(f) AS (
+			SELECT MIN(field) FROM changelog WHERE field IS NOT NULL
+			UNION ALL
+			SELECT (SELECT MIN(field) FROM changelog WHERE field > distinct_fields.f)
+			FROM distinct_fields
+			WHERE distinct_fields.f IS NOT NULL
+		)
+		SELECT f FROM distinct_fields WHERE f IS NOT NULL`)
 	if err != nil {
 		return nil, fmt.Errorf("coverage fields query: %w", err)
 	}
