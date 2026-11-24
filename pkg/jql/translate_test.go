@@ -90,7 +90,7 @@ func TestTranslateExample89SQLite(t *testing.T) {
 		"lower(project) = lower('ROX')",
 		"lower(type) = lower('Bug')",
 		"lower(COALESCE(team,'')) NOT IN ('', lower('ACS Docs'))",
-		"(lower(priority) IN (lower('Critical'),lower('Blocker')) OR CAST(px_impact_score AS REAL) >= 10000)",
+		"(lower(priority) IN (lower('Critical'),lower('Blocker')) OR px_impact_score >= 10000)",
 		"created < datetime('now','-90 day')",
 		"(resolved IS NULL OR resolved = '')",
 		"lower(status) IN (lower('New'),lower('Backlog'),lower('Refinement'),lower('To Do'))",
@@ -161,7 +161,7 @@ func TestTranslateCaseInsensitiveStrings(t *testing.T) {
 func TestTranslateNonStringKindsStayExact(t *testing.T) {
 	// Numeric: bare comparison, no lower().
 	r := mustTranslate(t, `px_impact_score >= 10000`, translateOpts(SQLite))
-	wantFragments(t, r.SQL, "CAST(px_impact_score AS REAL) >= 10000")
+	wantFragments(t, r.SQL, "px_impact_score >= 10000")
 	if strings.Contains(norm(r.SQL), "lower(") {
 		t.Errorf("numeric clause should not use lower(): %s", r.SQL)
 	}

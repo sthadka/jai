@@ -216,6 +216,7 @@ var builtinAliases = FieldMap{
 	"key":            {Column: "key", Kind: KindString},
 	"issuekey":       {Column: "key", Kind: KindString},
 	"issue":          {Column: "key", Kind: KindString},
+	"text":           {Column: "text", Kind: KindString},
 	"summary":        {Column: "summary", Kind: KindString},
 	"description":    {Column: "description", Kind: KindString},
 	"project":        {Column: "project", Kind: KindString},
@@ -230,6 +231,14 @@ var builtinAliases = FieldMap{
 	"parent":         {Column: "parent_key", Kind: KindString},
 	"epic":           {Column: "epic_key", Kind: KindString},
 	"sprint":         {Column: "sprint", Kind: KindString},
+
+	// numeric fields
+	"story_points":       {Column: "story_points", Kind: KindNumber},
+	"storypoints":        {Column: "story_points", Kind: KindNumber},
+	"sprint_id":          {Column: "sprint_id", Kind: KindNumber},
+	"original_estimate":  {Column: "original_estimate", Kind: KindNumber},
+	"time_spent":         {Column: "time_spent", Kind: KindNumber},
+	"remaining_estimate": {Column: "remaining_estimate", Kind: KindNumber},
 
 	// entity fields (values may be ids)
 	"assignee": {Column: "assignee", Kind: KindString, Entity: true},

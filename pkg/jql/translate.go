@@ -55,10 +55,18 @@ type Options struct {
 	Now time.Time
 	// SelectColumns overrides the projected columns. When empty, the default
 	// issue-list projection is used, augmented with any columns referenced by the
-	// WHERE predicates or ORDER BY so the emitted SQL is self-consistent.
+	// WHERE predicates or ORDER BY so the statement is self-consistent.
 	SelectColumns []string
+	// UseFTS5 enables SQLite FTS5 rewrites for `~` / `!~` predicates on FTS-indexed
+	// fields (`text`, `summary`, `description`, `labels`, `comments_text`), emitting
+	// `rowid IN (SELECT rowid FROM issues_fts WHERE issues_fts MATCH ...)` instead of LIKE.
+	// Ignored when Dialect != SQLite.
+	UseFTS5 bool
+	// FTSRewrite, when non-nil, intercepts `~` / `!~` predicates before default
+	// emission. It receives (column, pattern) and returns (sqlPredicate, handled).
+	// For `!~`, the returned predicate is wrapped in `NOT (...)`.
+	FTSRewrite func(field, pattern string) (string, bool)
 }
-
 // Result is the output of [Translate]: the compiled SQL statement and the
 // ordered list of projected columns (so callers can label result rows without
 // re-parsing the SELECT).
@@ -123,7 +131,13 @@ func emit(rq *ResolvedQuery, opts Options) (Result, error) {
 	if now.IsZero() {
 		now = time.Now()
 	}
-	cp := &compiler{e: e, now: now}
+	cp := &compiler{
+		e:          e,
+		dialect:    opts.Dialect,
+		now:        now,
+		useFTS5:    opts.UseFTS5,
+		ftsRewrite: opts.FTSRewrite,
+	}
 
 	cols := selectColumns(opts, rq)
 
@@ -185,7 +199,8 @@ func referencedColumns(rq *ResolvedQuery) []string {
 	var out []string
 	seen := map[string]bool{}
 	add := func(c string) {
-		if c != "" && !seen[c] {
+		// "text" is a virtual full-text search alias, not a physical issues column.
+		if c != "" && c != "text" && !seen[c] {
 			seen[c] = true
 			out = append(out, c)
 		}
@@ -225,10 +240,12 @@ func orderBy(terms []ResolvedOrder) string {
 // compiler walks the resolved boolean tree, delegating the dialect-specific leaf
 // spellings to its [emitter].
 type compiler struct {
-	e   emitter
-	now time.Time
+	e          emitter
+	dialect    Dialect
+	now        time.Time
+	useFTS5    bool
+	ftsRewrite func(field, pattern string) (string, bool)
 }
-
 // expr compiles a resolved boolean node into a SQL fragment.
 func (cp *compiler) expr(e ResolvedExpr) (string, error) {
 	switch n := e.(type) {
@@ -279,14 +296,17 @@ func (cp *compiler) clause(c *ResolvedClause) (string, error) {
 	case OpIsNotEmpty:
 		return "NOT " + emptyExpr(col), nil
 	case OpContains:
-		return cp.e.textContains(col, c.Values[0].Str, false), nil
+		return cp.emitTextContains(col, c.Values[0].Str, false), nil
 	case OpNotContains:
-		return cp.e.textContains(col, c.Values[0].Str, true), nil
+		return cp.emitTextContains(col, c.Values[0].Str, true), nil
 	case OpGt, OpGte, OpLt, OpLte:
 		return cp.compare(c)
 	case OpEq:
 		if c.Kind == KindArray {
 			return cp.e.arrayContains(col, c.Values[0].Str), nil
+		}
+		if isCanonicalKeyCol(col) {
+			return keyEq(col, c.Values[0]), nil
 		}
 		if c.Kind == KindString {
 			return ciEq(col, c.Values[0]), nil
@@ -295,6 +315,9 @@ func (cp *compiler) clause(c *ResolvedClause) (string, error) {
 	case OpNeq:
 		if c.Kind == KindArray {
 			return "NOT " + cp.e.arrayContains(col, c.Values[0].Str), nil
+		}
+		if isCanonicalKeyCol(col) {
+			return keyNeq(col, c.Values[0]), nil
 		}
 		if c.Kind == KindString {
 			return ciNeq(col, c.Values[0]), nil
@@ -305,6 +328,9 @@ func (cp *compiler) clause(c *ResolvedClause) (string, error) {
 		if c.Kind == KindArray {
 			return cp.arrayIn(col, c.Values, false), nil
 		}
+		if isCanonicalKeyCol(col) {
+			return keyIn(col, c.Values), nil
+		}
 		if c.Kind == KindString {
 			return ciIn(col, c.Values), nil
 		}
@@ -312,6 +338,9 @@ func (cp *compiler) clause(c *ResolvedClause) (string, error) {
 	case OpNotIn:
 		if c.Kind == KindArray {
 			return cp.arrayIn(col, c.Values, true), nil
+		}
+		if isCanonicalKeyCol(col) {
+			return keyNotIn(col, c.Values), nil
 		}
 		if c.Kind == KindString {
 			return ciNotIn(col, c.Values), nil
@@ -439,6 +468,78 @@ func loweredLiteralList(values []ResolvedValue) string {
 	return strings.Join(parts, ",")
 }
 
+
+// isCanonicalKeyCol reports whether col stores canonical uppercase Jira issue keys
+// (e.g. "PROJ-123"), allowing direct PRIMARY KEY / index equality via UPPER(...).
+func isCanonicalKeyCol(col string) bool {
+	return col == "key" || col == "parent_key" || col == "epic_key"
+}
+
+func keyEq(col string, v ResolvedValue) string {
+	return col + " = UPPER(" + scalarLiteral(v) + ")"
+}
+
+func keyNeq(col string, v ResolvedValue) string {
+	return "COALESCE(" + col + ",'') NOT IN ('', UPPER(" + scalarLiteral(v) + "))"
+}
+
+func keyIn(col string, values []ResolvedValue) string {
+	return col + " IN (" + upperedLiteralList(values) + ")"
+}
+
+func keyNotIn(col string, values []ResolvedValue) string {
+	return "COALESCE(" + col + ",'') NOT IN ('', " + upperedLiteralList(values) + ")"
+}
+
+func upperedLiteralList(values []ResolvedValue) string {
+	parts := make([]string, len(values))
+	for i, v := range values {
+		parts[i] = "UPPER(" + scalarLiteral(v) + ")"
+	}
+	return strings.Join(parts, ",")
+}
+
+// emitTextContains renders `~` / `!~`, consulting FTSRewrite and UseFTS5 when
+// configured before falling back to dialect LIKE / ILIKE.
+func (cp *compiler) emitTextContains(col, pat string, negate bool) string {
+	if cp.ftsRewrite != nil {
+		if sqlPred, ok := cp.ftsRewrite(col, pat); ok {
+			if negate {
+				return "NOT (" + sqlPred + ")"
+			}
+			return sqlPred
+		}
+	}
+	if cp.useFTS5 && cp.dialect == SQLite && strings.TrimSpace(pat) != "" {
+		if ftsMatch, ok := buildFTS5Match(col, pat); ok {
+			if negate {
+				return "rowid NOT IN (SELECT rowid FROM issues_fts WHERE issues_fts MATCH " + quote(ftsMatch) + ")"
+			}
+			return "rowid IN (SELECT rowid FROM issues_fts WHERE issues_fts MATCH " + quote(ftsMatch) + ")"
+		}
+	}
+	if col == "text" {
+		if negate {
+			return "(" + cp.e.textContains("summary", pat, true) + " AND " + cp.e.textContains("description", pat, true) + ")"
+		}
+		return "(" + cp.e.textContains("summary", pat, false) + " OR " + cp.e.textContains("description", pat, false) + ")"
+	}
+	return cp.e.textContains(col, pat, negate)
+}
+
+// buildFTS5Match constructs a quoted FTS5 phrase match expression for an FTS5-indexed
+// column (or whole-document search for virtual "text").
+func buildFTS5Match(col, pat string) (string, bool) {
+	escaped := `"` + strings.ReplaceAll(pat, `"`, `""`) + `"`
+	switch col {
+	case "text":
+		return escaped, true
+	case "summary", "description", "comments_text", "labels":
+		return col + " : " + escaped, true
+	default:
+		return "", false
+	}
+}
 // quote renders s as a single-quoted SQL string literal with embedded quotes
 // doubled. This is the sole string-literal escaper; all literals are data, never
 // identifiers (design §8.8, §10.3).
