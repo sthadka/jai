@@ -134,7 +134,7 @@ func handleSchemaDB(s *Server, ctx context.Context, tier, filter string) (*mcp.C
 	}
 
 	// Query table_info for issues table
-	rows, err := s.db.Query("PRAGMA table_info(issues)")
+	rows, err := s.db.ReadDB().Query("PRAGMA table_info(issues)")
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -160,7 +160,7 @@ func handleSchemaDB(s *Server, ctx context.Context, tier, filter string) (*mcp.C
 	rows.Close()
 
 	// Enrich columns with jira_name and custom flag from field_map
-	metaRows, err := s.db.Query("SELECT name, jira_name, is_custom FROM field_map WHERE is_column = 1")
+	metaRows, err := s.db.ReadDB().Query("SELECT name, jira_name, is_custom FROM field_map WHERE is_column = 1")
 	if err == nil {
 		type fieldMeta struct {
 			jiraName string
@@ -203,13 +203,13 @@ func handleSchemaDB(s *Server, ctx context.Context, tier, filter string) (*mcp.C
 		// Add population stats for custom fields
 		if len(columns) > 0 {
 			var totalCount int
-			countRow := s.db.QueryRow("SELECT COUNT(*) FROM issues")
+			countRow := s.db.ReadDB().QueryRow("SELECT COUNT(*) FROM issues")
 			countRow.Scan(&totalCount)
 
 			for i, c := range columns {
 				var nonNullCount int
 				sql := fmt.Sprintf(`SELECT COUNT(*) FROM issues WHERE "%s" IS NOT NULL AND "%s" != ''`, c.Name, c.Name)
-				row := s.db.QueryRow(sql)
+				row := s.db.ReadDB().QueryRow(sql)
 				if err := row.Scan(&nonNullCount); err == nil {
 					columns[i].Populated = nonNullCount
 					columns[i].Total = totalCount
@@ -263,7 +263,7 @@ func handleSchemaValues(s *Server, ctx context.Context, column string) (*mcp.Cal
 		ORDER BY count DESC
 		LIMIT 20`, column, column, column, column)
 
-	rows, err := s.db.Query(sql)
+	rows, err := s.db.ReadDB().Query(sql)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}

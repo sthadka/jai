@@ -6,14 +6,35 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
-	_ "github.com/mattn/go-sqlite3"
+	sqlite3 "github.com/mattn/go-sqlite3"
 )
 
-// readPoolMaxConns caps concurrent read-only SQLite connections in WAL mode.
-const readPoolMaxConns = 4
+const readDriverName = "sqlite3_jai_read"
 
+func init() {
+	sql.Register(readDriverName, &sqlite3.SQLiteDriver{
+		ConnectHook: func(conn *sqlite3.SQLiteConn) error {
+			for _, p := range []string{
+				"PRAGMA temp_store=MEMORY",
+				"PRAGMA mmap_size=268435456",
+			} {
+				if _, err := conn.Exec(p, nil); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	})
+}
+
+// readPoolMaxConns scales concurrent read-only WAL connections with CPU count,
+// clamped to [4, 8].
+func readPoolMaxConns() int {
+	return min(8, max(4, runtime.NumCPU()))
+}
 // DB wraps a SQLite database connection with a single-writer pool (the
 // embedded *sql.DB) and a separate multi-connection read-only pool for
 // concurrent WAL readers.
@@ -74,24 +95,33 @@ func (db *DB) ReadDB() *sql.DB {
 	return db.DB
 }
 
-// Close closes the read-only pool (if distinct) before the writer connection so
-// SQLite can cleanly checkpoint WAL on shutdown.
+// Close closes the read-only pool (if distinct), runs PRAGMA optimize, and
+// closes the writer connection so SQLite can cleanly checkpoint WAL on shutdown.
 func (db *DB) Close() error {
 	var readErr error
 	if db.readDB != nil && db.readDB != db.DB {
 		readErr = db.readDB.Close()
 	}
+	_ = db.Optimize()
 	writeErr := db.DB.Close()
 	return errors.Join(readErr, writeErr)
 }
 
+// Optimize runs SQLite's PRAGMA optimize to refresh query planner statistics
+// for tables whose statistics have grown stale.
+func (db *DB) Optimize() error {
+	_, err := db.Exec(`PRAGMA optimize`)
+	return err
+}
+
 func openReadPool(path string) (*sql.DB, error) {
-	readDB, err := sql.Open("sqlite3", readOnlyDSN(path))
+	readDB, err := sql.Open(readDriverName, readOnlyDSN(path))
 	if err != nil {
 		return nil, fmt.Errorf("opening read-only sqlite pool: %w", err)
 	}
-	readDB.SetMaxOpenConns(readPoolMaxConns)
-	readDB.SetMaxIdleConns(readPoolMaxConns)
+	maxConns := readPoolMaxConns()
+	readDB.SetMaxOpenConns(maxConns)
+	readDB.SetMaxIdleConns(maxConns)
 	if err := readDB.Ping(); err != nil {
 		readDB.Close()
 		return nil, fmt.Errorf("pinging read-only sqlite pool: %w", err)
@@ -122,6 +152,10 @@ func (db *DB) applyPragmas() error {
 		"PRAGMA foreign_keys=ON",
 		"PRAGMA synchronous=NORMAL",
 		"PRAGMA cache_size=-64000",
+		"PRAGMA temp_store=MEMORY",
+		"PRAGMA mmap_size=268435456",
+		"PRAGMA wal_autocheckpoint=2000",
+		"PRAGMA journal_size_limit=67108864",
 	}
 	for _, p := range pragmas {
 		if _, err := db.Exec(p); err != nil {

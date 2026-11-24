@@ -29,7 +29,7 @@ func (db *DB) GetComments(issueKey string) ([]*Comment, error) {
 	// conversion. Without this, Jira's "+0000" timezone format (no colon) fails
 	// go-sqlite3's timestamp parsers and the column scans as time.Time{} (zero),
 	// which then formats as "0001-01-01T00:00:00Z" and displays as "Jan 01, 0001".
-	rows, err := db.Query(
+	rows, err := db.ReadDB().Query(
 		`SELECT id, issue_key, author, author_email, body,
 		 CAST(created AS TEXT), CAST(updated AS TEXT)
 		 FROM comments WHERE issue_key = ? ORDER BY created`,

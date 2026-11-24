@@ -65,7 +65,7 @@ func (s *Service) loadBlockerLinks(projects, linkTypes []string) ([]blockerLink,
 		q += " AND bi.project IN (" + strings.Join(pph, ", ") + ")"
 	}
 	q += " ORDER BY il.issue_key, il.linked_key"
-	rows, err := s.db.Query(q, args...)
+	rows, err := s.db.ReadDB().Query(q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("load blocker links: %w", err)
 	}

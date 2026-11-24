@@ -29,18 +29,19 @@ func upComment(t *testing.T, database db.Store, id, key, created string) {
 	}
 }
 
-// Migration 15 creates the partial index idx_cl_tracked on a fresh DB.
-func TestMigration_PartialChangelogIndex(t *testing.T) {
+// Migration 24 replaces the partial idx_cl_tracked with the unconditional
+// composite index idx_changelog_field_issue_time(field, issue_key, changed_at).
+func TestMigration_ChangelogFieldIndex(t *testing.T) {
 	database, _ := eventsService(t, nil)
 	var name, sqlText string
-	err := database.QueryRow(
-		`SELECT name, sql FROM sqlite_master WHERE type='index' AND name='idx_cl_tracked'`,
+	err := database.ReadDB().QueryRow(
+		`SELECT name, sql FROM sqlite_master WHERE type='index' AND name='idx_changelog_field_issue_time'`,
 	).Scan(&name, &sqlText)
 	if err != nil {
-		t.Fatalf("idx_cl_tracked not found on fresh DB: %v", err)
+		t.Fatalf("idx_changelog_field_issue_time not found on fresh DB: %v", err)
 	}
-	if want := "WHERE field IN"; !strings.Contains(sqlText, want) {
-		t.Errorf("index is not partial: %q", sqlText)
+	if strings.Contains(sqlText, "WHERE") {
+		t.Errorf("index should be unconditional: %q", sqlText)
 	}
 }
 

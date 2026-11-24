@@ -156,7 +156,7 @@ func (s *Service) freshness(projects []string) map[string]SourceFreshness {
 		}
 		q += " WHERE project IN (" + strings.Join(ph, ", ") + ")"
 	}
-	rows, err := s.db.Query(q, args...)
+	rows, err := s.db.ReadDB().Query(q, args...)
 	if err != nil {
 		return out
 	}

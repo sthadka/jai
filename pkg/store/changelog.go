@@ -64,7 +64,7 @@ func (db *DB) InsertChangelogBatch(entries []*ChangelogEntry) error {
 // GetIssueIDToKeyMap returns a map of Jira numeric issue ID to issue key
 // for all issues that have a populated id.
 func (db *DB) GetIssueIDToKeyMap() (map[string]string, error) {
-	sqlRows, err := db.Query(`SELECT id, key FROM issues WHERE id IS NOT NULL AND id != ''`)
+	sqlRows, err := db.ReadDB().Query(`SELECT id, key FROM issues WHERE id IS NOT NULL AND id != ''`)
 	if err != nil {
 		return nil, err
 	}
@@ -224,7 +224,7 @@ func (db *DB) GetIssueIDToKeyMapForKeys(keys []string) (map[string]string, error
 			`SELECT id, key FROM issues WHERE key IN (%s) AND id IS NOT NULL AND id != ''`,
 			strings.Join(placeholders, ", "),
 		)
-		sqlRows, err := db.Query(query, args...)
+		sqlRows, err := db.ReadDB().Query(query, args...)
 		if err != nil {
 			return nil, err
 		}

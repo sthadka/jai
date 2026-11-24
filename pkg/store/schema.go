@@ -127,7 +127,14 @@ func createSchema(tx *sql.Tx) error {
 			VALUES (new.rowid, new.key, new.summary, new.description, new.comments_text, new.labels);
 		END`,
 
-		`CREATE TRIGGER IF NOT EXISTS issues_fts_update AFTER UPDATE ON issues BEGIN
+		`CREATE TRIGGER IF NOT EXISTS issues_fts_update
+		AFTER UPDATE OF key, summary, description, comments_text, labels ON issues
+		WHEN old.key           IS NOT new.key
+		  OR old.summary       IS NOT new.summary
+		  OR old.description   IS NOT new.description
+		  OR old.comments_text IS NOT new.comments_text
+		  OR old.labels        IS NOT new.labels
+		BEGIN
 			INSERT INTO issues_fts(issues_fts, rowid, key, summary, description, comments_text, labels)
 			VALUES ('delete', old.rowid, old.key, old.summary, old.description, old.comments_text, old.labels);
 			INSERT INTO issues_fts(rowid, key, summary, description, comments_text, labels)

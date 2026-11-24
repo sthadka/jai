@@ -440,7 +440,7 @@ func (b *Builder) loadSources(projects, keys []string) ([]issueSource, *time.Tim
 			iq += " WHERE project IN (" + strings.Join(ph, ", ") + ")"
 		}
 
-		rows, err := b.store.db.Query(iq, iargs...)
+		rows, err := b.store.db.ReadDB().Query(iq, iargs...)
 		if err != nil {
 			return nil, nil, fmt.Errorf("load issues: %w", err)
 		}
@@ -560,7 +560,7 @@ func (b *Builder) loadStatusEvents(projects, keys []string, index map[string]int
 		}
 		cq += " ORDER BY issue_key, changed_at"
 
-		crows, err := b.store.db.Query(cq, cargs...)
+		crows, err := b.store.db.ReadDB().Query(cq, cargs...)
 		if err != nil {
 			return fmt.Errorf("load status events: %w", err)
 		}
@@ -633,7 +633,7 @@ func (b *Builder) loadScalarEvents(projects, keys, fields []string, index map[st
 		}
 		cq += " ORDER BY issue_key, field, changed_at"
 
-		crows, err := b.store.db.Query(cq, cargs...)
+		crows, err := b.store.db.ReadDB().Query(cq, cargs...)
 		if err != nil {
 			return fmt.Errorf("load scalar events: %w", err)
 		}
@@ -698,7 +698,7 @@ func (b *Builder) loadMembershipCurrent(projects, keys, fields []string, index m
 			}
 			q += " WHERE project IN (" + strings.Join(ph, ", ") + ")"
 		}
-		rows, err := b.store.db.Query(q, args...)
+		rows, err := b.store.db.ReadDB().Query(q, args...)
 		if err != nil {
 			return fmt.Errorf("load membership current values: %w", err)
 		}
@@ -797,7 +797,7 @@ func (b *Builder) loadMembershipEvents(projects, keys, fields []string, index ma
 		}
 		cq += " ORDER BY issue_key, field, changed_at"
 
-		crows, err := b.store.db.Query(cq, cargs...)
+		crows, err := b.store.db.ReadDB().Query(cq, cargs...)
 		if err != nil {
 			return fmt.Errorf("load membership events: %w", err)
 		}
@@ -878,7 +878,7 @@ func (b *Builder) loadScalarCurrent(projects, keys, fields []string, index map[s
 			}
 			q += " WHERE project IN (" + strings.Join(ph, ", ") + ")"
 		}
-		rows, err := b.store.db.Query(q, args...)
+		rows, err := b.store.db.ReadDB().Query(q, args...)
 		if err != nil {
 			return fmt.Errorf("load scalar current values: %w", err)
 		}
@@ -920,7 +920,7 @@ func (b *Builder) loadScalarCurrent(projects, keys, fields []string, index map[s
 // same-named column.
 func (b *Builder) scalarColumns(fields []string) (map[string]string, error) {
 	existing := map[string]bool{}
-	crows, err := b.store.db.Query(`PRAGMA table_info(issues)`)
+	crows, err := b.store.db.ReadDB().Query(`PRAGMA table_info(issues)`)
 	if err != nil {
 		return nil, fmt.Errorf("inspect issues columns: %w", err)
 	}
@@ -942,7 +942,7 @@ func (b *Builder) scalarColumns(fields []string) (map[string]string, error) {
 	}
 
 	lookup := map[string]string{}
-	frows, err := b.store.db.Query(`SELECT name, jira_name FROM field_map WHERE is_column = 1`)
+	frows, err := b.store.db.ReadDB().Query(`SELECT name, jira_name FROM field_map WHERE is_column = 1`)
 	if err != nil {
 		return nil, fmt.Errorf("load field map: %w", err)
 	}
