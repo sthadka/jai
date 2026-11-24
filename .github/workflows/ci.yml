@@ -34,11 +34,13 @@ jobs:
       - name: Verify module path matches release major
         run: |
           maj=$(jq -r '."." | split(".")[0]' .release-please-manifest.json)
+          next=$((maj + 1))
           mod=$(go list -m)
           if [ "$maj" -ge 2 ]; then
             case "$mod" in
-              */v$maj) echo "ok: $mod matches v$maj" ;;
-              *) echo "::error::module path '$mod' must end in /v$maj (release manifest major is $maj) — bump go.mod + imports on every major"; exit 1 ;;
+              */v$maj) echo "ok: $mod matches released major v$maj" ;;
+              */v$next) echo "ok: $mod targets next major v$next (manifest at v$maj; release-please bumps manifest on release)" ;;
+              *) echo "::error::module path '$mod' must end in /v$maj or /v$next (release manifest major is $maj) — bump go.mod + imports on every major"; exit 1 ;;
             esac
           fi
 

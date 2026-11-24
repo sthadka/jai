@@ -200,8 +200,8 @@ func referencedColumns(rq *ResolvedQuery) []string {
 	var out []string
 	seen := map[string]bool{}
 	add := func(c string) {
-		// "text" is a virtual full-text search alias, not a physical issues column.
-		if c != "" && c != "text" && !seen[c] {
+		// "text" is a virtual full-text alias and "comments_text" lives in issue_blobs (v25+).
+		if c != "" && c != "text" && c != "comments_text" && !seen[c] {
 			seen[c] = true
 			out = append(out, c)
 		}
@@ -524,6 +524,17 @@ func (cp *compiler) emitTextContains(col, pat string, negate bool) string {
 			return "(" + cp.e.textContains("summary", pat, true) + " AND " + cp.e.textContains("description", pat, true) + ")"
 		}
 		return "(" + cp.e.textContains("summary", pat, false) + " OR " + cp.e.textContains("description", pat, false) + ")"
+	}
+	if col == "comments_text" {
+		blobTable := "issue_blobs"
+		if cp.dialect == DuckDB {
+			blobTable = "jai.issue_blobs"
+		}
+		pred := "EXISTS (SELECT 1 FROM " + blobTable + " b WHERE b.issue_key = " + cp.e.tableName() + ".key AND " + cp.e.textContains("b.comments_text", pat, false) + ")"
+		if negate {
+			return "NOT " + pred
+		}
+		return pred
 	}
 	return cp.e.textContains(col, pat, negate)
 }

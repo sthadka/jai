@@ -625,7 +625,7 @@ func extractKeys(columns []string, rows [][]interface{}) ([]string, error) {
 
 func (s *Server) readCurrentArray(issueKey, fieldName string) []string {
 	var raw sql.NullString
-	_ = s.db.QueryRow(
+	_ = s.db.ReadDB().QueryRow(
 		fmt.Sprintf("SELECT %s FROM issues WHERE key = ?", fieldName),
 		issueKey,
 	).Scan(&raw)
