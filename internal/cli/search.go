@@ -22,7 +22,7 @@ var searchCmd = &cobra.Command{
 		sql := fmt.Sprintf(`
 			SELECT i.key, i.summary, i.status, i.assignee, highlight(issues_fts, 1, '[', ']') AS match
 			FROM issues_fts
-			JOIN issues i ON i.key = issues_fts.key
+			JOIN issues i ON i.rowid = issues_fts.rowid
 			WHERE issues_fts MATCH ?
 			ORDER BY issues_fts.rank
 			LIMIT %d`, searchLimit)

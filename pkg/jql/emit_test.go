@@ -66,7 +66,25 @@ func TestEmitOperatorTable(t *testing.T) {
 			name:   "numeric compare",
 			jql:    `px_impact_score > 5`,
 			duck:   "TRY_CAST(px_impact_score AS DOUBLE) > 5",
-			sqlite: "CAST(px_impact_score AS REAL) > 5",
+			sqlite: "px_impact_score > 5",
+		},
+		{
+			name:   "canonical key equality",
+			jql:    `key = eng-123`,
+			duck:   "key = UPPER('eng-123')",
+			sqlite: "key = UPPER('eng-123')",
+		},
+		{
+			name:   "canonical parent key IN",
+			jql:    `parent in (eng-1, eng-2)`,
+			duck:   "parent_key IN (UPPER('eng-1'),UPPER('eng-2'))",
+			sqlite: "parent_key IN (UPPER('eng-1'),UPPER('eng-2'))",
+		},
+		{
+			name:   "canonical epic key eq",
+			jql:    `epic = eng-9`,
+			duck:   "epic_key = UPPER('eng-9')",
+			sqlite: "epic_key = UPPER('eng-9')",
 		},
 		{
 			name:   "relative date",
@@ -135,4 +153,39 @@ func TestEmitDateAnchors(t *testing.T) {
 
 	r = mustTranslate(t, `created < startOfMonth()`, translateOpts(SQLite))
 	wantFragments(t, r.SQL, "created < '2026-11-01 00:00:00'")
+}
+
+func TestEmitUseFTS5AndCustomRewrite(t *testing.T) {
+	opts := translateOpts(SQLite)
+	opts.UseFTS5 = true
+
+	r := mustTranslate(t, `text ~ "login bug"`, opts)
+	wantFragments(t, r.SQL, `rowid IN (SELECT rowid FROM issues_fts WHERE issues_fts MATCH '"login bug"')`)
+	for _, c := range r.Columns {
+		if c == "text" {
+			t.Errorf("virtual 'text' alias should not be projected in SELECT columns: %v", r.Columns)
+		}
+	}
+
+	r = mustTranslate(t, `summary ~ "auth"`, opts)
+	wantFragments(t, r.SQL, `rowid IN (SELECT rowid FROM issues_fts WHERE issues_fts MATCH 'summary : "auth"')`)
+
+	r = mustTranslate(t, `description !~ "legacy"`, opts)
+	wantFragments(t, r.SQL, `rowid NOT IN (SELECT rowid FROM issues_fts WHERE issues_fts MATCH 'description : "legacy"')`)
+
+	// Non-SQLite dialect ignores UseFTS5 and emits DuckDB ILIKE.
+	dopts := translateOpts(DuckDB)
+	dopts.UseFTS5 = true
+	r = mustTranslate(t, `summary ~ "auth"`, dopts)
+	wantFragments(t, r.SQL, `summary ILIKE '%auth%'`)
+
+	// Custom FTSRewrite hook overrides default emission.
+	custom := translateOpts(SQLite)
+	custom.FTSRewrite = func(field, pat string) (string, bool) {
+		return "custom_fts(" + field + "," + quote(pat) + ")", true
+	}
+	r = mustTranslate(t, `summary ~ "hello"`, custom)
+	wantFragments(t, r.SQL, `custom_fts(summary,'hello')`)
+	r = mustTranslate(t, `summary !~ "hello"`, custom)
+	wantFragments(t, r.SQL, `NOT (custom_fts(summary,'hello'))`)
 }

@@ -11,11 +11,11 @@ type sqliteEmitter struct{}
 // tableName returns the unqualified issues table.
 func (sqliteEmitter) tableName() string { return "issues" }
 
-// numericCompare casts the column to REAL for an ordered numeric comparison.
+// numericCompare emits a direct numeric comparison so SQLite can use B-tree
+// indexes on numeric columns (REAL/INTEGER) without defeating them via CAST.
 func (sqliteEmitter) numericCompare(col, op, num string) string {
-	return fmt.Sprintf("CAST(%s AS REAL) %s %s", col, op, num)
+	return fmt.Sprintf("%s %s %s", col, op, num)
 }
-
 // dateCompareRelative compares the column against SQLite's datetime() date math,
 // e.g. `created < datetime('now','-90 day')`. SQLite stores ISO-8601 text, so a
 // direct lexical comparison is correct.
