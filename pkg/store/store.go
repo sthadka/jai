@@ -27,6 +27,7 @@ type Store interface {
 	AllSyncMeta() ([]*SyncMeta, error)
 	ClearResumeCursor(source string) error
 	CountPendingChanges() (int, error)
+	DeleteIssuesTx(keys []string) (int64, error)
 	DeleteSyncMetadata(sources []string) (int64, error)
 	EnsureColumn(name, colType string) error
 	EnsurePendingChangesTable() error

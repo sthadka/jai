@@ -217,6 +217,27 @@ func TestGetChangelogSyncCandidates_IncludesNeverSynced(t *testing.T) {
 	}
 }
 
+func TestGetChangelogSyncCandidates_ProjectFilterPrecedence(t *testing.T) {
+	db := openTestDB(t)
+
+	// UNSCOPED-1 has changelog_synced_at IS NULL and must NOT leak when filtering to PROJB.
+	if _, err := db.Exec(`INSERT INTO issues (key, project, summary, updated, changelog_synced_at) VALUES
+		('UNSCOPED-1', 'UNSCOPED', '', '2026-06-01T00:00:00Z', NULL),
+		('PROJB-1', 'PROJB', '', '2026-06-01T00:00:00Z', NULL),
+		('PROJB-2', 'PROJB', '', '2026-06-02T00:00:00Z', '2026-06-01T00:00:00Z'),
+		('PROJB-3', 'PROJB', '', '2026-06-01T00:00:00Z', '2026-06-02T00:00:00Z')`); err != nil {
+		t.Fatalf("inserting issues: %v", err)
+	}
+
+	keys, err := db.GetChangelogSyncCandidates([]string{"PROJB"})
+	if err != nil {
+		t.Fatalf("GetChangelogSyncCandidates: %v", err)
+	}
+	if len(keys) != 2 || keys[0] != "PROJB-1" || keys[1] != "PROJB-2" {
+		t.Fatalf("candidates = %v, want [PROJB-1 PROJB-2]", keys)
+	}
+}
+
 func TestUpsertIssue_PreservesChangelogSyncedAt(t *testing.T) {
 	db := openTestDB(t)
 

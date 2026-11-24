@@ -2,6 +2,7 @@ package metrics
 
 import (
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -315,5 +316,54 @@ func TestIncremental_NoActiveGeneration(t *testing.T) {
 	_, err := NewBuilder(store, factPolicy()).Incremental(asOf, []string{"N-1"})
 	if err != ErrFullRebuildRequired {
 		t.Errorf("expected ErrFullRebuildRequired, got %v", err)
+	}
+}
+
+// Incremental must handle >999 keys without hitting SQLite's bind-variable limit.
+func TestIncremental_Over999Keys(t *testing.T) {
+	database, store := newFactStore(t)
+
+	const total = 1100
+	keys := make([]string, total)
+	tx, err := database.Begin()
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	stmt, err := tx.Prepare(`INSERT INTO issues (key, project, type, summary, status, status_category, created, updated, changelog_synced_at) VALUES (?, 'BIG', 'Story', 's', 'Backlog', 'To Do', '2024-01-01T00:00:00Z', '2024-01-02T00:00:00Z', '2024-01-02T00:00:00Z')`)
+	if err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+	for i := range total {
+		k := "BIG-" + strconv.Itoa(i+1)
+		keys[i] = k
+		if _, err := stmt.Exec(k); err != nil {
+			t.Fatalf("insert %s: %v", k, err)
+		}
+	}
+	stmt.Close()
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	pol := CompilePolicy(&config.MetricsConfig{
+		StatusStages: map[string][]string{
+			"todo":   {"Backlog"},
+			"active": {"In Progress"},
+			"done":   {"Done"},
+		},
+		WIPStages:     []string{"active"},
+		TrackedFields: []string{"status", "assignee", "Sprint"},
+	})
+	b := NewBuilder(store, pol)
+	if _, err := b.BuildAll(asOf, nil); err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+
+	res, err := b.Incremental(asOf, keys)
+	if err != nil {
+		t.Fatalf("Incremental(%d keys): %v", total, err)
+	}
+	if res.IssueCount != total {
+		t.Errorf("IssueCount = %d, want %d", res.IssueCount, total)
 	}
 }
