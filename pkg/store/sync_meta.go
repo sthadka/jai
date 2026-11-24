@@ -207,7 +207,88 @@ func (db *DB) DeleteSyncMetadata(sources []string) (int64, error) {
 	return res.RowsAffected()
 }
 
-// PruneProjects deletes all issues, changelog entries, and comments for the
+// DeleteIssuesTx atomically deletes the given issue keys and all associated
+// child and metrics-fact rows inside a single transaction, chunked in batches
+// of 200 to stay well under SQLite's bind-variable limit. Returns the number
+// of rows removed from issues.
+func (db *DB) DeleteIssuesTx(keys []string) (int64, error) {
+	if len(keys) == 0 {
+		return 0, nil
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	const chunkSize = 200
+	var totalDeleted int64
+
+	childTables := []string{
+		"changelog",
+		"comments",
+		"issue_links",
+		"dev_links",
+		"attachments",
+		"pending_changes",
+		"fact_field_interval",
+		"fact_issue_flow",
+		"fact_issue_membership",
+	}
+
+	for i := 0; i < len(keys); i += chunkSize {
+		end := i + chunkSize
+		if end > len(keys) {
+			end = len(keys)
+		}
+		chunk := keys[i:end]
+
+		placeholders := make([]string, len(chunk))
+		args := make([]any, len(chunk))
+		for j, k := range chunk {
+			placeholders[j] = "?"
+			args[j] = k
+		}
+		in := strings.Join(placeholders, ",")
+
+		// Remove retired-key aliases matching either the key itself or the
+		// stable Jira numeric id of any issue being deleted (must run before
+		// DELETE FROM issues).
+		aliasArgs := make([]any, 0, len(chunk)*2)
+		aliasArgs = append(aliasArgs, args...)
+		aliasArgs = append(aliasArgs, args...)
+		if _, err := tx.Exec(
+			`DELETE FROM issue_key_alias WHERE old_key IN (`+in+`) OR id IN (SELECT id FROM issues WHERE key IN (`+in+`) AND id IS NOT NULL AND id <> '')`,
+			aliasArgs...,
+		); err != nil {
+			return 0, err
+		}
+
+		for _, table := range childTables {
+			if _, err := tx.Exec(`DELETE FROM `+table+` WHERE issue_key IN (`+in+`)`, args...); err != nil {
+				return 0, err
+			}
+		}
+
+		res, err := tx.Exec(`DELETE FROM issues WHERE key IN (`+in+`)`, args...)
+		if err != nil {
+			return 0, err
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return 0, err
+		}
+		totalDeleted += n
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return totalDeleted, nil
+}
+
+// PruneProjects deletes all issues and associated child/metrics rows for the
 // given Jira project keys in a single transaction, returning the number of
 // issues removed. The issues_fts index is maintained by the delete trigger.
 func (db *DB) PruneProjects(projects []string) (int64, error) {
@@ -221,30 +302,25 @@ func (db *DB) PruneProjects(projects []string) (int64, error) {
 		args[i] = p
 	}
 	in := strings.Join(placeholders, ",")
-	sub := `SELECT key FROM issues WHERE project IN (` + in + `)`
 
-	tx, err := db.Begin()
+	rows, err := db.ReadDB().Query(`SELECT key FROM issues WHERE project IN (`+in+`)`, args...)
 	if err != nil {
 		return 0, err
 	}
-	defer tx.Rollback()
+	var keys []string
+	for rows.Next() {
+		var k string
+		if err := rows.Scan(&k); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		keys = append(keys, k)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return 0, err
+	}
+	rows.Close()
 
-	if _, err := tx.Exec(`DELETE FROM changelog WHERE issue_key IN (`+sub+`)`, args...); err != nil {
-		return 0, err
-	}
-	if _, err := tx.Exec(`DELETE FROM comments WHERE issue_key IN (`+sub+`)`, args...); err != nil {
-		return 0, err
-	}
-	res, err := tx.Exec(`DELETE FROM issues WHERE project IN (`+in+`)`, args...)
-	if err != nil {
-		return 0, err
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return 0, err
-	}
-	if err := tx.Commit(); err != nil {
-		return 0, err
-	}
-	return n, nil
+	return db.DeleteIssuesTx(keys)
 }

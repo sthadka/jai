@@ -48,6 +48,56 @@ func TestPruneProjects(t *testing.T) {
 	assertCount(t, db, "SELECT count(*) FROM issues_fts WHERE key = 'KEEP-1'", 1)
 }
 
+func TestDeleteIssuesTx_CleansAllChildAndFactTables(t *testing.T) {
+	db := openTestDB(t)
+
+	for _, i := range []*Issue{
+		{ID: "1001", Key: "DEL-1", Project: "DEL", Summary: "gone", RawJSON: "{}"},
+		{ID: "1002", Key: "KEEP-1", Project: "KEEP", Summary: "stay", RawJSON: "{}"},
+	} {
+		if err := db.UpsertIssue(i, nil); err != nil {
+			t.Fatalf("UpsertIssue %s: %v", i.Key, err)
+		}
+	}
+
+	seedStmts := []string{
+		`INSERT INTO changelog (id, issue_key, field, to_string) VALUES ('c1', 'DEL-1', 'status', 'Done'), ('c2', 'KEEP-1', 'status', 'Done')`,
+		`INSERT INTO comments (id, issue_key, body) VALUES ('cm1', 'DEL-1', 'bye'), ('cm2', 'KEEP-1', 'hi')`,
+		`INSERT INTO issue_links (issue_key, link_type, direction, linked_key) VALUES ('DEL-1', 'blocks', 'outward', 'KEEP-1'), ('KEEP-1', 'relates', 'inward', 'DEL-1')`,
+		`INSERT INTO dev_links (issue_key, type, url) VALUES ('DEL-1', 'pr', 'https://x/1'), ('KEEP-1', 'pr', 'https://x/2')`,
+		`INSERT INTO attachments (id, issue_key, filename) VALUES (1, 'DEL-1', 'a.txt'), (2, 'KEEP-1', 'b.txt')`,
+		`INSERT INTO pending_changes (issue_key, operation, payload) VALUES ('DEL-1', 'update', '{}'), ('KEEP-1', 'update', '{}')`,
+		`INSERT INTO issue_key_alias (old_key, id, changed_at) VALUES ('OLD-1', '1001', '2026-01-01T00:00:00Z'), ('OLD-2', '1002', '2026-01-01T00:00:00Z')`,
+		`INSERT INTO fact_field_interval (generation, issue_key, project, field, seq, entered_at) VALUES (1, 'DEL-1', 'DEL', 'status', 0, '2026-01-01T00:00:00Z'), (1, 'KEEP-1', 'KEEP', 'status', 0, '2026-01-01T00:00:00Z')`,
+		`INSERT INTO fact_issue_flow (generation, issue_key, project) VALUES (1, 'DEL-1', 'DEL'), (1, 'KEEP-1', 'KEEP')`,
+		`INSERT INTO fact_issue_membership (generation, issue_key, project, dimension, seq, entered_at) VALUES (1, 'DEL-1', 'DEL', 'sprint', 0, '2026-01-01T00:00:00Z'), (1, 'KEEP-1', 'KEEP', 'sprint', 0, '2026-01-01T00:00:00Z')`,
+	}
+	for _, stmt := range seedStmts {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("seeding (%s): %v", stmt, err)
+		}
+	}
+
+	n, err := db.DeleteIssuesTx([]string{"DEL-1"})
+	if err != nil {
+		t.Fatalf("DeleteIssuesTx: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("deleted = %d, want 1", n)
+	}
+
+	tables := []string{
+		"issues", "changelog", "comments", "issue_links", "dev_links",
+		"attachments", "pending_changes", "issue_key_alias",
+		"fact_field_interval", "fact_issue_flow", "fact_issue_membership",
+	}
+	for _, tbl := range tables {
+		assertCount(t, db, "SELECT count(*) FROM "+tbl, 1)
+	}
+	assertCount(t, db, "SELECT count(*) FROM issues_fts WHERE key = 'DEL-1'", 0)
+	assertCount(t, db, "SELECT count(*) FROM issues_fts WHERE key = 'KEEP-1'", 1)
+}
+
 func TestPruneProjectsEmpty(t *testing.T) {
 	db := openTestDB(t)
 	removed, err := db.PruneProjects(nil)

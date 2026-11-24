@@ -158,6 +158,7 @@ func (b *Builder) BuildAll(asOf time.Time, projects []string) (*BuildResult, err
 // re-insert). If the active generation is absent or its fingerprint no longer matches the
 // policy, it returns ErrFullRebuildRequired.
 func (b *Builder) Incremental(asOf time.Time, keys []string) (*BuildResult, error) {
+	keys = dedupStrings(keys)
 	if len(keys) == 0 {
 		return nil, nil
 	}
@@ -189,14 +190,18 @@ func (b *Builder) Incremental(asOf time.Time, keys []string) (*BuildResult, erro
 
 	// Delete the old facts for every requested key (including ones that no longer exist),
 	// then re-insert replayed facts for the keys that still exist.
-	for _, k := range keys {
-		if _, err := tx.Exec(`DELETE FROM fact_field_interval WHERE generation = ? AND issue_key = ?`, gen, k); err != nil {
+	for _, chunk := range chunkStrings(keys, maxKeyBindChunk) {
+		kargs, in := keyFilter(chunk, nil)
+		args := make([]any, 0, 1+len(kargs))
+		args = append(args, gen)
+		args = append(args, kargs...)
+		if _, err := tx.Exec(`DELETE FROM fact_field_interval WHERE generation = ? AND issue_key IN `+in, args...); err != nil {
 			return nil, err
 		}
-		if _, err := tx.Exec(`DELETE FROM fact_issue_flow WHERE generation = ? AND issue_key = ?`, gen, k); err != nil {
+		if _, err := tx.Exec(`DELETE FROM fact_issue_flow WHERE generation = ? AND issue_key IN `+in, args...); err != nil {
 			return nil, err
 		}
-		if _, err := tx.Exec(`DELETE FROM fact_issue_membership WHERE generation = ? AND issue_key = ?`, gen, k); err != nil {
+		if _, err := tx.Exec(`DELETE FROM fact_issue_membership WHERE generation = ? AND issue_key IN `+in, args...); err != nil {
 			return nil, err
 		}
 	}
@@ -414,94 +419,97 @@ func deriveFlow(result ReplayResult, src issueSource, pol *Policy) FlowRow {
 // by projects or by explicit keys (mutually exclusive; both empty = all issues). It also
 // returns the source watermark: the latest issue-update / changelog time observed.
 func (b *Builder) loadSources(projects, keys []string) ([]issueSource, *time.Time, error) {
-	iq := `SELECT key, project, type, created, status, status_category, changelog_synced_at, updated, resolved, resolution, story_points FROM issues`
-	var iargs []any
-	switch {
-	case len(keys) > 0:
-		iargs, _ = keyFilter(keys, &iq)
-	case len(projects) > 0:
-		ph := make([]string, len(projects))
-		for i, p := range projects {
-			ph[i] = "?"
-			iargs = append(iargs, p)
-		}
-		iq += " WHERE project IN (" + strings.Join(ph, ", ") + ")"
-	}
-
-	rows, err := b.store.db.Query(iq, iargs...)
-	if err != nil {
-		return nil, nil, fmt.Errorf("load issues: %w", err)
-	}
-	defer rows.Close()
-
 	index := map[string]int{}
 	var sources []issueSource
 	var watermark time.Time
 	scalarFields := ScalarTrackedFields(b.pol)
 	membershipFields := b.pol.MembershipFields()
-	for rows.Next() {
-		var (
-			key, project                      string
-			itype, created, status, category  sql.NullString
-			synced, updated, resolved, resltn sql.NullString
-			storyPoints                       sql.NullFloat64
-		)
-		if err := rows.Scan(&key, &project, &itype, &created, &status, &category, &synced, &updated, &resolved, &resltn, &storyPoints); err != nil {
+
+	for _, keyChunk := range keyBatches(keys, maxKeyBindChunk) {
+		iq := `SELECT key, project, type, created, status, status_category, changelog_synced_at, updated, resolved, resolution, story_points FROM issues`
+		var iargs []any
+		switch {
+		case len(keyChunk) > 0:
+			iargs, _ = keyFilter(keyChunk, &iq)
+		case len(projects) > 0:
+			ph := make([]string, len(projects))
+			for i, p := range projects {
+				ph[i] = "?"
+				iargs = append(iargs, p)
+			}
+			iq += " WHERE project IN (" + strings.Join(ph, ", ") + ")"
+		}
+
+		rows, err := b.store.db.Query(iq, iargs...)
+		if err != nil {
+			return nil, nil, fmt.Errorf("load issues: %w", err)
+		}
+		for rows.Next() {
+			var (
+				key, project                      string
+				itype, created, status, category  sql.NullString
+				synced, updated, resolved, resltn sql.NullString
+				storyPoints                       sql.NullFloat64
+			)
+			if err := rows.Scan(&key, &project, &itype, &created, &status, &category, &synced, &updated, &resolved, &resltn, &storyPoints); err != nil {
+				rows.Close()
+				return nil, nil, err
+			}
+			src := issueSource{
+				hist: IssueHistory{
+					Key:                   key,
+					Project:               project,
+					HistoryComplete:       nullTime(synced) != nil,
+					CurrentStatus:         status.String,
+					CurrentStatusCategory: category.String,
+				},
+				resolution: resltn.String,
+				itype:      itype.String,
+			}
+			if t := nullTime(created); t != nil {
+				src.hist.CreatedAt = *t
+			}
+			src.resolved = nullTime(resolved)
+			if storyPoints.Valid {
+				v := storyPoints.Float64
+				src.estimate = &v
+			}
+			if t := nullTime(updated); t != nil && t.After(watermark) {
+				watermark = *t
+			}
+			if len(scalarFields) > 0 {
+				src.scalar = make(map[string]*ScalarHistory, len(scalarFields))
+				for _, f := range scalarFields {
+					src.scalar[f] = &ScalarHistory{
+						Key:             key,
+						Project:         project,
+						Field:           f,
+						CreatedAt:       src.hist.CreatedAt,
+						HistoryComplete: src.hist.HistoryComplete,
+					}
+				}
+			}
+			if len(membershipFields) > 0 {
+				src.membership = make(map[string]*MembershipHistory, len(membershipFields))
+				for _, f := range membershipFields {
+					src.membership[f] = &MembershipHistory{
+						Key:             key,
+						Project:         project,
+						Field:           f,
+						CreatedAt:       src.hist.CreatedAt,
+						HistoryComplete: src.hist.HistoryComplete,
+					}
+				}
+			}
+			index[key] = len(sources)
+			sources = append(sources, src)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
 			return nil, nil, err
 		}
-		src := issueSource{
-			hist: IssueHistory{
-				Key:                   key,
-				Project:               project,
-				HistoryComplete:       nullTime(synced) != nil,
-				CurrentStatus:         status.String,
-				CurrentStatusCategory: category.String,
-			},
-			resolution: resltn.String,
-			itype:      itype.String,
-		}
-		if t := nullTime(created); t != nil {
-			src.hist.CreatedAt = *t
-		}
-		src.resolved = nullTime(resolved)
-		if storyPoints.Valid {
-			v := storyPoints.Float64
-			src.estimate = &v
-		}
-		if t := nullTime(updated); t != nil && t.After(watermark) {
-			watermark = *t
-		}
-		if len(scalarFields) > 0 {
-			src.scalar = make(map[string]*ScalarHistory, len(scalarFields))
-			for _, f := range scalarFields {
-				src.scalar[f] = &ScalarHistory{
-					Key:             key,
-					Project:         project,
-					Field:           f,
-					CreatedAt:       src.hist.CreatedAt,
-					HistoryComplete: src.hist.HistoryComplete,
-				}
-			}
-		}
-		if len(membershipFields) > 0 {
-			src.membership = make(map[string]*MembershipHistory, len(membershipFields))
-			for _, f := range membershipFields {
-				src.membership[f] = &MembershipHistory{
-					Key:             key,
-					Project:         project,
-					Field:           f,
-					CreatedAt:       src.hist.CreatedAt,
-					HistoryComplete: src.hist.HistoryComplete,
-				}
-			}
-		}
-		index[key] = len(sources)
-		sources = append(sources, src)
+		rows.Close()
 	}
-	if err := rows.Err(); err != nil {
-		return nil, nil, err
-	}
-
 	if err := b.loadStatusEvents(projects, keys, index, sources, &watermark); err != nil {
 		return nil, nil, err
 	}
@@ -533,57 +541,64 @@ func (b *Builder) loadSources(projects, keys []string) ([]issueSource, *time.Tim
 
 // loadStatusEvents appends status changelog transitions to the already-loaded sources.
 func (b *Builder) loadStatusEvents(projects, keys []string, index map[string]int, sources []issueSource, watermark *time.Time) error {
-	cq := `SELECT id, issue_key, from_value, from_string, to_value, to_string, changed_at
+	for _, keyChunk := range keyBatches(keys, maxKeyBindChunk) {
+		cq := `SELECT id, issue_key, from_value, from_string, to_value, to_string, changed_at
 	         FROM changelog WHERE field = 'status'`
-	var cargs []any
-	switch {
-	case len(keys) > 0:
-		args, in := keyFilter(keys, nil)
-		cq += " AND issue_key IN " + in
-		cargs = args
-	case len(projects) > 0:
-		ph := make([]string, len(projects))
-		for i, p := range projects {
-			ph[i] = "?"
-			cargs = append(cargs, p)
+		var cargs []any
+		switch {
+		case len(keyChunk) > 0:
+			args, in := keyFilter(keyChunk, nil)
+			cq += " AND issue_key IN " + in
+			cargs = args
+		case len(projects) > 0:
+			ph := make([]string, len(projects))
+			for i, p := range projects {
+				ph[i] = "?"
+				cargs = append(cargs, p)
+			}
+			cq += " AND issue_key IN (SELECT key FROM issues WHERE project IN (" + strings.Join(ph, ", ") + "))"
 		}
-		cq += " AND issue_key IN (SELECT key FROM issues WHERE project IN (" + strings.Join(ph, ", ") + "))"
-	}
-	cq += " ORDER BY issue_key, changed_at"
+		cq += " ORDER BY issue_key, changed_at"
 
-	crows, err := b.store.db.Query(cq, cargs...)
-	if err != nil {
-		return fmt.Errorf("load status events: %w", err)
-	}
-	defer crows.Close()
-	for crows.Next() {
-		var (
-			id, issueKey                    string
-			fromV, fromS, toV, toS, changed sql.NullString
-		)
-		if err := crows.Scan(&id, &issueKey, &fromV, &fromS, &toV, &toS, &changed); err != nil {
+		crows, err := b.store.db.Query(cq, cargs...)
+		if err != nil {
+			return fmt.Errorf("load status events: %w", err)
+		}
+		for crows.Next() {
+			var (
+				id, issueKey                    string
+				fromV, fromS, toV, toS, changed sql.NullString
+			)
+			if err := crows.Scan(&id, &issueKey, &fromV, &fromS, &toV, &toS, &changed); err != nil {
+				crows.Close()
+				return err
+			}
+			i, ok := index[issueKey]
+			if !ok {
+				continue
+			}
+			ev := StatusEvent{
+				ID:         id,
+				FromValue:  fromV.String,
+				FromString: fromS.String,
+				ToValue:    toV.String,
+				ToString:   toS.String,
+			}
+			if changed.Valid && strings.TrimSpace(changed.String) != "" {
+				ev.ChangedAt = parseDBTime(changed.String)
+				if ev.ChangedAt.After(*watermark) {
+					*watermark = ev.ChangedAt
+				}
+			}
+			sources[i].hist.Events = append(sources[i].hist.Events, ev)
+		}
+		if err := crows.Err(); err != nil {
+			crows.Close()
 			return err
 		}
-		i, ok := index[issueKey]
-		if !ok {
-			continue
-		}
-		ev := StatusEvent{
-			ID:         id,
-			FromValue:  fromV.String,
-			FromString: fromS.String,
-			ToValue:    toV.String,
-			ToString:   toS.String,
-		}
-		if changed.Valid && strings.TrimSpace(changed.String) != "" {
-			ev.ChangedAt = parseDBTime(changed.String)
-			if ev.ChangedAt.After(*watermark) {
-				*watermark = ev.ChangedAt
-			}
-		}
-		sources[i].hist.Events = append(sources[i].hist.Events, ev)
+		crows.Close()
 	}
-	return crows.Err()
+	return nil
 }
 
 // loadScalarEvents appends changelog transitions for the scalar tracked fields to the
@@ -591,65 +606,76 @@ func (b *Builder) loadStatusEvents(projects, keys []string, index map[string]int
 // fields; rows are grouped by (issue, field).
 func (b *Builder) loadScalarEvents(projects, keys, fields []string, index map[string]int, sources []issueSource, watermark *time.Time) error {
 	fph := make([]string, len(fields))
-	cargs := make([]any, 0, len(fields)+len(keys)+len(projects))
+	fargs := make([]any, len(fields))
 	for i, f := range fields {
 		fph[i] = "?"
-		cargs = append(cargs, f)
+		fargs[i] = f
 	}
-	cq := `SELECT id, issue_key, field, from_value, from_string, to_value, to_string, changed_at
-	         FROM changelog WHERE field IN (` + strings.Join(fph, ", ") + `)`
-	switch {
-	case len(keys) > 0:
-		args, in := keyFilter(keys, nil)
-		cq += " AND issue_key IN " + in
-		cargs = append(cargs, args...)
-	case len(projects) > 0:
-		ph := make([]string, len(projects))
-		for i, p := range projects {
-			ph[i] = "?"
-			cargs = append(cargs, p)
+	inFields := strings.Join(fph, ", ")
+	chunkSize := max(1, maxKeyBindChunk-len(fields))
+	for _, keyChunk := range keyBatches(keys, chunkSize) {
+		cargs := make([]any, 0, len(fields)+len(keyChunk)+len(projects))
+		cargs = append(cargs, fargs...)
+		cq := `SELECT id, issue_key, field, from_value, from_string, to_value, to_string, changed_at
+	         FROM changelog WHERE field IN (` + inFields + `)`
+		switch {
+		case len(keyChunk) > 0:
+			args, in := keyFilter(keyChunk, nil)
+			cq += " AND issue_key IN " + in
+			cargs = append(cargs, args...)
+		case len(projects) > 0:
+			ph := make([]string, len(projects))
+			for i, p := range projects {
+				ph[i] = "?"
+				cargs = append(cargs, p)
+			}
+			cq += " AND issue_key IN (SELECT key FROM issues WHERE project IN (" + strings.Join(ph, ", ") + "))"
 		}
-		cq += " AND issue_key IN (SELECT key FROM issues WHERE project IN (" + strings.Join(ph, ", ") + "))"
-	}
-	cq += " ORDER BY issue_key, field, changed_at"
+		cq += " ORDER BY issue_key, field, changed_at"
 
-	crows, err := b.store.db.Query(cq, cargs...)
-	if err != nil {
-		return fmt.Errorf("load scalar events: %w", err)
-	}
-	defer crows.Close()
-	for crows.Next() {
-		var (
-			id, issueKey, field             string
-			fromV, fromS, toV, toS, changed sql.NullString
-		)
-		if err := crows.Scan(&id, &issueKey, &field, &fromV, &fromS, &toV, &toS, &changed); err != nil {
+		crows, err := b.store.db.Query(cq, cargs...)
+		if err != nil {
+			return fmt.Errorf("load scalar events: %w", err)
+		}
+		for crows.Next() {
+			var (
+				id, issueKey, field             string
+				fromV, fromS, toV, toS, changed sql.NullString
+			)
+			if err := crows.Scan(&id, &issueKey, &field, &fromV, &fromS, &toV, &toS, &changed); err != nil {
+				crows.Close()
+				return err
+			}
+			i, ok := index[issueKey]
+			if !ok {
+				continue
+			}
+			sh := sources[i].scalar[field]
+			if sh == nil {
+				continue
+			}
+			ev := ScalarEvent{
+				ID:         id,
+				FromValue:  fromV.String,
+				FromString: fromS.String,
+				ToValue:    toV.String,
+				ToString:   toS.String,
+			}
+			if changed.Valid && strings.TrimSpace(changed.String) != "" {
+				ev.ChangedAt = parseDBTime(changed.String)
+				if ev.ChangedAt.After(*watermark) {
+					*watermark = ev.ChangedAt
+				}
+			}
+			sh.Events = append(sh.Events, ev)
+		}
+		if err := crows.Err(); err != nil {
+			crows.Close()
 			return err
 		}
-		i, ok := index[issueKey]
-		if !ok {
-			continue
-		}
-		sh := sources[i].scalar[field]
-		if sh == nil {
-			continue
-		}
-		ev := ScalarEvent{
-			ID:         id,
-			FromValue:  fromV.String,
-			FromString: fromS.String,
-			ToValue:    toV.String,
-			ToString:   toS.String,
-		}
-		if changed.Valid && strings.TrimSpace(changed.String) != "" {
-			ev.ChangedAt = parseDBTime(changed.String)
-			if ev.ChangedAt.After(*watermark) {
-				*watermark = ev.ChangedAt
-			}
-		}
-		sh.Events = append(sh.Events, ev)
+		crows.Close()
 	}
-	return crows.Err()
+	return nil
 }
 
 // loadMembershipCurrent fills each set-valued field's current snapshot set from the issues
@@ -658,63 +684,70 @@ func (b *Builder) loadScalarEvents(projects, keys, fields []string, index map[st
 // from today's snapshot. The snapshot carries names only for components/labels (no stable
 // ids), so those seed name-keyed members; sprint carries its id.
 func (b *Builder) loadMembershipCurrent(projects, keys, fields []string, index map[string]int, sources []issueSource) error {
-	q := `SELECT key, sprint_id, sprint_name, components, labels FROM issues`
-	var args []any
-	switch {
-	case len(keys) > 0:
-		args, _ = keyFilter(keys, &q)
-	case len(projects) > 0:
-		ph := make([]string, len(projects))
-		for i, p := range projects {
-			ph[i] = "?"
-			args = append(args, p)
+	for _, keyChunk := range keyBatches(keys, maxKeyBindChunk) {
+		q := `SELECT key, sprint_id, sprint_name, components, labels FROM issues`
+		var args []any
+		switch {
+		case len(keyChunk) > 0:
+			args, _ = keyFilter(keyChunk, &q)
+		case len(projects) > 0:
+			ph := make([]string, len(projects))
+			for i, p := range projects {
+				ph[i] = "?"
+				args = append(args, p)
+			}
+			q += " WHERE project IN (" + strings.Join(ph, ", ") + ")"
 		}
-		q += " WHERE project IN (" + strings.Join(ph, ", ") + ")"
-	}
-	rows, err := b.store.db.Query(q, args...)
-	if err != nil {
-		return fmt.Errorf("load membership current values: %w", err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var (
-			key                       string
-			sprintID                  sql.NullInt64
-			sprintName, comps, labels sql.NullString
-		)
-		if err := rows.Scan(&key, &sprintID, &sprintName, &comps, &labels); err != nil {
-			return err
+		rows, err := b.store.db.Query(q, args...)
+		if err != nil {
+			return fmt.Errorf("load membership current values: %w", err)
 		}
-		i, ok := index[key]
-		if !ok {
-			continue
-		}
-		for _, f := range fields {
-			mh := sources[i].membership[f]
-			if mh == nil {
+		for rows.Next() {
+			var (
+				key                       string
+				sprintID                  sql.NullInt64
+				sprintName, comps, labels sql.NullString
+			)
+			if err := rows.Scan(&key, &sprintID, &sprintName, &comps, &labels); err != nil {
+				rows.Close()
+				return err
+			}
+			i, ok := index[key]
+			if !ok {
 				continue
 			}
-			dim, _ := MembershipDimension(f)
-			switch dim {
-			case "sprint":
-				if sprintID.Valid {
-					mh.CurrentValue = strconv.FormatInt(sprintID.Int64, 10)
+			for _, f := range fields {
+				mh := sources[i].membership[f]
+				if mh == nil {
+					continue
 				}
-				if sprintName.Valid {
-					mh.CurrentString = sprintName.String
-				}
-			case "component":
-				if names := parseJSONArray(comps.String); len(names) > 0 {
-					mh.CurrentString = strings.Join(names, ",")
-				}
-			case "label":
-				if names := parseJSONArray(labels.String); len(names) > 0 {
-					mh.CurrentString = strings.Join(names, " ")
+				dim, _ := MembershipDimension(f)
+				switch dim {
+				case "sprint":
+					if sprintID.Valid {
+						mh.CurrentValue = strconv.FormatInt(sprintID.Int64, 10)
+					}
+					if sprintName.Valid {
+						mh.CurrentString = sprintName.String
+					}
+				case "component":
+					if names := parseJSONArray(comps.String); len(names) > 0 {
+						mh.CurrentString = strings.Join(names, ",")
+					}
+				case "label":
+					if names := parseJSONArray(labels.String); len(names) > 0 {
+						mh.CurrentString = strings.Join(names, " ")
+					}
 				}
 			}
 		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return err
+		}
+		rows.Close()
 	}
-	return rows.Err()
+	return nil
 }
 
 // parseJSONArray decodes a denormalized array column (the issues table's components
@@ -737,65 +770,76 @@ func parseJSONArray(s string) []string {
 // covers all membership fields; rows are grouped by (issue, field).
 func (b *Builder) loadMembershipEvents(projects, keys, fields []string, index map[string]int, sources []issueSource, watermark *time.Time) error {
 	fph := make([]string, len(fields))
-	cargs := make([]any, 0, len(fields)+len(keys)+len(projects))
+	fargs := make([]any, len(fields))
 	for i, f := range fields {
 		fph[i] = "?"
-		cargs = append(cargs, f)
+		fargs[i] = f
 	}
-	cq := `SELECT id, issue_key, field, from_value, from_string, to_value, to_string, changed_at
-	         FROM changelog WHERE field IN (` + strings.Join(fph, ", ") + `)`
-	switch {
-	case len(keys) > 0:
-		args, in := keyFilter(keys, nil)
-		cq += " AND issue_key IN " + in
-		cargs = append(cargs, args...)
-	case len(projects) > 0:
-		ph := make([]string, len(projects))
-		for i, p := range projects {
-			ph[i] = "?"
-			cargs = append(cargs, p)
+	inFields := strings.Join(fph, ", ")
+	chunkSize := max(1, maxKeyBindChunk-len(fields))
+	for _, keyChunk := range keyBatches(keys, chunkSize) {
+		cargs := make([]any, 0, len(fields)+len(keyChunk)+len(projects))
+		cargs = append(cargs, fargs...)
+		cq := `SELECT id, issue_key, field, from_value, from_string, to_value, to_string, changed_at
+	         FROM changelog WHERE field IN (` + inFields + `)`
+		switch {
+		case len(keyChunk) > 0:
+			args, in := keyFilter(keyChunk, nil)
+			cq += " AND issue_key IN " + in
+			cargs = append(cargs, args...)
+		case len(projects) > 0:
+			ph := make([]string, len(projects))
+			for i, p := range projects {
+				ph[i] = "?"
+				cargs = append(cargs, p)
+			}
+			cq += " AND issue_key IN (SELECT key FROM issues WHERE project IN (" + strings.Join(ph, ", ") + "))"
 		}
-		cq += " AND issue_key IN (SELECT key FROM issues WHERE project IN (" + strings.Join(ph, ", ") + "))"
-	}
-	cq += " ORDER BY issue_key, field, changed_at"
+		cq += " ORDER BY issue_key, field, changed_at"
 
-	crows, err := b.store.db.Query(cq, cargs...)
-	if err != nil {
-		return fmt.Errorf("load membership events: %w", err)
-	}
-	defer crows.Close()
-	for crows.Next() {
-		var (
-			id, issueKey, field             string
-			fromV, fromS, toV, toS, changed sql.NullString
-		)
-		if err := crows.Scan(&id, &issueKey, &field, &fromV, &fromS, &toV, &toS, &changed); err != nil {
+		crows, err := b.store.db.Query(cq, cargs...)
+		if err != nil {
+			return fmt.Errorf("load membership events: %w", err)
+		}
+		for crows.Next() {
+			var (
+				id, issueKey, field             string
+				fromV, fromS, toV, toS, changed sql.NullString
+			)
+			if err := crows.Scan(&id, &issueKey, &field, &fromV, &fromS, &toV, &toS, &changed); err != nil {
+				crows.Close()
+				return err
+			}
+			i, ok := index[issueKey]
+			if !ok {
+				continue
+			}
+			mh := sources[i].membership[field]
+			if mh == nil {
+				continue
+			}
+			ev := MembershipEvent{
+				ID:         id,
+				FromValue:  fromV.String,
+				FromString: fromS.String,
+				ToValue:    toV.String,
+				ToString:   toS.String,
+			}
+			if changed.Valid && strings.TrimSpace(changed.String) != "" {
+				ev.ChangedAt = parseDBTime(changed.String)
+				if ev.ChangedAt.After(*watermark) {
+					*watermark = ev.ChangedAt
+				}
+			}
+			mh.Events = append(mh.Events, ev)
+		}
+		if err := crows.Err(); err != nil {
+			crows.Close()
 			return err
 		}
-		i, ok := index[issueKey]
-		if !ok {
-			continue
-		}
-		mh := sources[i].membership[field]
-		if mh == nil {
-			continue
-		}
-		ev := MembershipEvent{
-			ID:         id,
-			FromValue:  fromV.String,
-			FromString: fromS.String,
-			ToValue:    toV.String,
-			ToString:   toS.String,
-		}
-		if changed.Valid && strings.TrimSpace(changed.String) != "" {
-			ev.ChangedAt = parseDBTime(changed.String)
-			if ev.ChangedAt.After(*watermark) {
-				*watermark = ev.ChangedAt
-			}
-		}
-		mh.Events = append(mh.Events, ev)
+		crows.Close()
 	}
-	return crows.Err()
+	return nil
 }
 
 // loadScalarCurrent fills each scalar field's current snapshot value from the issues row,
@@ -819,47 +863,55 @@ func (b *Builder) loadScalarCurrent(projects, keys, fields []string, index map[s
 			selCols = append(selCols, `"`+col+`"`)
 		}
 	}
-	q := `SELECT key, ` + strings.Join(selCols, ", ") + ` FROM issues`
-	var args []any
-	switch {
-	case len(keys) > 0:
-		args, _ = keyFilter(keys, &q)
-	case len(projects) > 0:
-		ph := make([]string, len(projects))
-		for i, p := range projects {
-			ph[i] = "?"
-			args = append(args, p)
+	baseQ := `SELECT key, ` + strings.Join(selCols, ", ") + ` FROM issues`
+	for _, keyChunk := range keyBatches(keys, maxKeyBindChunk) {
+		q := baseQ
+		var args []any
+		switch {
+		case len(keyChunk) > 0:
+			args, _ = keyFilter(keyChunk, &q)
+		case len(projects) > 0:
+			ph := make([]string, len(projects))
+			for i, p := range projects {
+				ph[i] = "?"
+				args = append(args, p)
+			}
+			q += " WHERE project IN (" + strings.Join(ph, ", ") + ")"
 		}
-		q += " WHERE project IN (" + strings.Join(ph, ", ") + ")"
-	}
-	rows, err := b.store.db.Query(q, args...)
-	if err != nil {
-		return fmt.Errorf("load scalar current values: %w", err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var key string
-		vals := make([]sql.NullString, len(fieldOrder))
-		dest := make([]any, 0, len(fieldOrder)+1)
-		dest = append(dest, &key)
-		for i := range vals {
-			dest = append(dest, &vals[i])
+		rows, err := b.store.db.Query(q, args...)
+		if err != nil {
+			return fmt.Errorf("load scalar current values: %w", err)
 		}
-		if err := rows.Scan(dest...); err != nil {
-			return err
-		}
-		i, ok := index[key]
-		if !ok {
-			continue
-		}
-		for j, f := range fieldOrder {
-			if sh := sources[i].scalar[f]; sh != nil {
-				sh.CurrentKnown = true
-				sh.CurrentValue = vals[j].String
+		for rows.Next() {
+			var key string
+			vals := make([]sql.NullString, len(fieldOrder))
+			dest := make([]any, 0, len(fieldOrder)+1)
+			dest = append(dest, &key)
+			for i := range vals {
+				dest = append(dest, &vals[i])
+			}
+			if err := rows.Scan(dest...); err != nil {
+				rows.Close()
+				return err
+			}
+			i, ok := index[key]
+			if !ok {
+				continue
+			}
+			for j, f := range fieldOrder {
+				if sh := sources[i].scalar[f]; sh != nil {
+					sh.CurrentKnown = true
+					sh.CurrentValue = vals[j].String
+				}
 			}
 		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return err
+		}
+		rows.Close()
 	}
-	return rows.Err()
+	return nil
 }
 
 // scalarColumns resolves each scalar tracked field to the issues column holding its current
@@ -922,6 +974,53 @@ func (b *Builder) scalarColumns(fields []string) (map[string]string, error) {
 		}
 	}
 	return out, nil
+}
+
+const maxKeyBindChunk = 500
+
+// chunkStrings splits ss into non-empty slices of at most size elements.
+func chunkStrings(ss []string, size int) [][]string {
+	if len(ss) == 0 {
+		return nil
+	}
+	if size <= 0 {
+		size = maxKeyBindChunk
+	}
+	out := make([][]string, 0, (len(ss)+size-1)/size)
+	for i := 0; i < len(ss); i += size {
+		end := i + size
+		if end > len(ss) {
+			end = len(ss)
+		}
+		out = append(out, ss[i:end])
+	}
+	return out
+}
+
+// keyBatches returns chunked slices when keys is non-empty, or a single nil
+// sentinel batch when keys is empty so unfiltered/project-scoped callers execute once.
+func keyBatches(keys []string, size int) [][]string {
+	if len(keys) == 0 {
+		return [][]string{nil}
+	}
+	return chunkStrings(keys, size)
+}
+
+// dedupStrings returns unique elements preserving first-seen order.
+func dedupStrings(ss []string) []string {
+	if len(ss) <= 1 {
+		return ss
+	}
+	seen := make(map[string]struct{}, len(ss))
+	out := make([]string, 0, len(ss))
+	for _, s := range ss {
+		if _, ok := seen[s]; ok {
+			continue
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	return out
 }
 
 // keyFilter appends/returns an "IN (?, ...)" clause for issue keys. When q is non-nil the

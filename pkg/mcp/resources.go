@@ -430,24 +430,23 @@ func (s *Server) handleIssueResource(ctx context.Context, req mcp.ReadResourceRe
 		return nil, fmt.Errorf("invalid issue URI: %s", req.Params.URI)
 	}
 
-	row := s.db.QueryRowContext(ctx, `
+	row := s.db.ReadDB().QueryRowContext(ctx, `
 		SELECT key, summary, description, status, priority, assignee, assignee_email,
-		       reporter, issue_type, project, created, updated, resolved, due_date,
-		       status_category, resolution, parent_key, sprint, story_points,
-		       components, labels, fix_versions, affected_versions, raw_json
+		       reporter, type, project, created, updated, resolved, due_date,
+		       status_category, resolution, parent_key, sprint_name, story_points,
+		       components, labels, fix_version, affects_versions
 		FROM issues WHERE key = ?`, key)
 
 	var k, summary, status, priority, issueType, project, created, updated, statusCategory sql.NullString
 	var description, assignee, assigneeEmail, reporter, resolved, dueDate sql.NullString
 	var resolution, parentKey, sprint, components, labels, fixVersions, affectedVersions sql.NullString
 	var storyPoints sql.NullFloat64
-	var rawJSON sql.NullString
 
 	err := row.Scan(
 		&k, &summary, &description, &status, &priority, &assignee, &assigneeEmail,
 		&reporter, &issueType, &project, &created, &updated, &resolved, &dueDate,
 		&statusCategory, &resolution, &parentKey, &sprint, &storyPoints,
-		&components, &labels, &fixVersions, &affectedVersions, &rawJSON,
+		&components, &labels, &fixVersions, &affectedVersions,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("issue not found: %s: %w", key, err)

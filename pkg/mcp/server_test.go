@@ -4,9 +4,11 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"testing"
 
+	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/sthadka/jai/v6/pkg/config"
 	"github.com/sthadka/jai/v6/pkg/jira"
 	"github.com/sthadka/jai/v6/pkg/query"
@@ -196,4 +198,44 @@ func TestServerHTTPAndSSE(t *testing.T) {
 
 	// The methods ServeHTTP and ServeSSE exist as methods on the Server type.
 	// Their existence is verified at compile time, not runtime.
+}
+
+func TestHandleIssueResource(t *testing.T) {
+	srv := testServer(t, false, nil)
+
+	if _, err := srv.db.Exec(`INSERT INTO issues (
+		key, project, type, summary, description, status, status_category,
+		priority, assignee, assignee_email, reporter, created, updated,
+		due_date, resolution, parent_key, sprint_name, story_points,
+		components, labels, fix_version, affects_versions, raw_json
+	) VALUES (
+		'ENG-42', 'ENG', 'Bug', 'Fix SQL', 'Desc', 'In Progress', 'In Progress',
+		'High', 'Alice', 'alice@example.com', 'Bob', '2026-01-01T00:00:00Z', '2026-01-02T00:00:00Z',
+		'2026-02-01', 'Unresolved', 'ENG-1', 'Sprint 10', 3.5,
+		'["core"]', '["perf"]', '["1.0"]', '["0.9"]', '{}'
+	)`); err != nil {
+		t.Fatalf("seeding issue: %v", err)
+	}
+
+	req := mcp.ReadResourceRequest{}
+	req.Params.URI = "jira://issue/ENG-42"
+	contents, err := srv.handleIssueResource(context.Background(), req)
+	if err != nil {
+		t.Fatalf("handleIssueResource: %v", err)
+	}
+	if len(contents) != 1 {
+		t.Fatalf("expected 1 resource content, got %d", len(contents))
+	}
+	tc, ok := contents[0].(*mcp.TextResourceContents)
+	if !ok {
+		t.Fatalf("expected *mcp.TextResourceContents, got %T", contents[0])
+	}
+	var got map[string]any
+	if err := json.Unmarshal([]byte(tc.Text), &got); err != nil {
+		t.Fatalf("unmarshal resource json: %v", err)
+	}
+	if got["key"] != "ENG-42" || got["issue_type"] != "Bug" || got["sprint"] != "Sprint 10" ||
+		got["fix_versions"] != `["1.0"]` || got["affected_versions"] != `["0.9"]` {
+		t.Errorf("unexpected resource payload: %v", got)
+	}
 }

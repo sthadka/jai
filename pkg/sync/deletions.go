@@ -40,7 +40,7 @@ func DetectDeletedKeys(ctx context.Context, database db.Store, client jira.JiraC
 	}
 
 	// Fetch all local issues (stable numeric id + key) for this project.
-	rows, err := database.Query(`SELECT COALESCE(id, ''), key FROM issues WHERE project = ?`, project)
+	rows, err := database.ReadDB().Query(`SELECT COALESCE(id, ''), key FROM issues WHERE project = ?`, project)
 	if err != nil {
 		return nil, fmt.Errorf("fetching local keys: %w", err)
 	}
@@ -75,10 +75,13 @@ func DetectDeletedKeys(ctx context.Context, database db.Store, client jira.JiraC
 			present = remoteKeys[lr.key]
 		}
 		if !present {
-			if _, err := database.Exec(`DELETE FROM issues WHERE key = ?`, lr.key); err != nil {
-				return deleted, fmt.Errorf("deleting %s: %w", lr.key, err)
-			}
 			deleted = append(deleted, lr.key)
+		}
+	}
+
+	if len(deleted) > 0 {
+		if _, err := database.DeleteIssuesTx(deleted); err != nil {
+			return nil, fmt.Errorf("deleting %d issues: %w", len(deleted), err)
 		}
 	}
 

@@ -87,8 +87,7 @@ func (db *DB) GetIssueIDToKeyMap() (map[string]string, error) {
 func (db *DB) GetChangelogSyncCandidates(projectFilter []string) ([]string, error) {
 	query := `
 		SELECT key FROM issues
-		WHERE changelog_synced_at IS NULL
-		   OR updated > changelog_synced_at`
+		WHERE (changelog_synced_at IS NULL OR updated > changelog_synced_at)`
 
 	var args []any
 	if len(projectFilter) > 0 {
@@ -101,7 +100,7 @@ func (db *DB) GetChangelogSyncCandidates(projectFilter []string) ([]string, erro
 	}
 	query += ` ORDER BY key`
 
-	sqlRows, err := db.Query(query, args...)
+	sqlRows, err := db.ReadDB().Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
