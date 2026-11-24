@@ -189,3 +189,31 @@ func TestEmitUseFTS5AndCustomRewrite(t *testing.T) {
 	r = mustTranslate(t, `summary !~ "hello"`, custom)
 	wantFragments(t, r.SQL, `NOT (custom_fts(summary,'hello'))`)
 }
+
+func TestEmitCommentsTextFallbackUsesIssueBlobs(t *testing.T) {
+	opts := translateOpts(SQLite)
+	opts.FieldMap["comment"] = FieldDef{Column: "comments_text", Kind: KindString}
+
+	// UseFTS5: false must query issue_blobs instead of dropped issues.comments_text.
+	r := mustTranslate(t, `comment ~ "needle"`, opts)
+	wantFragments(t, r.SQL, `EXISTS (SELECT 1 FROM issue_blobs b WHERE b.issue_key = issues.key AND b.comments_text LIKE '%needle%')`)
+	for _, c := range r.Columns {
+		if c == "comments_text" {
+			t.Errorf("comments_text should not be projected from issues: %v", r.Columns)
+		}
+	}
+
+	r = mustTranslate(t, `comment !~ "needle"`, opts)
+	wantFragments(t, r.SQL, `NOT EXISTS (SELECT 1 FROM issue_blobs b WHERE b.issue_key = issues.key AND b.comments_text LIKE '%needle%')`)
+
+	// DuckDB dialect uses jai.issue_blobs + ILIKE.
+	dopts := translateOpts(DuckDB)
+	dopts.FieldMap["comment"] = FieldDef{Column: "comments_text", Kind: KindString}
+	r = mustTranslate(t, `comment ~ "needle"`, dopts)
+	wantFragments(t, r.SQL, `EXISTS (SELECT 1 FROM jai.issue_blobs b WHERE b.issue_key = jai.issues.key AND b.comments_text ILIKE '%needle%')`)
+
+	// UseFTS5: true still uses issues_fts directly.
+	opts.UseFTS5 = true
+	r = mustTranslate(t, `comment ~ "needle"`, opts)
+	wantFragments(t, r.SQL, `rowid IN (SELECT rowid FROM issues_fts WHERE issues_fts MATCH 'comments_text : "needle"')`)
+}
