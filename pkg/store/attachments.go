@@ -1,6 +1,9 @@
 package store
 
-import "time"
+import (
+	"database/sql"
+	"time"
+)
 
 // Attachment represents a row from the attachments table.
 type Attachment struct {
@@ -14,27 +17,43 @@ type Attachment struct {
 	URL      string
 }
 
-// UpsertAttachments replaces all attachments for an issue and updates attachment_count.
+// UpsertAttachments replaces all attachments for an issue and updates
+// attachment_count atomically in a single transaction.
 func (db *DB) UpsertAttachments(issueKey string, attachments []*Attachment) error {
-	// Delete existing attachments for this issue.
-	if _, err := db.Exec(`DELETE FROM attachments WHERE issue_key = ?`, issueKey); err != nil {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := UpsertAttachmentsTx(tx, issueKey, attachments); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// UpsertAttachmentsTx replaces all attachments for an issue within an existing transaction.
+func UpsertAttachmentsTx(tx *sql.Tx, issueKey string, attachments []*Attachment) error {
+	if _, err := tx.Exec(`DELETE FROM attachments WHERE issue_key = ?`, issueKey); err != nil {
 		return err
 	}
 
-	// Insert new attachments.
-	for _, a := range attachments {
-		_, err := db.Exec(
+	if len(attachments) > 0 {
+		stmt, err := tx.Prepare(
 			`INSERT INTO attachments (id, issue_key, filename, size, mime_type, author, created, url, synced_at)
 			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			a.ID, a.IssueKey, a.Filename, a.Size, a.MimeType, a.Author, a.Created, a.URL,
-			time.Now().UTC().Format(time.RFC3339),
 		)
 		if err != nil {
 			return err
 		}
+		defer stmt.Close()
+		now := time.Now().UTC().Format(time.RFC3339)
+		for _, a := range attachments {
+			if _, err := stmt.Exec(a.ID, a.IssueKey, a.Filename, a.Size, a.MimeType, a.Author, a.Created, a.URL, now); err != nil {
+				return err
+			}
+		}
 	}
 
-	// Update attachment_count on the issue.
-	_, err := db.Exec(`UPDATE issues SET attachment_count = ? WHERE key = ?`, len(attachments), issueKey)
+	_, err := tx.Exec(`UPDATE issues SET attachment_count = ? WHERE key = ?`, len(attachments), issueKey)
 	return err
 }

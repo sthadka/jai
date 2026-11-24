@@ -202,17 +202,16 @@ func handleSchemaDB(s *Server, ctx context.Context, tier, filter string) (*mcp.C
 		}
 		// Add population stats for custom fields
 		if len(columns) > 0 {
-			var totalCount int
-			countRow := s.db.ReadDB().QueryRow("SELECT COUNT(*) FROM issues")
-			countRow.Scan(&totalCount)
-
+			colNames := make([]string, len(columns))
 			for i, c := range columns {
-				var nonNullCount int
-				sql := fmt.Sprintf(`SELECT COUNT(*) FROM issues WHERE "%s" IS NOT NULL AND "%s" != ''`, c.Name, c.Name)
-				row := s.db.ReadDB().QueryRow(sql)
-				if err := row.Scan(&nonNullCount); err == nil {
-					columns[i].Populated = nonNullCount
-					columns[i].Total = totalCount
+				colNames[i] = c.Name
+			}
+			if stats, err := s.db.FieldPopulationStats(colNames, ""); err == nil {
+				for i, c := range columns {
+					if st, ok := stats[c.Name]; ok {
+						columns[i].Populated = st.NonNull
+						columns[i].Total = st.Total
+					}
 				}
 			}
 		}

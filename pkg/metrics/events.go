@@ -309,20 +309,23 @@ func (s *Service) loadTriageIssues(projects []string) ([]triageIssue, error) {
 // never assigned have no entry.
 func (s *Service) firstAssignmentTimes(projects []string, issues []triageIssue) (map[string]*time.Time, error) {
 	type ev struct {
+		id           string
 		fromAssigned bool
 		toAssigned   bool
 		at           time.Time
 	}
 	byKey := map[string][]ev{}
 
-	cq := `SELECT issue_key, from_value, from_string, to_value, to_string, changed_at
+	cq := `SELECT id, issue_key, from_value, from_string, to_value, to_string, changed_at
 	         FROM changelog WHERE field = ?`
 	args := []any{assigneeField}
 	if in, pa := projectInClause(projects); in != "" {
 		cq += " AND issue_key IN (SELECT key FROM issues WHERE project IN " + in + ")"
 		args = append(args, pa...)
 	}
-	cq += " ORDER BY issue_key, changed_at, id"
+	// Match idx_changelog_field_issue_time(field, issue_key, changed_at) without
+	// a temp B-tree sort; equal-timestamp ties are broken deterministically by id in Go.
+	cq += " ORDER BY issue_key, changed_at"
 	rows, err := s.db.ReadDB().Query(cq, args...)
 	if err != nil {
 		return nil, fmt.Errorf("load assignee events: %w", err)
@@ -330,16 +333,17 @@ func (s *Service) firstAssignmentTimes(projects []string, issues []triageIssue) 
 	defer rows.Close()
 	for rows.Next() {
 		var (
-			key                             string
+			id, key                         string
 			fromV, fromS, toV, toS, changed sql.NullString
 		)
-		if err := rows.Scan(&key, &fromV, &fromS, &toV, &toS, &changed); err != nil {
+		if err := rows.Scan(&id, &key, &fromV, &fromS, &toV, &toS, &changed); err != nil {
 			return nil, err
 		}
 		if !changed.Valid || strings.TrimSpace(changed.String) == "" {
 			continue
 		}
 		byKey[key] = append(byKey[key], ev{
+			id:           id,
 			fromAssigned: assigneeSet(fromV.String, fromS.String),
 			toAssigned:   assigneeSet(toV.String, toS.String),
 			at:           parseDBTime(changed.String),
@@ -361,9 +365,13 @@ func (s *Service) firstAssignmentTimes(projects []string, issues []triageIssue) 
 			}
 			continue
 		}
-		sort.SliceStable(evs, func(i, j int) bool { return evs[i].at.Before(evs[j].at) })
+		sort.SliceStable(evs, func(i, j int) bool {
+			if !evs[i].at.Equal(evs[j].at) {
+				return evs[i].at.Before(evs[j].at)
+			}
+			return evs[i].id < evs[j].id
+		})
 		if evs[0].fromAssigned {
-			// Already assigned before the first recorded change -> assigned at/before
 			// creation.
 			if it.created != nil {
 				t := *it.created
