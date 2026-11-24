@@ -10,7 +10,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	db "github.com/sthadka/jai/v6/pkg/store"
+	db "github.com/sthadka/jai/v7/pkg/store"
 )
 
 // ChainItem is one step in the breadcrumb parent chain.

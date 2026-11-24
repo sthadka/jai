@@ -35,6 +35,7 @@ func init() {
 func readPoolMaxConns() int {
 	return min(8, max(4, runtime.NumCPU()))
 }
+
 // DB wraps a SQLite database connection with a single-writer pool (the
 // embedded *sql.DB) and a separate multi-connection read-only pool for
 // concurrent WAL readers.
@@ -138,11 +139,24 @@ func readOnlyDSN(path string) string {
 	return "file:" + escaped + "?mode=ro&_query_only=1&_busy_timeout=30000&_cache_size=-16000"
 }
 
-// RebuildFTS rebuilds the issues_fts index from the current issues table.
-// Call when the FTS index becomes inconsistent (e.g. "fts5: missing row" errors).
+// RebuildFTS rebuilds the issues_fts index from the current issues and issue_blobs tables.
 func (db *DB) RebuildFTS() error {
-	_, err := db.Exec(`INSERT INTO issues_fts(issues_fts) VALUES('rebuild')`)
-	return err
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`DELETE FROM issues_fts`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`
+		INSERT INTO issues_fts(rowid, key, summary, description, comments_text, labels)
+		SELECT i.rowid, i.key, i.summary, i.description, b.comments_text, i.labels
+		FROM issues i
+		LEFT JOIN issue_blobs b ON b.issue_key = i.key`); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (db *DB) applyPragmas() error {

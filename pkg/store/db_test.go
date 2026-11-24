@@ -353,7 +353,7 @@ func TestReadDB_ConcurrentReadsDuringActiveWriteTx(t *testing.T) {
 		t.Fatalf("Begin: %v", err)
 	}
 	if _, err := tx.Exec(
-		`INSERT INTO issues (id, key, project, summary, raw_json) VALUES ('2', 'ENG-2', 'ENG', 'uncommitted', '{}')`,
+		`INSERT INTO issues (id, key, project, summary) VALUES ('2', 'ENG-2', 'ENG', 'uncommitted')`,
 	); err != nil {
 		tx.Rollback()
 		t.Fatalf("tx insert: %v", err)
@@ -503,4 +503,57 @@ func TestUpsertIssueBundleTx_AndSlimSummary(t *testing.T) {
 	if _, present := byID["201"]["raw_json"]; present {
 		t.Errorf("GetIssuesSummaryByIDs should omit raw_json")
 	}
+}
+
+func TestIssueBlobsVerticalPartitionAndStartDate(t *testing.T) {
+	db := openTestDB(t)
+
+	// issues must NOT carry raw_json or comments_text columns anymore; start_date must exist.
+	var hasRaw, hasComments, hasStartDate int
+	_ = db.ReadDB().QueryRow(`SELECT count(*) FROM pragma_table_info('issues') WHERE name = 'raw_json'`).Scan(&hasRaw)
+	_ = db.ReadDB().QueryRow(`SELECT count(*) FROM pragma_table_info('issues') WHERE name = 'comments_text'`).Scan(&hasComments)
+	_ = db.ReadDB().QueryRow(`SELECT count(*) FROM pragma_table_info('issues') WHERE name = 'start_date'`).Scan(&hasStartDate)
+	if hasRaw != 0 || hasComments != 0 || hasStartDate != 1 {
+		t.Fatalf("issues schema flags raw=%d comments=%d start_date=%d, want 0/0/1", hasRaw, hasComments, hasStartDate)
+	}
+
+	if err := db.UpsertIssue(&Issue{
+		ID:        "500",
+		Key:       "OLD-500",
+		Project:   "OLD",
+		Summary:   "Original summary",
+		StartDate: "2026-03-01T00:00:00Z",
+		RawJSON:   `{"key":"OLD-500","secret":"blob"}`,
+	}, nil); err != nil {
+		t.Fatalf("UpsertIssue: %v", err)
+	}
+	if err := db.UpsertComment(&Comment{ID: "c-500", IssueKey: "OLD-500", Body: "searchable comment token"}); err != nil {
+		t.Fatalf("UpsertComment: %v", err)
+	}
+	if err := db.UpdateIssueCommentsText("OLD-500"); err != nil {
+		t.Fatalf("UpdateIssueCommentsText: %v", err)
+	}
+	assertCount(t, db, `SELECT count(*) FROM issues_fts WHERE issues_fts MATCH 'searchable'`, 1)
+
+	// Key rename (same numeric ID, new key) must cascade issue_blobs and preserve raw_json & FTS.
+	if err := db.UpsertIssue(&Issue{
+		ID:        "500",
+		Key:       "NEW-500",
+		Project:   "NEW",
+		Summary:   "Moved summary",
+		StartDate: "2026-03-01T00:00:00Z",
+	}, nil); err != nil {
+		t.Fatalf("UpsertIssue rename: %v", err)
+	}
+	raws, err := db.GetIssuesRawJSON([]string{"NEW-500"})
+	if err != nil {
+		t.Fatalf("GetIssuesRawJSON: %v", err)
+	}
+	if raws["NEW-500"] != `{"key":"OLD-500","secret":"blob"}` {
+		t.Errorf("raw_json after rename = %q", raws["NEW-500"])
+	}
+	if err := db.RebuildFTS(); err != nil {
+		t.Fatalf("RebuildFTS: %v", err)
+	}
+	assertCount(t, db, `SELECT count(*) FROM issues_fts WHERE issues_fts MATCH 'searchable' AND key = 'NEW-500'`, 1)
 }

@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"reflect"
 
-	"github.com/sthadka/jai/v6/pkg/jira"
+	"github.com/sthadka/jai/v7/pkg/jira"
 )
 
 // excludedColumns defines columns that should never appear in MCP responses

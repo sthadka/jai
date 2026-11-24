@@ -6,9 +6,9 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/sthadka/jai/v6/pkg/jira"
-	"github.com/sthadka/jai/v6/pkg/output"
-	synce "github.com/sthadka/jai/v6/pkg/sync"
+	"github.com/sthadka/jai/v7/pkg/jira"
+	"github.com/sthadka/jai/v7/pkg/output"
+	synce "github.com/sthadka/jai/v7/pkg/sync"
 )
 
 var (

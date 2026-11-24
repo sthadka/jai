@@ -25,8 +25,8 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/sthadka/jai/v6/pkg/jql"
-	"github.com/sthadka/jai/v6/pkg/metrics/dashboard/specs"
+	"github.com/sthadka/jai/v7/pkg/jql"
+	"github.com/sthadka/jai/v7/pkg/metrics/dashboard/specs"
 	"gopkg.in/yaml.v3"
 )
 
@@ -561,7 +561,7 @@ func (s *Server) makeIDResolver(fm jql.FieldMap) jql.IDResolver {
 			col = fd.Column
 		}
 		q := fmt.Sprintf(
-			"SELECT DISTINCT %s FROM jai.issues WHERE raw_json LIKE '%%'||%s||'%%' AND %s IS NOT NULL AND %s <> '' LIMIT 2",
+			"SELECT DISTINCT i.%s FROM jai.issues i JOIN jai.issue_blobs b ON b.issue_key = i.key WHERE b.raw_json LIKE '%%'||%s||'%%' AND i.%s IS NOT NULL AND i.%s <> '' LIMIT 2",
 			col, sqlLiteral(id), col, col,
 		)
 		rows, err := s.engine.Query(q)

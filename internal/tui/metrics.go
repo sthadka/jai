@@ -9,7 +9,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/sthadka/jai/v6/pkg/metrics"
+	"github.com/sthadka/jai/v7/pkg/metrics"
 )
 
 // metricsComputeTimeout bounds a single pane computation so a slow/large metric

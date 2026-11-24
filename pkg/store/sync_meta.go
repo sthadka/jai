@@ -231,6 +231,7 @@ func (db *DB) DeleteIssuesTx(keys []string) (int64, error) {
 		"issue_links",
 		"dev_links",
 		"attachments",
+		"issue_blobs",
 		"pending_changes",
 		"fact_field_interval",
 		"fact_issue_flow",

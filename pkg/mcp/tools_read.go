@@ -8,8 +8,8 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
-	"github.com/sthadka/jai/v6/pkg/jira"
-	"github.com/sthadka/jai/v6/pkg/output"
+	"github.com/sthadka/jai/v7/pkg/jira"
+	"github.com/sthadka/jai/v7/pkg/output"
 )
 
 // registerReadTools registers all read toolset tools with the MCP server.
@@ -248,7 +248,7 @@ func handleGet(s *Server, ctx context.Context, request mcp.CallToolRequest) (*mc
 	}
 
 	// Query local database first
-	results, err := s.query.Execute("SELECT * FROM issues WHERE key = ?", key)
+	results, err := s.query.Execute("SELECT i.*, b.raw_json, b.comments_text FROM issues i LEFT JOIN issue_blobs b ON b.issue_key = i.key WHERE i.key = ?", key)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}

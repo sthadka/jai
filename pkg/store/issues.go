@@ -36,6 +36,7 @@ type Issue struct {
 	RawJSON           string
 	SyncedAt          string
 	Resolution        string
+	StartDate         string
 	DueDate           string
 	OriginalEstimate  sql.NullInt64
 	TimeSpent         sql.NullInt64
@@ -97,14 +98,18 @@ func buildUpsertIssue(issue *Issue, extra map[string]interface{}) (string, []int
 		"created", "updated", "resolved",
 		"labels", "components", "fix_version",
 		"parent_key", "epic_key", "story_points",
-		"comments_text", "raw_json", "synced_at",
-		"resolution", "due_date",
+		"synced_at",
+		"resolution", "start_date", "due_date",
 		"original_estimate", "time_spent", "remaining_estimate",
 		"subtask_keys", "sprint_id", "sprint_name",
 	}
 	var idVal any = issue.ID
 	if issue.ID == "" {
 		idVal = nil
+	}
+	var startDateVal any
+	if issue.StartDate != "" {
+		startDateVal = issue.StartDate
 	}
 	vals := []interface{}{
 		idVal, issue.Key, issue.Project, issue.Type, issue.Summary, issue.Description,
@@ -113,9 +118,8 @@ func buildUpsertIssue(issue *Issue, extra map[string]interface{}) (string, []int
 		issue.Created, issue.Updated, issue.Resolved,
 		issue.Labels, issue.Components, issue.FixVersion,
 		issue.ParentKey, issue.EpicKey, issue.StoryPoints,
-		issue.CommentsText, issue.RawJSON,
 		time.Now().UTC().Format(time.RFC3339),
-		issue.Resolution, issue.DueDate,
+		issue.Resolution, startDateVal, issue.DueDate,
 		issue.OriginalEstimate, issue.TimeSpent, issue.RemainingEstimate,
 		issue.SubtaskKeys, issue.SprintID, issue.SprintName,
 	}
@@ -159,19 +163,37 @@ func buildUpsertIssue(issue *Issue, extra map[string]interface{}) (string, []int
 	return query, vals
 }
 
-// UpsertIssue inserts a new issue row or updates an existing one. Extra contains
-// additional dynamic columns.
+const upsertIssueBlobSQL = `
+	INSERT INTO issue_blobs (issue_key, raw_json, comments_text)
+	VALUES (?, NULLIF(?, ''), NULLIF(?, ''))
+	ON CONFLICT(issue_key) DO UPDATE SET
+		raw_json      = COALESCE(NULLIF(excluded.raw_json, ''), issue_blobs.raw_json),
+		comments_text = COALESCE(NULLIF(excluded.comments_text, ''), issue_blobs.comments_text)`
+
+// UpsertIssue inserts a new issue row or updates an existing one, storing
+// raw_json and comments_text in the companion issue_blobs table atomically.
 func (db *DB) UpsertIssue(issue *Issue, extra map[string]interface{}) error {
 	query, vals := buildUpsertIssue(issue, extra)
-	_, err := db.Exec(query, vals...)
-	return err
+	if issue.RawJSON == "" && issue.CommentsText == "" {
+		_, err := db.Exec(query, vals...)
+		return err
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(query, vals...); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(upsertIssueBlobSQL, issue.Key, issue.RawJSON, issue.CommentsText); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
-// UpsertIssuesTx upserts every issue in a single transaction: either all rows
-// land or none do. The rank/field reconcile pass uses it so an interrupted or
-// failed refresh never exposes a half-updated ordering — on any error the
-// transaction rolls back and the prior (last-known-good) snapshot stays intact.
-// An empty slice is a no-op.
+// UpsertIssuesTx upserts every issue (and its issue_blobs payload) in a single
+// transaction: either all rows land or none do.
 func (db *DB) UpsertIssuesTx(items []*IssueUpsert) error {
 	if len(items) == 0 {
 		return nil
@@ -181,9 +203,13 @@ func (db *DB) UpsertIssuesTx(items []*IssueUpsert) error {
 		return fmt.Errorf("begin issue upsert tx: %w", err)
 	}
 	stmts := make(map[string]*sql.Stmt, 4)
+	var blobStmt *sql.Stmt
 	closeStmts := func() {
 		for _, s := range stmts {
 			_ = s.Close()
+		}
+		if blobStmt != nil {
+			_ = blobStmt.Close()
 		}
 	}
 	for _, it := range items {
@@ -202,6 +228,21 @@ func (db *DB) UpsertIssuesTx(items []*IssueUpsert) error {
 			closeStmts()
 			_ = tx.Rollback()
 			return fmt.Errorf("upserting issue %s in tx: %w", it.Issue.Key, err)
+		}
+		if it.Issue.RawJSON != "" || it.Issue.CommentsText != "" {
+			if blobStmt == nil {
+				blobStmt, err = tx.Prepare(upsertIssueBlobSQL)
+				if err != nil {
+					closeStmts()
+					_ = tx.Rollback()
+					return err
+				}
+			}
+			if _, err := blobStmt.Exec(it.Issue.Key, it.Issue.RawJSON, it.Issue.CommentsText); err != nil {
+				closeStmts()
+				_ = tx.Rollback()
+				return fmt.Errorf("upserting issue_blobs for %s in tx: %w", it.Issue.Key, err)
+			}
 		}
 	}
 	closeStmts()
@@ -224,12 +265,12 @@ func (db *DB) UpsertIssueBundleTx(bundles []*IssueBundle) error {
 	}
 
 	issueStmts := make(map[string]*sql.Stmt, 4)
-	var commentStmt, commentsTextStmt, delLinksStmt, insLinkStmt, delAttStmt, insAttStmt, updAttCountStmt *sql.Stmt
+	var blobStmt, commentStmt, commentsTextStmt, syncedAtStmt, delLinksStmt, insLinkStmt, delAttStmt, insAttStmt, updAttCountStmt *sql.Stmt
 	closeAll := func() {
 		for _, s := range issueStmts {
 			_ = s.Close()
 		}
-		for _, s := range []*sql.Stmt{commentStmt, commentsTextStmt, delLinksStmt, insLinkStmt, delAttStmt, insAttStmt, updAttCountStmt} {
+		for _, s := range []*sql.Stmt{blobStmt, commentStmt, commentsTextStmt, syncedAtStmt, delLinksStmt, insLinkStmt, delAttStmt, insAttStmt, updAttCountStmt} {
 			if s != nil {
 				_ = s.Close()
 			}
@@ -262,6 +303,18 @@ func (db *DB) UpsertIssueBundleTx(bundles []*IssueBundle) error {
 		}
 
 		key := b.Issue.Key
+		if b.Issue.RawJSON != "" || b.Issue.CommentsText != "" {
+			if blobStmt == nil {
+				blobStmt, err = tx.Prepare(upsertIssueBlobSQL)
+				if err != nil {
+					return fail(err)
+				}
+			}
+			if _, err := blobStmt.Exec(key, b.Issue.RawJSON, b.Issue.CommentsText); err != nil {
+				return fail(fmt.Errorf("upserting issue_blobs for %s: %w", key, err))
+			}
+		}
+
 		if len(b.Comments) > 0 {
 			if commentStmt == nil {
 				commentStmt, err = tx.Prepare(
@@ -281,16 +334,24 @@ func (db *DB) UpsertIssueBundleTx(bundles []*IssueBundle) error {
 		if b.UpdateCommentsText {
 			if commentsTextStmt == nil {
 				commentsTextStmt, err = tx.Prepare(`
-					UPDATE issues SET comments_text = (
-						SELECT GROUP_CONCAT(body, ' ') FROM comments WHERE issue_key = ?
-					), synced_at = ?
-					WHERE key = ?`)
+					INSERT INTO issue_blobs (issue_key, comments_text)
+					VALUES (?, (SELECT GROUP_CONCAT(body, ' ') FROM comments WHERE issue_key = ?))
+					ON CONFLICT(issue_key) DO UPDATE SET comments_text = excluded.comments_text`)
 				if err != nil {
 					return fail(err)
 				}
 			}
-			if _, err := commentsTextStmt.Exec(key, nowComments, key); err != nil {
+			if _, err := commentsTextStmt.Exec(key, key); err != nil {
 				return fail(fmt.Errorf("updating comments_text for %s: %w", key, err))
+			}
+			if syncedAtStmt == nil {
+				syncedAtStmt, err = tx.Prepare(`UPDATE issues SET synced_at = ? WHERE key = ?`)
+				if err != nil {
+					return fail(err)
+				}
+			}
+			if _, err := syncedAtStmt.Exec(nowComments, key); err != nil {
+				return fail(fmt.Errorf("updating synced_at for %s: %w", key, err))
 			}
 		}
 		if b.UpdateLinks {
@@ -363,6 +424,7 @@ func (db *DB) UpsertIssueBundleTx(bundles []*IssueBundle) error {
 	}
 	return nil
 }
+
 // GetIssueUpdated returns the stored "updated" timestamp for an issue, or "" if not found.
 func (db *DB) GetIssueUpdated(key string) (string, error) {
 	var updated sql.NullString
@@ -537,7 +599,7 @@ func (db *DB) GetIssuesRawJSON(keys []string) (map[string]string, error) {
 			placeholders[j] = "?"
 			args[j] = k
 		}
-		q := "SELECT key, raw_json FROM issues WHERE key IN (" + strings.Join(placeholders, ", ") + ")"
+		q := "SELECT issue_key, raw_json FROM issue_blobs WHERE issue_key IN (" + strings.Join(placeholders, ", ") + ")"
 		rows, err := db.ReadDB().Query(q, args...)
 		if err != nil {
 			return nil, err
@@ -678,7 +740,11 @@ func (db *DB) resolveKey(key string) string {
 }
 
 func (db *DB) getIssueByKey(key string) (map[string]interface{}, error) {
-	rows, err := db.ReadDB().Query("SELECT * FROM issues WHERE key = ?", key)
+	rows, err := db.ReadDB().Query(
+		`SELECT i.*, b.raw_json, b.comments_text
+		 FROM issues i
+		 LEFT JOIN issue_blobs b ON b.issue_key = i.key
+		 WHERE i.key = ?`, key)
 	if err != nil {
 		return nil, err
 	}

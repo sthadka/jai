@@ -4,9 +4,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/sthadka/jai/v6/pkg/config"
-	"github.com/sthadka/jai/v6/pkg/metrics"
-	db "github.com/sthadka/jai/v6/pkg/store"
+	"github.com/sthadka/jai/v7/pkg/config"
+	"github.com/sthadka/jai/v7/pkg/metrics"
+	db "github.com/sthadka/jai/v7/pkg/store"
 )
 
 // metricsCfg builds a config whose metrics: block maps the given done resolutions.

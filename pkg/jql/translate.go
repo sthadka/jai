@@ -67,6 +67,7 @@ type Options struct {
 	// For `!~`, the returned predicate is wrapped in `NOT (...)`.
 	FTSRewrite func(field, pattern string) (string, bool)
 }
+
 // Result is the output of [Translate]: the compiled SQL statement and the
 // ordered list of projected columns (so callers can label result rows without
 // re-parsing the SELECT).
@@ -246,6 +247,7 @@ type compiler struct {
 	useFTS5    bool
 	ftsRewrite func(field, pattern string) (string, bool)
 }
+
 // expr compiles a resolved boolean node into a SQL fragment.
 func (cp *compiler) expr(e ResolvedExpr) (string, error) {
 	switch n := e.(type) {
@@ -468,7 +470,6 @@ func loweredLiteralList(values []ResolvedValue) string {
 	return strings.Join(parts, ",")
 }
 
-
 // isCanonicalKeyCol reports whether col stores canonical uppercase Jira issue keys
 // (e.g. "PROJ-123"), allowing direct PRIMARY KEY / index equality via UPPER(...).
 func isCanonicalKeyCol(col string) bool {
@@ -540,6 +541,7 @@ func buildFTS5Match(col, pat string) (string, bool) {
 		return "", false
 	}
 }
+
 // quote renders s as a single-quoted SQL string literal with embedded quotes
 // doubled. This is the sole string-literal escaper; all literals are data, never
 // identifiers (design §8.8, §10.3).

@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sthadka/jai/v6/pkg/jira"
+	"github.com/sthadka/jai/v7/pkg/jira"
 )
 
 const (

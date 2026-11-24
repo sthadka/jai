@@ -620,18 +620,18 @@ goreleaser build --snapshot --clean
 
 The engine is extracted into importable `pkg/` packages, so other Go programs can
 embed the same sync/query/metrics/JQL engine without pulling in the CLI, cobra,
-or the TUI. The module is published under the `/v5` major-version path:
+or the TUI. The module is published under the `/v7` major-version path:
 
 ```sh
-go get github.com/sthadka/jai/v6@latest
+go get github.com/sthadka/jai/v7@latest
 ```
 
 ```go
 import (
-    "github.com/sthadka/jai/v6/pkg/config"
-    "github.com/sthadka/jai/v6/pkg/core"
-    "github.com/sthadka/jai/v6/pkg/jira"
-    "github.com/sthadka/jai/v6/pkg/store"
+    "github.com/sthadka/jai/v7/pkg/config"
+    "github.com/sthadka/jai/v7/pkg/core"
+    "github.com/sthadka/jai/v7/pkg/jira"
+    "github.com/sthadka/jai/v7/pkg/store"
 )
 
 st, _ := store.Open("jai.db")                 // SQLite impl of the store.Store seam

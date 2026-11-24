@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/sthadka/jai/v6/pkg/config"
+	"github.com/sthadka/jai/v7/pkg/config"
 )
 
 func TestSchemaSnippetsCmd_Empty(t *testing.T) {

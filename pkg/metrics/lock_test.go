@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	db "github.com/sthadka/jai/v6/pkg/store"
+	db "github.com/sthadka/jai/v7/pkg/store"
 )
 
 // The advisory lock is mutually exclusive: while one handle holds it, a non-blocking

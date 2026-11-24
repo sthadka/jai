@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sthadka/jai/v6/pkg/config"
-	db "github.com/sthadka/jai/v6/pkg/store"
+	"github.com/sthadka/jai/v7/pkg/config"
+	db "github.com/sthadka/jai/v7/pkg/store"
 )
 
 // snapshotService builds a service over an issues-only DB with NO fact generation, proving

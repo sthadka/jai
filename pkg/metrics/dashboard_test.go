@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sthadka/jai/v6/pkg/config"
+	"github.com/sthadka/jai/v7/pkg/config"
 )
 
 // dashboardPolicy combines the fact stages (todo/active/done) with type classes and a ratio

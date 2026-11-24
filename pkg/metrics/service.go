@@ -4,9 +4,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sthadka/jai/v6/pkg/clock"
-	"github.com/sthadka/jai/v6/pkg/config"
-	db "github.com/sthadka/jai/v6/pkg/store"
+	"github.com/sthadka/jai/v7/pkg/clock"
+	"github.com/sthadka/jai/v7/pkg/config"
+	db "github.com/sthadka/jai/v7/pkg/store"
 )
 
 // Service is the single query/result entry point shared by every consumer (CLI, MCP, TUI,

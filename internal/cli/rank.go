@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	synce "github.com/sthadka/jai/v6/pkg/sync"
+	synce "github.com/sthadka/jai/v7/pkg/sync"
 )
 
 var rankBoard int

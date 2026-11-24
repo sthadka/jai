@@ -10,10 +10,10 @@ import (
 	"time"
 	_ "time/tzdata"
 
-	"github.com/sthadka/jai/v6/pkg/clock"
-	"github.com/sthadka/jai/v6/pkg/config"
-	"github.com/sthadka/jai/v6/pkg/jira"
-	db "github.com/sthadka/jai/v6/pkg/store"
+	"github.com/sthadka/jai/v7/pkg/clock"
+	"github.com/sthadka/jai/v7/pkg/config"
+	"github.com/sthadka/jai/v7/pkg/jira"
+	db "github.com/sthadka/jai/v7/pkg/store"
 )
 
 // Progress reports sync progress for a project.

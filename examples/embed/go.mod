@@ -1,10 +1,10 @@
-// Separate module: proves the jai engine is embeddable via github.com/sthadka/jai/v6/pkg/...
+// Separate module: proves the jai engine is embeddable via github.com/sthadka/jai/v7/pkg/...
 // using only exported APIs — no cobra, TUI, or internal/CLI packages.
 module github.com/sthadka/jai/examples/embed
 
 go 1.27.4
 
-require github.com/sthadka/jai/v6 v6.0.0
+require github.com/sthadka/jai/v7 v7.0.0
 
 require (
 	github.com/mattn/go-sqlite3 v1.14.34 // indirect
@@ -12,4 +12,4 @@ require (
 	golang.org/x/time v0.15.0 // indirect
 )
 
-replace github.com/sthadka/jai/v6 => ../..
+replace github.com/sthadka/jai/v7 => ../..

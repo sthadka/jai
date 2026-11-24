@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sthadka/jai/v6/pkg/config"
+	"github.com/sthadka/jai/v7/pkg/config"
 )
 
 // SyncSprints fetches boards and sprints from the Jira Agile API and stores them in the DB.

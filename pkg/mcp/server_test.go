@@ -9,11 +9,11 @@ import (
 	"testing"
 
 	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/sthadka/jai/v6/pkg/config"
-	"github.com/sthadka/jai/v6/pkg/jira"
-	"github.com/sthadka/jai/v6/pkg/query"
-	db "github.com/sthadka/jai/v6/pkg/store"
-	synce "github.com/sthadka/jai/v6/pkg/sync"
+	"github.com/sthadka/jai/v7/pkg/config"
+	"github.com/sthadka/jai/v7/pkg/jira"
+	"github.com/sthadka/jai/v7/pkg/query"
+	db "github.com/sthadka/jai/v7/pkg/store"
+	synce "github.com/sthadka/jai/v7/pkg/sync"
 )
 
 // testServer creates a minimal Server instance for testing using a temp DB.
@@ -207,12 +207,12 @@ func TestHandleIssueResource(t *testing.T) {
 		key, project, type, summary, description, status, status_category,
 		priority, assignee, assignee_email, reporter, created, updated,
 		due_date, resolution, parent_key, sprint_name, story_points,
-		components, labels, fix_version, affects_versions, raw_json
+		components, labels, fix_version, affects_versions
 	) VALUES (
 		'ENG-42', 'ENG', 'Bug', 'Fix SQL', 'Desc', 'In Progress', 'In Progress',
 		'High', 'Alice', 'alice@example.com', 'Bob', '2026-01-01T00:00:00Z', '2026-01-02T00:00:00Z',
 		'2026-02-01', 'Unresolved', 'ENG-1', 'Sprint 10', 3.5,
-		'["core"]', '["perf"]', '["1.0"]', '["0.9"]', '{}'
+		'["core"]', '["perf"]', '["1.0"]', '["0.9"]'
 	)`); err != nil {
 		t.Fatalf("seeding issue: %v", err)
 	}

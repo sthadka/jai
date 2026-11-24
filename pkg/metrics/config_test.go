@@ -3,7 +3,7 @@ package metrics
 import (
 	"testing"
 
-	"github.com/sthadka/jai/v6/pkg/config"
+	"github.com/sthadka/jai/v7/pkg/config"
 )
 
 // Two distinct tenant taxonomies must produce correct mapping with no code change.
