@@ -10,9 +10,9 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/sthadka/jai/v6/pkg/jira"
-	"github.com/sthadka/jai/v6/pkg/output"
-	db "github.com/sthadka/jai/v6/pkg/store"
+	"github.com/sthadka/jai/v7/pkg/jira"
+	"github.com/sthadka/jai/v7/pkg/output"
+	db "github.com/sthadka/jai/v7/pkg/store"
 )
 
 var getShowComments bool
@@ -37,7 +37,7 @@ front-matter view. Pass --fields all to get every column instead, or
 			return app.getRaw(cmd, key)
 		}
 
-		results, err := app.engine.Query.Execute("SELECT * FROM issues WHERE key = ?", key)
+		results, err := app.engine.Query.Execute("SELECT i.*, b.raw_json, b.comments_text FROM issues i LEFT JOIN issue_blobs b ON b.issue_key = i.key WHERE i.key = ?", key)
 		if err != nil {
 			if jsonMode {
 				fmt.Println(string(output.Err("QueryError", err.Error())))
@@ -225,7 +225,7 @@ func issueDataToRow(data map[string]interface{}, jiraNames map[string]string) ([
 }
 
 func (app *CLI) getRaw(cmd *cobra.Command, key string) error {
-	results, err := app.engine.Query.Execute("SELECT raw_json FROM issues WHERE key = ?", key)
+	results, err := app.engine.Query.Execute("SELECT raw_json FROM issue_blobs WHERE issue_key = ?", key)
 	if err == nil && len(results.Rows) > 0 {
 		if raw := output.ValueStr(results.Rows[0][0]); raw != "" {
 			app.printRaw([]byte(raw))

@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sthadka/jai/v6/pkg/config"
-	db "github.com/sthadka/jai/v6/pkg/store"
+	"github.com/sthadka/jai/v7/pkg/config"
+	db "github.com/sthadka/jai/v7/pkg/store"
 )
 
 // primeTestConfig returns a config with a sync source, a named view, and a

@@ -9,10 +9,10 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/sthadka/jai/v6/pkg/jira"
-	"github.com/sthadka/jai/v6/pkg/jql"
-	"github.com/sthadka/jai/v6/pkg/output"
-	db "github.com/sthadka/jai/v6/pkg/store"
+	"github.com/sthadka/jai/v7/pkg/jira"
+	"github.com/sthadka/jai/v7/pkg/jql"
+	"github.com/sthadka/jai/v7/pkg/output"
+	db "github.com/sthadka/jai/v7/pkg/store"
 )
 
 var (
@@ -333,9 +333,9 @@ func (app *CLI) jqlIDResolver(fm jql.FieldMap) jql.IDResolver {
 			return "", false, nil
 		}
 		col := def.Column
-		q := "SELECT DISTINCT " + col + " FROM issues WHERE raw_json LIKE '%'||?||'%' AND " +
-			col + " IS NOT NULL AND " + col + " <> '' LIMIT 2"
-		rows, err := app.engine.Store.Query(q, id)
+		q := "SELECT DISTINCT i." + col + " FROM issues i JOIN issue_blobs b ON b.issue_key = i.key WHERE b.raw_json LIKE '%'||?||'%' AND i." +
+			col + " IS NOT NULL AND i." + col + " <> '' LIMIT 2"
+		rows, err := app.engine.Store.ReadDB().Query(q, id)
 		if err != nil {
 			return "", false, err
 		}

@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/sthadka/jai/v6/pkg/config"
-	"github.com/sthadka/jai/v6/pkg/metrics"
-	db "github.com/sthadka/jai/v6/pkg/store"
+	"github.com/sthadka/jai/v7/pkg/config"
+	"github.com/sthadka/jai/v7/pkg/metrics"
+	db "github.com/sthadka/jai/v7/pkg/store"
 )
 
 // callMetrics invokes the jai_metrics handler and returns the single text

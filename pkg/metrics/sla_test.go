@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sthadka/jai/v6/pkg/config"
-	db "github.com/sthadka/jai/v6/pkg/store"
+	"github.com/sthadka/jai/v7/pkg/config"
+	db "github.com/sthadka/jai/v7/pkg/store"
 )
 
 func slaService(t *testing.T, mc *config.MetricsConfig) (*db.DB, *Service) {

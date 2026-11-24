@@ -51,14 +51,27 @@ func (db *DB) GetComments(issueKey string) ([]*Comment, error) {
 	return comments, rows.Err()
 }
 
-// UpdateIssueCommentsText updates the comments_text column for FTS.
+// UpdateIssueCommentsText updates issue_blobs.comments_text (which triggers FTS5
+// update) and stamps issues.synced_at inside one transaction.
 func (db *DB) UpdateIssueCommentsText(issueKey string) error {
-	_, err := db.Exec(`
-		UPDATE issues SET comments_text = (
-			SELECT GROUP_CONCAT(body, ' ') FROM comments WHERE issue_key = ?
-		), synced_at = ?
-		WHERE key = ?`,
-		issueKey, time.Now().UTC().Format("2006-01-02T15:04:05Z"), issueKey,
-	)
-	return err
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`
+		INSERT INTO issue_blobs (issue_key, comments_text)
+		VALUES (?, (SELECT GROUP_CONCAT(body, ' ') FROM comments WHERE issue_key = ?))
+		ON CONFLICT(issue_key) DO UPDATE SET comments_text = excluded.comments_text`,
+		issueKey, issueKey,
+	); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(
+		`UPDATE issues SET synced_at = ? WHERE key = ?`,
+		time.Now().UTC().Format("2006-01-02T15:04:05Z"), issueKey,
+	); err != nil {
+		return err
+	}
+	return tx.Commit()
 }

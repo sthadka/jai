@@ -5,9 +5,9 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
-	"github.com/sthadka/jai/v6/pkg/config"
-	"github.com/sthadka/jai/v6/pkg/metrics"
-	"github.com/sthadka/jai/v6/pkg/output"
+	"github.com/sthadka/jai/v7/pkg/config"
+	"github.com/sthadka/jai/v7/pkg/metrics"
+	"github.com/sthadka/jai/v7/pkg/output"
 )
 
 // applyGeneratedMetrics merges the config-generated metric fragments (snippets)

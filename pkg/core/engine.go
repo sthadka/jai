@@ -6,12 +6,12 @@
 package core
 
 import (
-	"github.com/sthadka/jai/v6/pkg/config"
-	"github.com/sthadka/jai/v6/pkg/jira"
-	"github.com/sthadka/jai/v6/pkg/metrics"
-	"github.com/sthadka/jai/v6/pkg/query"
-	"github.com/sthadka/jai/v6/pkg/store"
-	"github.com/sthadka/jai/v6/pkg/sync"
+	"github.com/sthadka/jai/v7/pkg/config"
+	"github.com/sthadka/jai/v7/pkg/jira"
+	"github.com/sthadka/jai/v7/pkg/metrics"
+	"github.com/sthadka/jai/v7/pkg/query"
+	"github.com/sthadka/jai/v7/pkg/store"
+	"github.com/sthadka/jai/v7/pkg/sync"
 )
 
 // Engine is the assembled jai engine. Its fields are the interface seams

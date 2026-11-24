@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sthadka/jai/v6/pkg/config"
-	"github.com/sthadka/jai/v6/pkg/jira"
-	db "github.com/sthadka/jai/v6/pkg/store"
+	"github.com/sthadka/jai/v7/pkg/config"
+	"github.com/sthadka/jai/v7/pkg/jira"
+	db "github.com/sthadka/jai/v7/pkg/store"
 )
 
 func TestNormalizeRawAndEqual(t *testing.T) {
@@ -318,7 +318,7 @@ func TestReconcileFields_CapExceededAppliesDirectly(t *testing.T) {
 	// Both the rank column and raw_json must carry the fresh scan value.
 	for _, key := range []string{"TEST-1", "TEST-2"} {
 		var col, raw string
-		if err := database.QueryRow(`SELECT rank, raw_json FROM issues WHERE key = '`+key+`'`).Scan(&col, &raw); err != nil {
+		if err := database.QueryRow(`SELECT i.rank, b.raw_json FROM issues i LEFT JOIN issue_blobs b ON b.issue_key = i.key WHERE i.key = '`+key+`'`).Scan(&col, &raw); err != nil {
 			t.Fatalf("querying %s: %v", key, err)
 		}
 		if col != "1|fresh:" {

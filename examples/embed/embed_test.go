@@ -1,7 +1,7 @@
 package embed
 
 // This test lives in a SEPARATE Go module (github.com/sthadka/jai/examples/embed). It proves the
-// jai engine is embeddable through github.com/sthadka/jai/v6/pkg/... using only
+// jai engine is embeddable through github.com/sthadka/jai/v7/pkg/... using only
 // exported APIs, without importing cobra, the TUI, or any internal/CLI package.
 
 import (
@@ -9,15 +9,15 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/sthadka/jai/v6/pkg/clock"
-	"github.com/sthadka/jai/v6/pkg/config"
-	"github.com/sthadka/jai/v6/pkg/core"
-	"github.com/sthadka/jai/v6/pkg/jira"
-	"github.com/sthadka/jai/v6/pkg/jql"
-	"github.com/sthadka/jai/v6/pkg/metrics"
-	"github.com/sthadka/jai/v6/pkg/query"
-	"github.com/sthadka/jai/v6/pkg/store"
-	"github.com/sthadka/jai/v6/pkg/sync"
+	"github.com/sthadka/jai/v7/pkg/clock"
+	"github.com/sthadka/jai/v7/pkg/config"
+	"github.com/sthadka/jai/v7/pkg/core"
+	"github.com/sthadka/jai/v7/pkg/jira"
+	"github.com/sthadka/jai/v7/pkg/jql"
+	"github.com/sthadka/jai/v7/pkg/metrics"
+	"github.com/sthadka/jai/v7/pkg/query"
+	"github.com/sthadka/jai/v7/pkg/store"
+	"github.com/sthadka/jai/v7/pkg/sync"
 )
 
 // mockJira implements jira.JiraClient by embedding the interface (so unused

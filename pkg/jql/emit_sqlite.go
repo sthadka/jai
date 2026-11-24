@@ -16,6 +16,7 @@ func (sqliteEmitter) tableName() string { return "issues" }
 func (sqliteEmitter) numericCompare(col, op, num string) string {
 	return fmt.Sprintf("%s %s %s", col, op, num)
 }
+
 // dateCompareRelative compares the column against SQLite's datetime() date math,
 // e.g. `created < datetime('now','-90 day')`. SQLite stores ISO-8601 text, so a
 // direct lexical comparison is correct.

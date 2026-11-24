@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 )
+
 var safeColumnRe = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 
 // FieldMapping represents a row from the field_map table.

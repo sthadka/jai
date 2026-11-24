@@ -256,6 +256,8 @@ var builtinAliases = FieldMap{
 	"updated":        {Column: "updated", Kind: KindDate},
 	"resolved":       {Column: "resolved", Kind: KindDate},
 	"resolutiondate": {Column: "resolved", Kind: KindDate},
+	"start_date":     {Column: "start_date", Kind: KindDate},
+	"startdate":      {Column: "start_date", Kind: KindDate},
 	"due":            {Column: "due_date", Kind: KindDate},
 	"duedate":        {Column: "due_date", Kind: KindDate},
 }

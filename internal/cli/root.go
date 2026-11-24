@@ -9,12 +9,12 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/sthadka/jai/v6/internal/cli/configloader"
-	"github.com/sthadka/jai/v6/pkg/config"
-	"github.com/sthadka/jai/v6/pkg/core"
-	"github.com/sthadka/jai/v6/pkg/jira"
-	db "github.com/sthadka/jai/v6/pkg/store"
-	synce "github.com/sthadka/jai/v6/pkg/sync"
+	"github.com/sthadka/jai/v7/internal/cli/configloader"
+	"github.com/sthadka/jai/v7/pkg/config"
+	"github.com/sthadka/jai/v7/pkg/core"
+	"github.com/sthadka/jai/v7/pkg/jira"
+	db "github.com/sthadka/jai/v7/pkg/store"
+	synce "github.com/sthadka/jai/v7/pkg/sync"
 )
 
 // CLI holds one invocation's flag values and the assembled engine. It replaces

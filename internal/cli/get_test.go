@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sthadka/jai/v6/pkg/config"
-	"github.com/sthadka/jai/v6/pkg/query"
-	db "github.com/sthadka/jai/v6/pkg/store"
+	"github.com/sthadka/jai/v7/pkg/config"
+	"github.com/sthadka/jai/v7/pkg/query"
+	db "github.com/sthadka/jai/v7/pkg/store"
 )
 
 func setupTestGlobals(t *testing.T) {

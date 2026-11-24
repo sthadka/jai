@@ -518,23 +518,30 @@ var migrations = []migration{
 		version:     24,
 		description: "scope issues_fts_update trigger and add composite, covering, and expression indexes",
 		up: func(tx *sql.Tx) error {
-			stmts := []string{
-				`DROP TRIGGER IF EXISTS issues_fts_update`,
-				`CREATE TRIGGER issues_fts_update
-				AFTER UPDATE OF key, summary, description, comments_text, labels ON issues
-				WHEN old.key           IS NOT new.key
-				  OR old.summary       IS NOT new.summary
-				  OR old.description   IS NOT new.description
-				  OR old.comments_text IS NOT new.comments_text
-				  OR old.labels        IS NOT new.labels
-				BEGIN
-					INSERT INTO issues_fts(issues_fts, rowid, key, summary, description, comments_text, labels)
-					VALUES ('delete', old.rowid, old.key, old.summary, old.description, old.comments_text, old.labels);
-					INSERT INTO issues_fts(rowid, key, summary, description, comments_text, labels)
-					VALUES (new.rowid, new.key, new.summary, new.description, new.comments_text, new.labels);
-				END`,
-
-				// JQL case-insensitive equality on type & priority
+			var hasCommentsText bool
+			if err := tx.QueryRow(`SELECT count(*) > 0 FROM pragma_table_info('issues') WHERE name = 'comments_text'`).Scan(&hasCommentsText); err != nil {
+				return err
+			}
+			var stmts []string
+			if hasCommentsText {
+				stmts = append(stmts,
+					`DROP TRIGGER IF EXISTS issues_fts_update`,
+					`CREATE TRIGGER issues_fts_update
+					AFTER UPDATE OF key, summary, description, comments_text, labels ON issues
+					WHEN old.key           IS NOT new.key
+					  OR old.summary       IS NOT new.summary
+					  OR old.description   IS NOT new.description
+					  OR old.comments_text IS NOT new.comments_text
+					  OR old.labels        IS NOT new.labels
+					BEGIN
+						INSERT INTO issues_fts(issues_fts, rowid, key, summary, description, comments_text, labels)
+						VALUES ('delete', old.rowid, old.key, old.summary, old.description, old.comments_text, old.labels);
+						INSERT INTO issues_fts(rowid, key, summary, description, comments_text, labels)
+						VALUES (new.rowid, new.key, new.summary, new.description, new.comments_text, new.labels);
+					END`,
+				)
+			}
+			stmts = append(stmts,
 				`CREATE INDEX IF NOT EXISTS idx_issues_type_lower_prio ON issues(LOWER(type), LOWER(priority), updated DESC)`,
 				// Project-scoped grouped/sorted lists
 				`CREATE INDEX IF NOT EXISTS idx_issues_project_status_updated ON issues(LOWER(project), status, updated DESC, id)`,
@@ -552,10 +559,174 @@ var migrations = []migration{
 				// Blocker metrics & key-rename trigger cascade
 				`CREATE INDEX IF NOT EXISTS idx_issue_links_type ON issue_links(link_type, issue_key, linked_key)`,
 				`CREATE INDEX IF NOT EXISTS idx_pending_changes_issue_key ON pending_changes(issue_key)`,
-			}
+			)
 			for _, stmt := range stmts {
 				if _, err := tx.Exec(stmt); err != nil {
 					return err
+				}
+			}
+			return nil
+		},
+	},
+	{
+		version:     25,
+		description: "vertically partition raw_json and comments_text into issue_blobs, add start_date, and rebuild FTS5",
+		up: func(tx *sql.Tx) error {
+			// 1. Create 1:1 companion blob table and copy existing heavy blobs.
+			if _, err := tx.Exec(`CREATE TABLE IF NOT EXISTS issue_blobs (
+				issue_key     TEXT PRIMARY KEY REFERENCES issues(key) ON DELETE CASCADE,
+				raw_json      TEXT,
+				comments_text TEXT
+			)`); err != nil {
+				return fmt.Errorf("creating issue_blobs: %w", err)
+			}
+			var hasRaw, hasComments bool
+			if err := tx.QueryRow(`SELECT count(*) > 0 FROM pragma_table_info('issues') WHERE name = 'raw_json'`).Scan(&hasRaw); err != nil {
+				return err
+			}
+			if err := tx.QueryRow(`SELECT count(*) > 0 FROM pragma_table_info('issues') WHERE name = 'comments_text'`).Scan(&hasComments); err != nil {
+				return err
+			}
+			if hasRaw || hasComments {
+				rawExpr, commExpr := "NULL", "NULL"
+				if hasRaw {
+					rawExpr = "raw_json"
+				}
+				if hasComments {
+					commExpr = "comments_text"
+				}
+				copySQL := fmt.Sprintf(
+					`INSERT OR REPLACE INTO issue_blobs (issue_key, raw_json, comments_text)
+					 SELECT key, %s, %s FROM issues
+					 WHERE %s IS NOT NULL OR %s IS NOT NULL`,
+					rawExpr, commExpr, rawExpr, commExpr,
+				)
+				if _, err := tx.Exec(copySQL); err != nil {
+					return fmt.Errorf("migrating blobs to issue_blobs: %w", err)
+				}
+			}
+			// 2. Add first-class nullable start_date column on issues.
+			if err := addColumnIfNotExists(tx, "issues", "start_date", "DATETIME"); err != nil {
+				return fmt.Errorf("adding start_date column: %w", err)
+			}
+			if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_issues_start_date ON issues(start_date)`); err != nil {
+				return fmt.Errorf("creating idx_issues_start_date: %w", err)
+			}
+
+			// 3. Drop old external-content FTS triggers & table before dropping columns.
+			for _, stmt := range []string{
+				`DROP TRIGGER IF EXISTS issues_fts_insert`,
+				`DROP TRIGGER IF EXISTS issues_fts_update`,
+				`DROP TRIGGER IF EXISTS issues_fts_delete`,
+				`DROP TRIGGER IF EXISTS issue_blobs_fts_insert`,
+				`DROP TRIGGER IF EXISTS issue_blobs_fts_update`,
+				`DROP TRIGGER IF EXISTS issue_blobs_fts_delete`,
+				`DROP TABLE IF EXISTS issues_fts`,
+			} {
+				if _, err := tx.Exec(stmt); err != nil {
+					return err
+				}
+			}
+
+			// 4. Drop heavy blob columns from issues so the core B-tree stays compact.
+			for _, col := range []string{"raw_json", "comments_text"} {
+				var exists bool
+				if err := tx.QueryRow(fmt.Sprintf(`SELECT count(*) > 0 FROM pragma_table_info('issues') WHERE name = '%s'`, col)).Scan(&exists); err != nil {
+					return err
+				}
+				if exists {
+					if _, err := tx.Exec(`ALTER TABLE issues DROP COLUMN ` + col); err != nil {
+						return fmt.Errorf("dropping issues.%s: %w", col, err)
+					}
+				}
+			}
+
+			// 5. Update key-rename cascade trigger to repoint issue_blobs as well.
+			if _, err := tx.Exec(`DROP TRIGGER IF EXISTS issues_key_rename`); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(`CREATE TRIGGER issues_key_rename
+			AFTER UPDATE OF key ON issues
+			WHEN old.key <> new.key
+			BEGIN
+				UPDATE comments        SET issue_key = new.key WHERE issue_key = old.key;
+				UPDATE issue_blobs     SET issue_key = new.key WHERE issue_key = old.key;
+				UPDATE changelog       SET issue_key = new.key WHERE issue_key = old.key;
+				UPDATE issue_links     SET issue_key = new.key WHERE issue_key = old.key;
+				UPDATE dev_links       SET issue_key = new.key WHERE issue_key = old.key;
+				UPDATE attachments     SET issue_key = new.key WHERE issue_key = old.key;
+				UPDATE pending_changes SET issue_key = new.key WHERE issue_key = old.key;
+				INSERT OR REPLACE INTO issue_key_alias(old_key, id, changed_at)
+					VALUES (old.key, new.id, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'));
+			END`); err != nil {
+				return fmt.Errorf("recreating issues_key_rename trigger: %w", err)
+			}
+
+			// 6. Recreate standalone issues_fts (rowid-aligned with issues.rowid)
+			//    plus scoped triggers on issues and issue_blobs.
+			ftsStmts := []string{
+				`CREATE VIRTUAL TABLE issues_fts USING fts5(
+					key UNINDEXED,
+					summary,
+					description,
+					comments_text,
+					labels,
+					tokenize='porter unicode61'
+				)`,
+				`INSERT INTO issues_fts(rowid, key, summary, description, comments_text, labels)
+				 SELECT i.rowid, i.key, i.summary, i.description, b.comments_text, i.labels
+				 FROM issues i
+				 LEFT JOIN issue_blobs b ON b.issue_key = i.key`,
+				`CREATE TRIGGER issues_fts_insert AFTER INSERT ON issues BEGIN
+					INSERT INTO issues_fts(rowid, key, summary, description, comments_text, labels)
+					VALUES (new.rowid, new.key, new.summary, new.description,
+					        (SELECT comments_text FROM issue_blobs WHERE issue_key = new.key), new.labels);
+				END`,
+				`CREATE TRIGGER issues_fts_update
+				AFTER UPDATE OF key, summary, description, labels ON issues
+				WHEN old.key         IS NOT new.key
+				  OR old.summary     IS NOT new.summary
+				  OR old.description IS NOT new.description
+				  OR old.labels      IS NOT new.labels
+				BEGIN
+					UPDATE issues_fts
+					   SET key = new.key,
+					       summary = new.summary,
+					       description = new.description,
+					       labels = new.labels
+					 WHERE rowid = new.rowid;
+				END`,
+				`CREATE TRIGGER issues_fts_delete AFTER DELETE ON issues BEGIN
+					DELETE FROM issues_fts WHERE rowid = old.rowid;
+				END`,
+				`CREATE TRIGGER issue_blobs_fts_insert
+				AFTER INSERT ON issue_blobs
+				WHEN new.comments_text IS NOT NULL AND new.comments_text <> ''
+				BEGIN
+					UPDATE issues_fts
+					   SET comments_text = new.comments_text
+					 WHERE rowid = (SELECT rowid FROM issues WHERE key = new.issue_key);
+				END`,
+				`CREATE TRIGGER issue_blobs_fts_update
+				AFTER UPDATE OF comments_text ON issue_blobs
+				WHEN old.comments_text IS NOT new.comments_text
+				BEGIN
+					UPDATE issues_fts
+					   SET comments_text = new.comments_text
+					 WHERE rowid = (SELECT rowid FROM issues WHERE key = new.issue_key);
+				END`,
+				`CREATE TRIGGER issue_blobs_fts_delete
+				AFTER DELETE ON issue_blobs
+				WHEN old.comments_text IS NOT NULL AND old.comments_text <> ''
+				BEGIN
+					UPDATE issues_fts
+					   SET comments_text = NULL
+					 WHERE rowid = (SELECT rowid FROM issues WHERE key = old.issue_key);
+				END`,
+			}
+			for _, stmt := range ftsStmts {
+				if _, err := tx.Exec(stmt); err != nil {
+					return fmt.Errorf("rebuilding FTS5 for issue_blobs: %w", err)
 				}
 			}
 			return nil

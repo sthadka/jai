@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/sthadka/jai/v6/pkg/output"
-	"github.com/sthadka/jai/v6/pkg/query"
+	"github.com/sthadka/jai/v7/pkg/output"
+	"github.com/sthadka/jai/v7/pkg/query"
 )
 
 // CommandSchema describes a command's parameters and flags.

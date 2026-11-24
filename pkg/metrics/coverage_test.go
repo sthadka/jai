@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sthadka/jai/v6/pkg/config"
+	"github.com/sthadka/jai/v7/pkg/config"
 )
 
 func tm(s string) time.Time {

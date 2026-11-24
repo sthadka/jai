@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sthadka/jai/v6/pkg/jira"
-	db "github.com/sthadka/jai/v6/pkg/store"
+	"github.com/sthadka/jai/v7/pkg/jira"
+	db "github.com/sthadka/jai/v7/pkg/store"
 )
 
 // defaultDeltaLookback is the default sliding overlap below the high-water mark

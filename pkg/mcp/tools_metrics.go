@@ -9,8 +9,8 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
-	"github.com/sthadka/jai/v6/pkg/metrics"
-	"github.com/sthadka/jai/v6/pkg/output"
+	"github.com/sthadka/jai/v7/pkg/metrics"
+	"github.com/sthadka/jai/v7/pkg/output"
 )
 
 // metricsTimeoutCap bounds every metric computation so a heavy/unbounded query

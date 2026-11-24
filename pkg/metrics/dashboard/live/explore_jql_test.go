@@ -34,10 +34,14 @@ CREATE TABLE jai.fact_issue_flow (generation BIGINT, issue_key VARCHAR, project 
 INSERT INTO jai.fact_issue_flow VALUES (7,'ROX-1','ROX'),(7,'ROX-2','ROX');
 CREATE TABLE jai.issues (
   key VARCHAR, project VARCHAR, type VARCHAR, priority VARCHAR, status VARCHAR,
-  team VARCHAR, created TIMESTAMP, summary VARCHAR, labels VARCHAR, raw_json VARCHAR);
+  team VARCHAR, created TIMESTAMP, summary VARCHAR, labels VARCHAR);
 INSERT INTO jai.issues VALUES
-  ('ROX-1','ROX','Bug','High','Done','platform', TIMESTAMP '2024-01-01','Fix login','["a"]','{"key":"ROX-1"}'),
-  ('ROX-2','ROX','Task','Low','In Progress','data', TIMESTAMP '2024-02-01','Add report','["b"]','{"key":"ROX-2"}');
+  ('ROX-1','ROX','Bug','High','Done','platform', TIMESTAMP '2024-01-01','Fix login','["a"]'),
+  ('ROX-2','ROX','Task','Low','In Progress','data', TIMESTAMP '2024-02-01','Add report','["b"]');
+CREATE TABLE jai.issue_blobs (issue_key VARCHAR, raw_json VARCHAR, comments_text VARCHAR);
+INSERT INTO jai.issue_blobs VALUES
+  ('ROX-1','{"key":"ROX-1"}',NULL),
+  ('ROX-2','{"key":"ROX-2"}',NULL);
 CREATE TABLE jai.field_map (jira_name VARCHAR, name VARCHAR, type VARCHAR, item_type VARCHAR, is_column BIGINT);
 INSERT INTO jai.field_map VALUES
   ('Key','key','text','',1),

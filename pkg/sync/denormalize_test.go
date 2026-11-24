@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/sthadka/jai/v6/pkg/jira"
-	db "github.com/sthadka/jai/v6/pkg/store"
+	"github.com/sthadka/jai/v7/pkg/jira"
+	db "github.com/sthadka/jai/v7/pkg/store"
 )
 
 func TestDenormalize_Basic(t *testing.T) {
@@ -514,5 +514,33 @@ func TestInferColumnName(t *testing.T) {
 		if got != tt.expected {
 			t.Errorf("inferColumnName(%q) = %q, want %q", tt.name, got, tt.expected)
 		}
+	}
+}
+
+func TestDenormalize_StartDateExtraction(t *testing.T) {
+	// Case 1: field_map custom field named "Start date"
+	raw := []byte(`{"id":"1","key":"TL-1","fields":{"summary":"Roadmap","customfield_99999":"2026-04-15","customfield_10015":"2026-01-01"}}`)
+	fm := map[string]*db.FieldMapping{
+		"customfield_99999": {JiraID: "customfield_99999", JiraName: "Start date", Name: "start_date", Type: "date", IsCustom: true, IsColumn: true},
+	}
+	issue, extra, err := Denormalize(raw, fm)
+	if err != nil {
+		t.Fatalf("Denormalize: %v", err)
+	}
+	if issue.StartDate != "2026-04-15T00:00:00Z" {
+		t.Errorf("StartDate = %q, want 2026-04-15T00:00:00Z", issue.StartDate)
+	}
+	if _, dup := extra["start_date"]; dup {
+		t.Errorf("extra must not duplicate start_date column")
+	}
+
+	// Case 2: fallback to standard customfield_10015 when field_map has no mapping
+	raw2 := []byte(`{"id":"2","key":"TL-2","fields":{"summary":"Default CF","customfield_10015":"2026-05-01"}}`)
+	issue2, _, err := Denormalize(raw2, nil)
+	if err != nil {
+		t.Fatalf("Denormalize fallback: %v", err)
+	}
+	if issue2.StartDate != "2026-05-01T00:00:00Z" {
+		t.Errorf("fallback StartDate = %q, want 2026-05-01T00:00:00Z", issue2.StartDate)
 	}
 }

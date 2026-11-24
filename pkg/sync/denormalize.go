@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sthadka/jai/v6/pkg/jira"
-	db "github.com/sthadka/jai/v6/pkg/store"
+	"github.com/sthadka/jai/v7/pkg/jira"
+	db "github.com/sthadka/jai/v7/pkg/store"
 )
 
 func marshalJSONArray(items []string) string {
@@ -162,6 +162,8 @@ func Denormalize(raw []byte, fieldMap map[string]*db.FieldMapping) (*db.Issue, m
 		issue.SprintID = sql.NullInt64{Int64: int64(sprintID), Valid: true}
 		issue.SprintName = sprintName
 	}
+	// Extract first-class start_date from field_map start-date candidates or customfield_10015.
+	issue.StartDate = extractStartDate(rawFields, fieldMap)
 
 	extra := make(map[string]interface{})
 
@@ -215,7 +217,10 @@ func Denormalize(raw []byte, fieldMap map[string]*db.FieldMapping) (*db.Issue, m
 			continue
 		}
 		if mapping.IsColumn {
-			extra[mapping.Name] = val
+			// start_date is already populated as a dedicated column on Issue.
+			if mapping.Name != "start_date" {
+				extra[mapping.Name] = val
+			}
 		} else {
 			custom[jiraID] = val
 		}
@@ -234,6 +239,57 @@ func Denormalize(raw []byte, fieldMap map[string]*db.FieldMapping) (*db.Issue, m
 	}
 
 	return issue, extra, nil
+}
+
+// extractStartDate resolves Jira's Start Date custom field from field_map
+// candidates ("Start date", "start_date", "Target start") or Jira Cloud's
+// standard customfield_10015, normalizing the value to RFC3339 UTC.
+func extractStartDate(rawFields map[string]json.RawMessage, fieldMap map[string]*db.FieldMapping) string {
+	readDate := func(jiraID string) string {
+		raw, ok := rawFields[jiraID]
+		if !ok || len(raw) == 0 || string(raw) == "null" {
+			return ""
+		}
+		var s string
+		if err := json.Unmarshal(raw, &s); err == nil && strings.TrimSpace(s) != "" {
+			return normalizeDate(strings.TrimSpace(s))
+		}
+		return ""
+	}
+
+	var primaryIDs, secondaryIDs []string
+	for jiraID, m := range fieldMap {
+		if m == nil {
+			continue
+		}
+		ln := strings.ToLower(strings.TrimSpace(m.Name))
+		lj := strings.ToLower(strings.TrimSpace(m.JiraName))
+		switch {
+		case ln == "start_date" || ln == "start date" || ln == "startdate" || lj == "start date":
+			primaryIDs = append(primaryIDs, jiraID)
+		case ln == "target_start" || ln == "target start" || lj == "target start":
+			secondaryIDs = append(secondaryIDs, jiraID)
+		}
+	}
+	for _, id := range primaryIDs {
+		if d := readDate(id); d != "" {
+			return d
+		}
+	}
+	if d := readDate("customfield_10015"); d != "" {
+		return d
+	}
+	for _, id := range secondaryIDs {
+		if d := readDate(id); d != "" {
+			return d
+		}
+	}
+	for _, fallback := range []string{"startDate", "start_date"} {
+		if d := readDate(fallback); d != "" {
+			return d
+		}
+	}
+	return ""
 }
 
 // extractFieldValue converts a raw JSON field value to a Go value based on Jira field type.
