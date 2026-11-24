@@ -76,7 +76,7 @@ func (db *DB) PromoteField(jiraID, name, colType string) error {
 
 // AllFieldMappings returns all field mappings.
 func (db *DB) AllFieldMappings() ([]*FieldMapping, error) {
-	rows, err := db.Query(`
+	rows, err := db.ReadDB().Query(`
 		SELECT jira_id, jira_name, name, type, COALESCE(item_type, ''), is_custom, is_column, user_override, searchable
 		FROM field_map ORDER BY name`,
 	)
@@ -114,7 +114,7 @@ func (db *DB) FieldPopulationStats(columns []string, project string) (map[string
 	}
 
 	var total int
-	if err := db.QueryRow("SELECT COUNT(*) FROM issues"+where, totalArgs...).Scan(&total); err != nil {
+	if err := db.ReadDB().QueryRow("SELECT COUNT(*) FROM issues"+where, totalArgs...).Scan(&total); err != nil {
 		return nil, err
 	}
 
@@ -135,13 +135,13 @@ func (db *DB) FieldPopulationStats(columns []string, project string) (map[string
 		}
 
 		var count int
-		if err := db.QueryRow(`SELECT COUNT(*) FROM issues WHERE `+cond, args...).Scan(&count); err != nil {
+		if err := db.ReadDB().QueryRow(`SELECT COUNT(*) FROM issues WHERE `+cond, args...).Scan(&count); err != nil {
 			result[col] = &FieldStats{Total: total}
 			continue
 		}
 
 		var sample string
-		row := db.QueryRow(`SELECT "`+col+`" FROM issues WHERE `+cond+` LIMIT 1`, args...)
+		row := db.ReadDB().QueryRow(`SELECT "`+col+`" FROM issues WHERE `+cond+` LIMIT 1`, args...)
 		_ = row.Scan(&sample)
 		if len(sample) > 60 {
 			sample = sample[:60] + "..."

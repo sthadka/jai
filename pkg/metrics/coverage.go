@@ -275,7 +275,7 @@ func ReportCoverage(database db.Store, projects []string, pol *Policy, cfg *conf
 		}
 		q += " WHERE i.project IN (" + strings.Join(ph, ", ") + ")"
 	}
-	rows, err := database.Query(q, args...)
+	rows, err := database.ReadDB().Query(q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("coverage issues query: %w", err)
 	}
@@ -317,7 +317,7 @@ func ReportCoverage(database db.Store, projects []string, pol *Policy, cfg *conf
 	}
 
 	// Observed changelog fields.
-	fieldRows, err := database.Query(`SELECT DISTINCT field FROM changelog WHERE field IS NOT NULL`)
+	fieldRows, err := database.ReadDB().Query(`SELECT DISTINCT field FROM changelog WHERE field IS NOT NULL`)
 	if err != nil {
 		return nil, fmt.Errorf("coverage fields query: %w", err)
 	}
@@ -339,13 +339,13 @@ func ReportCoverage(database db.Store, projects []string, pol *Policy, cfg *conf
 			fargs[i] = p
 		}
 		fq += " WHERE project IN (" + strings.Join(ph, ", ") + ")"
-		fRows, err := database.Query(fq, fargs...)
+		fRows, err := database.ReadDB().Query(fq, fargs...)
 		if err != nil {
 			return nil, err
 		}
 		scanFreshness(fRows, in.Freshness)
 	} else {
-		fRows, err := database.Query(fq)
+		fRows, err := database.ReadDB().Query(fq)
 		if err != nil {
 			return nil, err
 		}
@@ -388,7 +388,7 @@ func scanFreshness(rows *sql.Rows, out map[string]SourceFreshness) {
 func countRows(database db.Store, table string) int {
 	var n int
 	// table is a fixed literal, not user input.
-	if err := database.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&n); err != nil {
+	if err := database.ReadDB().QueryRow("SELECT COUNT(*) FROM " + table).Scan(&n); err != nil {
 		return 0
 	}
 	return n

@@ -175,7 +175,7 @@ func (e *Engine) jiraTimezone() *time.Location {
 // per GET /rest/api/3/project/search call (falling back to GetProject if the
 // search endpoint fails). Non-fatal: failures are logged via warnf.
 func (e *Engine) SyncProjects(ctx context.Context) {
-	rows, err := e.db.Query(`SELECT DISTINCT project FROM issues WHERE project != ''`)
+	rows, err := e.db.ReadDB().Query(`SELECT DISTINCT project FROM issues WHERE project != ''`)
 	if err != nil {
 		return
 	}
@@ -412,6 +412,9 @@ func (e *Engine) Sync(ctx context.Context, full, resume bool, sourceFilter strin
 			}(src)
 		}
 		wg.Wait()
+		if e.db != nil {
+			_ = e.db.Optimize()
+		}
 	}()
 	return ch, nil
 }

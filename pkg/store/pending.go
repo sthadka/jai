@@ -44,7 +44,7 @@ func (db *DB) InsertPendingChange(issueKey, operation, payload string) error {
 
 // ListPendingChanges returns all unsynced pending changes.
 func (db *DB) ListPendingChanges() ([]*PendingChange, error) {
-	rows, err := db.Query(`
+	rows, err := db.ReadDB().Query(`
 		SELECT id, issue_key, operation, payload, created_at, synced_at, retry_count, last_error
 		FROM pending_changes
 		WHERE synced_at IS NULL
@@ -87,6 +87,6 @@ func (db *DB) RecordRetryError(id int64, errMsg string) error {
 // CountPendingChanges returns the number of unsynced pending changes.
 func (db *DB) CountPendingChanges() (int, error) {
 	var count int
-	err := db.QueryRow(`SELECT COUNT(*) FROM pending_changes WHERE synced_at IS NULL`).Scan(&count)
+	err := db.ReadDB().QueryRow(`SELECT COUNT(*) FROM pending_changes WHERE synced_at IS NULL`).Scan(&count)
 	return count, err
 }

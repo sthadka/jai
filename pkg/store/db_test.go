@@ -306,6 +306,33 @@ func TestReadDB_EnforcesReadOnlyAndPragmas(t *testing.T) {
 		t.Errorf("PRAGMA busy_timeout = %d, want 30000", busyTimeout)
 	}
 
+	var tempStore int
+	if err := rdb.QueryRow(`PRAGMA temp_store`).Scan(&tempStore); err != nil {
+		t.Fatalf("PRAGMA temp_store: %v", err)
+	}
+	if tempStore != 2 {
+		t.Errorf("ReadDB PRAGMA temp_store = %d, want 2 (MEMORY)", tempStore)
+	}
+
+	var walAutoCheckpoint int
+	if err := db.QueryRow(`PRAGMA wal_autocheckpoint`).Scan(&walAutoCheckpoint); err != nil {
+		t.Fatalf("PRAGMA wal_autocheckpoint: %v", err)
+	}
+	if walAutoCheckpoint != 2000 {
+		t.Errorf("PRAGMA wal_autocheckpoint = %d, want 2000", walAutoCheckpoint)
+	}
+
+	var journalLimit int64
+	if err := db.QueryRow(`PRAGMA journal_size_limit`).Scan(&journalLimit); err != nil {
+		t.Fatalf("PRAGMA journal_size_limit: %v", err)
+	}
+	if journalLimit != 67108864 {
+		t.Errorf("PRAGMA journal_size_limit = %d, want 67108864", journalLimit)
+	}
+
+	if err := db.Optimize(); err != nil {
+		t.Fatalf("db.Optimize(): %v", err)
+	}
 	if _, err := rdb.Exec(`INSERT INTO issues (key, project, summary) VALUES ('RO-1', 'RO', 'nope')`); err == nil {
 		t.Fatal("expected write on ReadDB to fail, but it succeeded")
 	}

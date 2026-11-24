@@ -106,7 +106,7 @@ func (s *Server) registerResources(srv *server.MCPServer) {
 // handleSchemaResource returns database schema with field mappings.
 func (s *Server) handleSchemaResource(ctx context.Context, req mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
 	// Get table schema from PRAGMA
-	rows, err := s.db.QueryContext(ctx, "PRAGMA table_info(issues)")
+	rows, err := s.db.ReadDB().QueryContext(ctx, "PRAGMA table_info(issues)")
 	if err != nil {
 		return nil, fmt.Errorf("get table info: %w", err)
 	}
@@ -186,7 +186,7 @@ func (s *Server) handleSchemaValuesResource(ctx context.Context, req mcp.ReadRes
 		ORDER BY count DESC, value ASC
 		LIMIT 100`, column, column, column, column)
 
-	rows, err := s.db.QueryContext(ctx, query)
+	rows, err := s.db.ReadDB().QueryContext(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("query values: %w", err)
 	}

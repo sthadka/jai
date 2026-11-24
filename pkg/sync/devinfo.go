@@ -26,13 +26,6 @@ func (e *Engine) SyncDevInfo(ctx context.Context, src config.SyncSource) {
 		query += ` AND project IN (` + placeholders + `)`
 	}
 
-	stmt, err := e.db.Prepare(query)
-	if err != nil {
-		e.warnf("warning: dev info sync prepare failed: %v\n", err)
-		return
-	}
-	defer stmt.Close()
-
 	var args []interface{}
 	if src.JQL == "" && len(src.Projects) > 0 {
 		for _, p := range src.Projects {
@@ -40,12 +33,11 @@ func (e *Engine) SyncDevInfo(ctx context.Context, src config.SyncSource) {
 		}
 	}
 
-	rows, err := stmt.Query(args...)
+	rows, err := e.db.ReadDB().Query(query, args...)
 	if err != nil {
 		e.warnf("warning: dev info sync query failed: %v\n", err)
 		return
 	}
-	defer rows.Close()
 
 	type issueInfo struct {
 		key string
@@ -58,7 +50,7 @@ func (e *Engine) SyncDevInfo(ctx context.Context, src config.SyncSource) {
 			issues = append(issues, info)
 		}
 	}
-
+	rows.Close()
 	// Batch fetch dev info for issues.
 	for _, issue := range issues {
 		devInfo, err := e.client.GetDevInfo(ctx, issue.id)

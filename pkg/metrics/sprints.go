@@ -215,7 +215,7 @@ func (s *Service) sprintMembership(projects []string) ([]MembershipResult, error
 	}
 	iq += " ORDER BY key"
 
-	rows, err := s.db.Query(iq, iargs...)
+	rows, err := s.db.ReadDB().Query(iq, iargs...)
 	if err != nil {
 		return nil, fmt.Errorf("load sprint issues: %w", err)
 	}
@@ -277,7 +277,7 @@ func (s *Service) loadMembershipEvents(projects []string, field string, index ma
 	}
 	cq += " ORDER BY issue_key, changed_at"
 
-	crows, err := s.db.Query(cq, cargs...)
+	crows, err := s.db.ReadDB().Query(cq, cargs...)
 	if err != nil {
 		return fmt.Errorf("load membership events: %w", err)
 	}

@@ -157,7 +157,7 @@ func (s *Service) fieldChangeCounts(projects []string, field string) (map[string
 	}
 	cq += " GROUP BY issue_key"
 
-	rows, err := s.db.Query(cq, args...)
+	rows, err := s.db.ReadDB().Query(cq, args...)
 	if err != nil {
 		return nil, fmt.Errorf("count %s changes: %w", field, err)
 	}
@@ -183,7 +183,7 @@ func (s *Service) issueKeys(projects []string) ([]string, error) {
 		args = pa
 	}
 	q += " ORDER BY key"
-	rows, err := s.db.Query(q, args...)
+	rows, err := s.db.ReadDB().Query(q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("load issue keys: %w", err)
 	}
@@ -277,7 +277,7 @@ func (s *Service) loadTriageIssues(projects []string) ([]triageIssue, error) {
 		args = pa
 	}
 	q += " ORDER BY key"
-	rows, err := s.db.Query(q, args...)
+	rows, err := s.db.ReadDB().Query(q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("load triage issues: %w", err)
 	}
@@ -323,7 +323,7 @@ func (s *Service) firstAssignmentTimes(projects []string, issues []triageIssue) 
 		args = append(args, pa...)
 	}
 	cq += " ORDER BY issue_key, changed_at, id"
-	rows, err := s.db.Query(cq, args...)
+	rows, err := s.db.ReadDB().Query(cq, args...)
 	if err != nil {
 		return nil, fmt.Errorf("load assignee events: %w", err)
 	}
@@ -391,7 +391,7 @@ func (s *Service) firstCommentTimes(projects []string) (map[string]*time.Time, e
 		args = pa
 	}
 	q += " GROUP BY issue_key"
-	rows, err := s.db.Query(q, args...)
+	rows, err := s.db.ReadDB().Query(q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("load first comments: %w", err)
 	}

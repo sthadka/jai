@@ -21,6 +21,7 @@ type Store interface {
 	Prepare(query string) (*sql.Stmt, error)
 	Close() error
 	ReadDB() *sql.DB
+	Optimize() error
 
 	// Typed jai persistence methods.
 	AllFieldMappings() ([]*FieldMapping, error)

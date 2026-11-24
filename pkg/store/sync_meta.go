@@ -21,7 +21,7 @@ type SyncMeta struct {
 // GetSyncMeta retrieves sync metadata for a project. Returns zero value if not found.
 func (db *DB) GetSyncMeta(project string) (*SyncMeta, error) {
 	m := &SyncMeta{Project: project}
-	err := db.QueryRow(
+	err := db.ReadDB().QueryRow(
 		`SELECT project, last_sync_time, last_full_sync, issues_total, issues_synced, last_sync_duration, last_sync_error, last_issue_updated
 		 FROM sync_metadata WHERE project = ?`,
 		project,
@@ -85,7 +85,7 @@ func (db *DB) UpdateFullSyncMeta(project string) error {
 // a source, or "" if it has never been reconciled.
 func (db *DB) GetLastReconcile(source string) (string, error) {
 	var ts sql.NullString
-	err := db.QueryRow(`SELECT last_reconcile FROM sync_metadata WHERE project = ?`, source).Scan(&ts)
+	err := db.ReadDB().QueryRow(`SELECT last_reconcile FROM sync_metadata WHERE project = ?`, source).Scan(&ts)
 	if err == sql.ErrNoRows {
 		return "", nil
 	}
@@ -110,7 +110,7 @@ func (db *DB) UpdateReconcileMeta(source string) error {
 // GetResumeCursor returns the stored resume cursor for a sync source (empty if none).
 func (db *DB) GetResumeCursor(source string) (string, error) {
 	var cursor sql.NullString
-	err := db.QueryRow(`SELECT resume_cursor FROM sync_metadata WHERE project = ?`, source).Scan(&cursor)
+	err := db.ReadDB().QueryRow(`SELECT resume_cursor FROM sync_metadata WHERE project = ?`, source).Scan(&cursor)
 	if err == sql.ErrNoRows {
 		return "", nil
 	}
@@ -139,7 +139,7 @@ func (db *DB) ClearResumeCursor(source string) error {
 
 // IssueCountByProject returns a map of Jira project key → issue count.
 func (db *DB) IssueCountByProject() (map[string]int, error) {
-	rows, err := db.Query(`SELECT project, COUNT(*) FROM issues GROUP BY project`)
+	rows, err := db.ReadDB().Query(`SELECT project, COUNT(*) FROM issues GROUP BY project`)
 	if err != nil {
 		return nil, err
 	}
@@ -159,13 +159,13 @@ func (db *DB) IssueCountByProject() (map[string]int, error) {
 // TotalIssueCount returns the total number of issues in the database.
 func (db *DB) TotalIssueCount() (int, error) {
 	var n int
-	err := db.QueryRow(`SELECT COUNT(*) FROM issues`).Scan(&n)
+	err := db.ReadDB().QueryRow(`SELECT COUNT(*) FROM issues`).Scan(&n)
 	return n, err
 }
 
 // AllSyncMeta returns sync metadata for all projects.
 func (db *DB) AllSyncMeta() ([]*SyncMeta, error) {
-	rows, err := db.Query(
+	rows, err := db.ReadDB().Query(
 		`SELECT project, last_sync_time, last_full_sync, issues_total, issues_synced, last_sync_duration, last_sync_error, last_issue_updated
 		 FROM sync_metadata ORDER BY project`,
 	)

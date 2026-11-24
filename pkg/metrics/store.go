@@ -105,7 +105,7 @@ func (s *Store) LockPath() string { return LockPath(s.dbPath) }
 // when no generation has been activated yet.
 func (s *Store) ActiveGeneration() (*GenerationMeta, error) {
 	var genID sql.NullInt64
-	if err := s.db.QueryRow(`SELECT generation FROM metrics_active_generation WHERE id = 1`).Scan(&genID); err != nil {
+	if err := s.db.ReadDB().QueryRow(`SELECT generation FROM metrics_active_generation WHERE id = 1`).Scan(&genID); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
@@ -125,7 +125,7 @@ func (s *Store) generation(gen int64) (*GenerationMeta, error) {
 		watermark   sql.NullString
 		issueCount  int
 	)
-	err := s.db.QueryRow(
+	err := s.db.ReadDB().QueryRow(
 		`SELECT fingerprint, scope, built_at, source_watermark, issue_count
 		   FROM metrics_generation WHERE generation = ?`, gen,
 	).Scan(&fingerprint, &scope, &builtAt, &watermark, &issueCount)
@@ -161,7 +161,7 @@ func (s *Store) FlowRows(projects []string) ([]FlowRow, error) {
 	       WHERE generation = ` + activeGenSub
 	args, where := projectFilter(projects, "project")
 	q += where + " ORDER BY project, issue_key"
-	rows, err := s.db.Query(q, args...)
+	rows, err := s.db.ReadDB().Query(q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("flow rows query: %w", err)
 	}
@@ -224,7 +224,7 @@ func (s *Store) Intervals(projects []string, field string) ([]IntervalRow, error
 	more, where := projectFilter(projects, "project")
 	q += where + " ORDER BY issue_key, seq"
 	args = append(args, more...)
-	rows, err := s.db.Query(q, args...)
+	rows, err := s.db.ReadDB().Query(q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("interval rows query: %w", err)
 	}
@@ -269,7 +269,7 @@ func (s *Store) MembershipIntervals(projects []string, dimension string) ([]Memb
 	more, where := projectFilter(projects, "project")
 	q += where + " ORDER BY issue_key, seq"
 	args = append(args, more...)
-	rows, err := s.db.Query(q, args...)
+	rows, err := s.db.ReadDB().Query(q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("membership interval rows query: %w", err)
 	}

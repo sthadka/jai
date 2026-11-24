@@ -13,7 +13,7 @@ func (db *DB) UpsertProject(key, name string) error {
 // GetProjectName returns the display name for a project key, or the key itself if not found.
 func (db *DB) GetProjectName(key string) string {
 	var name string
-	if err := db.QueryRow(`SELECT name FROM projects WHERE key = ?`, key).Scan(&name); err != nil || name == "" {
+	if err := db.ReadDB().QueryRow(`SELECT name FROM projects WHERE key = ?`, key).Scan(&name); err != nil || name == "" {
 		return key
 	}
 	return name

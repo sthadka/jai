@@ -315,7 +315,7 @@ func bandLabel(bands []config.SeverityBand, score float64) (string, bool) {
 // columnExists reports whether table has a column named col, so a config-supplied field
 // name is validated before it is interpolated into a query.
 func (s *Service) columnExists(table, col string) (bool, error) {
-	rows, err := s.db.Query("PRAGMA table_info(" + table + ")")
+	rows, err := s.db.ReadDB().Query("PRAGMA table_info(" + table + ")")
 	if err != nil {
 		return false, err
 	}
@@ -358,7 +358,7 @@ func (s *Service) loadSecurityIssues(projects []string, sevCol, clockCol string)
 		}
 		q += " WHERE project IN (" + strings.Join(ph, ", ") + ")"
 	}
-	rows, err := s.db.Query(q, args...)
+	rows, err := s.db.ReadDB().Query(q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("load security issues: %w", err)
 	}

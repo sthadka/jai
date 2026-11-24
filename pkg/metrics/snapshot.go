@@ -55,7 +55,7 @@ func (s *Service) loadIssues(projects []string) ([]issueSnap, error) {
 		}
 		q += " WHERE project IN (" + strings.Join(ph, ", ") + ")"
 	}
-	rows, err := s.db.Query(q, args...)
+	rows, err := s.db.ReadDB().Query(q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("load issues: %w", err)
 	}

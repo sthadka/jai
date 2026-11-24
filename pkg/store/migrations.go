@@ -120,7 +120,14 @@ var migrations = []migration{
 					INSERT INTO issues_fts(rowid, key, summary, description, comments_text, labels)
 					VALUES (new.rowid, new.key, new.summary, new.description, new.comments_text, new.labels);
 				END`,
-				`CREATE TRIGGER IF NOT EXISTS issues_fts_update AFTER UPDATE ON issues BEGIN
+				`CREATE TRIGGER IF NOT EXISTS issues_fts_update
+				AFTER UPDATE OF key, summary, description, comments_text, labels ON issues
+				WHEN old.key           IS NOT new.key
+				  OR old.summary       IS NOT new.summary
+				  OR old.description   IS NOT new.description
+				  OR old.comments_text IS NOT new.comments_text
+				  OR old.labels        IS NOT new.labels
+				BEGIN
 					INSERT INTO issues_fts(issues_fts, rowid, key, summary, description, comments_text, labels)
 					VALUES ('delete', old.rowid, old.key, old.summary, old.description, old.comments_text, old.labels);
 					INSERT INTO issues_fts(rowid, key, summary, description, comments_text, labels)
@@ -501,6 +508,53 @@ var migrations = []migration{
 			}
 			for _, idx := range indexes {
 				if _, err := tx.Exec(idx); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	},
+	{
+		version:     24,
+		description: "scope issues_fts_update trigger and add composite, covering, and expression indexes",
+		up: func(tx *sql.Tx) error {
+			stmts := []string{
+				`DROP TRIGGER IF EXISTS issues_fts_update`,
+				`CREATE TRIGGER issues_fts_update
+				AFTER UPDATE OF key, summary, description, comments_text, labels ON issues
+				WHEN old.key           IS NOT new.key
+				  OR old.summary       IS NOT new.summary
+				  OR old.description   IS NOT new.description
+				  OR old.comments_text IS NOT new.comments_text
+				  OR old.labels        IS NOT new.labels
+				BEGIN
+					INSERT INTO issues_fts(issues_fts, rowid, key, summary, description, comments_text, labels)
+					VALUES ('delete', old.rowid, old.key, old.summary, old.description, old.comments_text, old.labels);
+					INSERT INTO issues_fts(rowid, key, summary, description, comments_text, labels)
+					VALUES (new.rowid, new.key, new.summary, new.description, new.comments_text, new.labels);
+				END`,
+
+				// JQL case-insensitive equality on type & priority
+				`CREATE INDEX IF NOT EXISTS idx_issues_type_lower_prio ON issues(LOWER(type), LOWER(priority), updated DESC)`,
+				// Project-scoped grouped/sorted lists
+				`CREATE INDEX IF NOT EXISTS idx_issues_project_status_updated ON issues(LOWER(project), status, updated DESC, id)`,
+				// Changelog sync candidate selection
+				`CREATE INDEX IF NOT EXISTS idx_issues_proj_cl_sync ON issues(project, changelog_synced_at, updated)`,
+				// Unconditional (field, issue_key, changed_at) index replacing narrow partial idx_cl_tracked
+				`CREATE INDEX IF NOT EXISTS idx_changelog_field_issue_time ON changelog(field, issue_key, changed_at)`,
+				`DROP INDEX IF EXISTS idx_cl_tracked`,
+				// Per-issue activity timelines (eliminates TEMP B-TREE sort)
+				`CREATE INDEX IF NOT EXISTS idx_changelog_issue_time_desc ON changelog(issue_key, changed_at DESC, id DESC)`,
+				`CREATE INDEX IF NOT EXISTS idx_comments_issue_created_desc ON comments(issue_key, created DESC, id DESC)`,
+				// Metrics fact tables: project-scoped reads
+				`CREATE INDEX IF NOT EXISTS idx_ffi_gen_field_proj ON fact_field_interval(generation, field, project, issue_key, seq)`,
+				`CREATE INDEX IF NOT EXISTS idx_fim_gen_dim_proj ON fact_issue_membership(generation, dimension, project, issue_key, seq)`,
+				// Blocker metrics & key-rename trigger cascade
+				`CREATE INDEX IF NOT EXISTS idx_issue_links_type ON issue_links(link_type, issue_key, linked_key)`,
+				`CREATE INDEX IF NOT EXISTS idx_pending_changes_issue_key ON pending_changes(issue_key)`,
+			}
+			for _, stmt := range stmts {
+				if _, err := tx.Exec(stmt); err != nil {
 					return err
 				}
 			}

@@ -516,6 +516,9 @@ func (e *Engine) DeltaSync(ctx context.Context, opts DeltaOptions) (*DeltaResult
 	}
 
 	if len(res.SyncedKeys) > 0 {
+		if e.db != nil {
+			_ = e.db.Optimize()
+		}
 		e.emitChange(ChangeEvent{
 			Source:  opts.ScopeName,
 			New:     res.New,
