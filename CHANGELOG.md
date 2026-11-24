@@ -1,5 +1,29 @@
 # Changelog
 
+## [7.0.0](https://github.com/sthadka/jai/compare/v6.3.0...v7.0.0) (2026-11-24)
+
+
+### ⚠ BREAKING CHANGES
+
+* Go module path moved to github.com/sthadka/jai/v7. raw_json and comments_text moved from issues to issue_blobs (migration v25 migrates existing DBs automatically). store.Store gains DeleteIssuesTx, Optimize, GetIssueSummary, GetIssuesSummaryByIDs, and UpsertIssueBundleTx.
+
+### Features
+
+* vertically partition issue_blobs, extract start_date, and bump module to v7 ([90d2031](https://github.com/sthadka/jai/commit/90d2031c81f4c2a8eefa0c26540e51ffd2e08b09))
+
+
+### Bug Fixes
+
+* **ci,mcp,jql:** allow next-major module path in CI, route readCurrentArray to ReadDB, handle comments_text in issue_blobs ([3520c1a](https://github.com/sthadka/jai/commit/3520c1ac57b0142de6096d28294bbbb8643efc04))
+* **store,metrics,mcp,sync:** fix changelog precedence, &gt;999 bind limit, MCP columns, and orphan deletes ([aa3a3a5](https://github.com/sthadka/jai/commit/aa3a3a5702364851e8d7c48edf6158e4739937f7))
+
+
+### Performance
+
+* **jql,mcp,cli:** emit index-friendly SQL for keys/numerics, add FTS5 hook, join FTS on rowid ([89e8d5a](https://github.com/sthadka/jai/commit/89e8d5af1f672609f38044dc534bcd56d9cdd758))
+* **store,metrics,sync,mcp:** scope FTS trigger, route reads to ReadDB, add PRAGMAs and v24 indexes ([98ba3cc](https://github.com/sthadka/jai/commit/98ba3cc7c8975517a94a3883d86a8cc6dc43b898))
+* **store,sync,metrics,mcp:** batch sync writes, optimize metrics builds/queries, eliminate N+1 scans ([fe3215e](https://github.com/sthadka/jai/commit/fe3215edf2ec3afb90c915b27a3cb0a1e47e803f))
+
 ## [6.3.0](https://github.com/sthadka/jai/compare/v6.2.0...v6.3.0) (2026-11-23)
 
 
