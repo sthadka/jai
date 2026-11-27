@@ -38,6 +38,12 @@ type Server struct {
 	// caps names the satisfied server capabilities (e.g. blocker_link_types) used to
 	// resolve config-dependent panels to explicit unavailable cards.
 	caps map[string]bool
+	// deliveredGenuine records whether the delivered cohort is restricted to the
+	// configured genuine-delivery resolutions (done_resolutions set). When false
+	// the cohort covers all resolved issues and /meta labels it with the CLI's
+	// "includes non-delivery resolutions" caveat. Defaults to true; set by the
+	// CLI from Policy.DoneResolutionsConfigured().
+	deliveredGenuine bool
 	// jiraBaseURL is the Jira site root (trailing slash trimmed) used by the SPA to
 	// build /browse/<key> links for drill-through issue lists. Empty = no links.
 	jiraBaseURL string
@@ -57,14 +63,15 @@ type Server struct {
 // NewServer wires routes over the given engine and active-generation metadata.
 func NewServer(engine *Engine, projects []string, generation any) *Server {
 	s := &Server{
-		engine:     engine,
-		whitelist:  NewWhitelist(projects),
-		projects:   projects,
-		generation: generation,
-		mux:        http.NewServeMux(),
-		specDirs:   specs.DefaultDirs(),
-		caps:       map[string]bool{},
-		csrfToken:  newCSRFToken(),
+		engine:           engine,
+		whitelist:        NewWhitelist(projects),
+		projects:         projects,
+		generation:       generation,
+		mux:              http.NewServeMux(),
+		specDirs:         specs.DefaultDirs(),
+		caps:             map[string]bool{},
+		deliveredGenuine: true,
+		csrfToken:        newCSRFToken(),
 	}
 	s.routes()
 	return s
@@ -84,6 +91,12 @@ func (s *Server) SetDashboards(caps map[string]bool, dirs []string) {
 
 // SetJiraBaseURL sets the Jira site root used for drill-through issue links.
 func (s *Server) SetJiraBaseURL(u string) { s.jiraBaseURL = u }
+
+// SetDeliveredGenuine records whether the delivered cohort is restricted to the
+// configured genuine-delivery resolutions. When false, /meta labels the cohort
+// with the "includes non-delivery resolutions" caveat (the same wording the CLI
+// metrics output uses) so panels and dropdowns stay honest about the fallback.
+func (s *Server) SetDeliveredGenuine(v bool) { s.deliveredGenuine = v }
 
 // Handler exposes the route mux (for tests and embedding).
 func (s *Server) Handler() http.Handler { return s.mux }
@@ -178,7 +191,7 @@ func (s *Server) handleMeta(w http.ResponseWriter, r *http.Request) {
 		"measures":      MeasureOptions(),
 		"dimensions":    DimensionOptions(),
 		"grains":        GrainOptions(),
-		"cohorts":       CohortOptions(),
+		"cohorts":       CohortOptions(s.deliveredGenuine),
 		"jira_base_url": s.jiraBaseURL,
 		"csrf_token":    s.exploreToken(),
 	})

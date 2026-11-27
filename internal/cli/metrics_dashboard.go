@@ -90,6 +90,7 @@ func (app *CLI) runMetricsDashboardLive() error {
 	}
 
 	srv := live.NewServer(engine, projects, gen)
+	srv.SetDeliveredGenuine(pol.DoneResolutionsConfigured())
 	srv.SetDashboards(app.dashboardCapabilities(pol), nil)
 	srv.SetJiraBaseURL(strings.TrimRight(app.engine.Config.Jira.URL, "/"))
 	url, httpSrv, err := srv.ListenAndServe(dashboardPort)
@@ -123,7 +124,7 @@ func (app *CLI) dashboardCapabilities(pol *metrics.Policy) map[string]bool {
 	caps := map[string]bool{
 		"blocker_link_types": len(pol.BlockerLinkTypes()) > 0,
 	}
-	if m := app.engine.Config.Metrics; m.SLA != nil && m.SLA.Security != nil {
+	if m := app.engine.Config.Metrics; m != nil && m.SLA != nil && m.SLA.Security != nil {
 		caps["security_sla"] = true
 	}
 	return caps

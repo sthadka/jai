@@ -107,6 +107,57 @@ func TestBuildAcceptsValidTemplate(t *testing.T) {
 	}
 }
 
+// TestBuildDeliveredCohortFallback proves the delivered cohort degrades to
+// "any resolved issue" when done_resolutions is unconfigured (done_res_set
+// bound false at engine setup): the filter keeps resolved rows instead of
+// matching nothing over an empty list. Mirrors the build-side policy
+// (unconfigured => all resolved, labelled "includes non-delivery resolutions").
+// Regression guard for the empty delivery dashboard on a config with no
+// metrics: section.
+func TestBuildDeliveredCohortFallback(t *testing.T) {
+	w := newTestWhitelist()
+	sql, err := w.Build(QueryParams{Measure: "throughput", Cohort: "delivered"})
+	if err != nil {
+		t.Fatalf("delivered build rejected: %v", err)
+	}
+	for _, want := range []string{
+		"f.resolved IS NOT NULL",
+		"NOT getvariable('done_res_set')",
+		"list_contains(getvariable('done_res'), f.resolution)",
+	} {
+		if !strings.Contains(sql, want) {
+			t.Fatalf("delivered cohort missing %q:\n%s", want, sql)
+		}
+	}
+}
+
+// TestCohortOptionsCaveatLabel proves the /meta cohort vocabulary carries the
+// "includes non-delivery resolutions" caveat exactly when the delivered cohort
+// is not restricted to configured genuine-delivery resolutions.
+func TestCohortOptionsCaveatLabel(t *testing.T) {
+	for _, tc := range []struct {
+		genuine bool
+		want    string
+	}{
+		{true, "Delivered"},
+		{false, "Delivered (includes non-delivery resolutions)"},
+	} {
+		opts := CohortOptions(tc.genuine)
+		found := false
+		for _, o := range opts {
+			if o.Value == "delivered" {
+				found = true
+				if o.Label != tc.want {
+					t.Fatalf("CohortOptions(%t) delivered label = %q, want %q", tc.genuine, o.Label, tc.want)
+				}
+			}
+		}
+		if !found {
+			t.Fatalf("CohortOptions(%t) missing the delivered option", tc.genuine)
+		}
+	}
+}
+
 // TestBuildUnknownProjectRejected proves projects outside the active generation
 // are rejected even though project is a value param.
 func TestBuildUnknownProjectRejected(t *testing.T) {

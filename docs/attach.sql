@@ -50,7 +50,11 @@ SET VARIABLE g = (SELECT generation FROM jai.metrics_active_generation WHERE id 
 -- Genuine-delivery resolutions come from the `metrics:` config (`done_resolutions`).
 -- The values below are ROX's documented set — EDIT this one line to match your
 -- tenant's config; everything downstream reads it, so there is no tenant literal
--- scattered through the views.
+-- scattered through the views. done_res_set must stay true while the list is
+-- edited: when the config omits done_resolutions entirely, the engine binds
+-- done_res_set=false and the delivered cohort falls back to all resolved issues
+-- (mirroring the Go policy: unconfigured => "includes non-delivery resolutions").
+SET VARIABLE done_res_set = true;
 SET VARIABLE done_res = ['Done', 'Done-Errata'];
 
 -- -----------------------------------------------------------------------------
@@ -68,12 +72,14 @@ CREATE OR REPLACE MACRO p95(x) AS quantile_cont(x, 0.95);
 -- -----------------------------------------------------------------------------
 -- Resolved issues with a genuine-done resolution, scoped to the active generation.
 -- This is the cohort cycle_time / lead_time / flow_occupancy / ratio run over.
+-- The done_res_set fallback mirrors the Go policy: with done_resolutions
+-- unconfigured the cohort is ALL resolved issues (never an empty match).
 CREATE OR REPLACE VIEW delivered AS
 SELECT *
 FROM jai.fact_issue_flow
 WHERE generation = getvariable('g')
   AND resolved IS NOT NULL
-  AND list_contains(getvariable('done_res'), resolution);
+  AND (NOT getvariable('done_res_set') OR list_contains(getvariable('done_res'), resolution));
 
 -- -----------------------------------------------------------------------------
 -- Period keys (day / week / month / quarter / year)

@@ -314,6 +314,38 @@ func TestLiveMetaLabels(t *testing.T) {
 	}
 }
 
+// TestLiveDeliveredCohortUnconfiguredFallback is the end-to-end regression for
+// the empty delivery dashboard: with no done_resolutions configured (the state
+// of a config with no metrics: section), the delivered cohort must still count
+// resolved issues — including non-delivery resolutions like ROX-4's 'Abandoned'
+// — instead of matching nothing over an empty done_res list. Before the
+// fallback, every delivered-cohort panel in 01-delivery.yaml rendered empty
+// while `jai metrics cycle_time` reported numbers over the same data.
+func TestLiveDeliveredCohortUnconfiguredFallback(t *testing.T) {
+	dbPath := buildFixtureDB(t)                            // self-skips when duckdb is absent
+	engine, err := NewEngine(EngineConfig{DBPath: dbPath}) // no DoneResolutions
+	if err != nil {
+		t.Fatalf("NewEngine: %v", err)
+	}
+	t.Cleanup(func() { engine.Close() })
+
+	w := NewWhitelist([]string{"ROX"})
+	sql, err := w.Build(QueryParams{Measure: "throughput", Slice: "none", Cohort: "delivered"})
+	if err != nil {
+		t.Fatalf("delivered build: %v", err)
+	}
+	rows, err := engine.Query(sql)
+	if err != nil {
+		t.Fatalf("delivered query: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("slice=none must return exactly one aggregate row, got %d", len(rows))
+	}
+	if n, _ := rows[0]["n"].(float64); n != 4 {
+		t.Fatalf("unconfigured delivered cohort must count all 4 resolved fixture issues (incl. 'Abandoned'), got %v", rows[0]["n"])
+	}
+}
+
 // TestLiveNumberTileCurrentAndPrior proves a chart:number tile resolves both its
 // current window and a prior window via two slice=none /q calls (the aggregate
 // row that feeds the tile value and its trend delta). slice=none yields at most
