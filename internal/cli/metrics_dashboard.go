@@ -123,7 +123,7 @@ func (app *CLI) dashboardCapabilities(pol *metrics.Policy) map[string]bool {
 	caps := map[string]bool{
 		"blocker_link_types": len(pol.BlockerLinkTypes()) > 0,
 	}
-	if m := app.engine.Config.Metrics; m.SLA != nil && m.SLA.Security != nil {
+	if m := app.engine.Config.Metrics; m != nil && m.SLA != nil && m.SLA.Security != nil {
 		caps["security_sla"] = true
 	}
 	return caps
