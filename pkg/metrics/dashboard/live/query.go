@@ -141,9 +141,13 @@ var grains = map[string]string{
 }
 
 // cohorts is the whitelist of completion cohorts. The delivered cohort reads the
-// config-derived `done_res` variable (bound at engine setup — no tenant literal).
+// config-derived `done_res`/`done_res_set` variables (bound at engine setup — no
+// tenant literal). When done_resolutions is unconfigured (done_res_set=false) the
+// cohort degrades to "any resolved issue", mirroring the build-side policy
+// (unconfigured => delivery metrics run over all resolved, labelled "includes
+// non-delivery resolutions") instead of matching nothing over an empty list.
 var cohorts = map[string]string{
-	"delivered": "f.resolved IS NOT NULL AND list_contains(getvariable('done_res'), f.resolution)",
+	"delivered": "f.resolved IS NOT NULL AND (NOT getvariable('done_res_set') OR list_contains(getvariable('done_res'), f.resolution))",
 	"resolved":  "f.resolved IS NOT NULL",
 	"open":      "f.resolved IS NULL",
 	"all":       "1 = 1",
@@ -567,9 +571,20 @@ func DimensionOptions() []LabelOption {
 	return labelOptions(sortedKeys(dimensionKeys()), dimensionLabels)
 }
 
-// CohortOptions returns the available Explore cohort choices with labels.
-func CohortOptions() []LabelOption {
-	return labelOptions(sortedKeys(cohortKeys()), cohortLabels)
+// CohortOptions returns the available Explore cohort choices with labels. When
+// genuineDelivery is false (done_resolutions unconfigured), the delivered cohort
+// runs over all resolved issues and its label carries the same caveat the CLI
+// metrics output uses, so the imprecision is visible at every consumption point.
+func CohortOptions(genuineDelivery bool) []LabelOption {
+	opts := labelOptions(sortedKeys(cohortKeys()), cohortLabels)
+	if !genuineDelivery {
+		for i, o := range opts {
+			if o.Value == "delivered" {
+				opts[i].Label = "Delivered (includes non-delivery resolutions)"
+			}
+		}
+	}
+	return opts
 }
 
 // GrainOptions returns grains in logical (not alphabetical) order.

@@ -90,6 +90,7 @@ func (app *CLI) runMetricsDashboardLive() error {
 	}
 
 	srv := live.NewServer(engine, projects, gen)
+	srv.SetDeliveredGenuine(pol.DoneResolutionsConfigured())
 	srv.SetDashboards(app.dashboardCapabilities(pol), nil)
 	srv.SetJiraBaseURL(strings.TrimRight(app.engine.Config.Jira.URL, "/"))
 	url, httpSrv, err := srv.ListenAndServe(dashboardPort)

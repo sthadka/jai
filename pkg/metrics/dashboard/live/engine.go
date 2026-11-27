@@ -40,8 +40,8 @@ const stderrSettle = 150 * time.Millisecond
 // publishes a new generation (and DELETEs the obsolete one) is served live
 // without restarting the server — `SET VARIABLE g = (subquery)` at setup alone
 // would freeze g to the generation active at startup. SET emits no JSON output,
-// so it does not perturb the result buffer. (done_res/blocker_links are
-// config-derived and stay bound from setup.)
+// so it does not perturb the result buffer. (done_res/done_res_set/blocker_links
+// are config-derived and stay bound from setup.)
 const refreshActiveGen = "SET VARIABLE g = (SELECT generation FROM jai.metrics_active_generation WHERE id = 1);"
 
 // ErrDuckDBNotFound is returned by NewEngine when no `duckdb` binary is on PATH.
@@ -128,6 +128,13 @@ func (e *Engine) setup(cfg EngineConfig) error {
 	// Active generation: every fact query filters on it so staged/obsolete
 	// generations are never visible.
 	b.WriteString("SET VARIABLE g = (SELECT generation FROM jai.metrics_active_generation WHERE id = 1);\n")
+	// done_res_set mirrors Policy.DoneResolutionsConfigured: a non-empty list is
+	// exactly the "configured" condition (an explicitly empty done_resolutions
+	// list is treated as omitted by the policy compiler too). When false, the
+	// delivered cohort falls back to all resolved issues — mirroring the
+	// build-side semantics — so an unconfigured metrics section renders the
+	// delivery dashboard over resolved data instead of empty graphs.
+	fmt.Fprintf(&b, "SET VARIABLE done_res_set = %t;\n", len(cfg.DoneResolutions) > 0)
 	b.WriteString("SET VARIABLE done_res = " + sqlStringList(cfg.DoneResolutions) + ";\n")
 	b.WriteString("SET VARIABLE blocker_links = " + sqlStringList(cfg.BlockerLinkTypes) + ";\n")
 	// Session hardening for the free-form /explore/* SQL path (see
